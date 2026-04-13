@@ -1,8 +1,8 @@
-# Ayala Triangle
+# Ayala
 
 **A 2D browser-based adventure game about a homeless cat finding love in the heart of Manila.**
 
-_For Camille and Mamma Cat._
+*For Camille -- and every cat who needs a forever home.*
 
 ---
 
@@ -14,44 +14,39 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 
 ## Project Status
 
-> **Pre-build.** The repository currently contains the RPG JS v4 starter template and project documentation. Game implementation has not yet begun.
+> **Phase 1 -- Foundation.** Building the playable foundation with Phaser 3.
 
 ### What exists
 
-- RPG JS v4 starter project (scaffolded, dependencies installed)
+- Vite + TypeScript + Phaser 3 project scaffold
 - [Game Design Document v0.1](docs/Ayala_GDD_v0.1.md) -- comprehensive design covering story, mechanics, map zones, characters, art direction, and technical architecture
-- [Phase 1 Build Brief](docs/Phase1_Claude_Code_Brief.md) -- detailed implementation plan for the foundation phase
+- [Phase 1 Build Brief](docs/Phase1_Brief_Phaser3.md) -- detailed implementation plan for the foundation phase
 
-### What's next
+### Development Roadmap
 
-Development follows the five-phase roadmap outlined in the GDD:
-
-| Phase                | Focus                                                                                          | Status      |
-| -------------------- | ---------------------------------------------------------------------------------------------- | ----------- |
-| 1. Foundation        | Dev environment, basic ATG map in Tiled, Mamma Cat movement, day/night cycle, standalone build | Not started |
-| 2. Core Mechanics    | Hunger/thirst/energy stats, food/water sources, NPC cats, threat indicators, Blacky NPC        | Not started |
-| 3. Social & Story    | Named NPC cats, body language animations, trust system, Chapters 1-3, human/dog NPCs           | Not started |
-| 4. Camille & Endgame | Camille encounters, Chapters 4-6, snatchers, epilogue, save/load, mobile testing               | Not started |
-| 5. Polish & Release  | Playtesting, bug fixes, audio, PWA/offline, deployment                                         | Not started |
+| Phase | Focus | Status |
+|-------|-------|--------|
+| 1. Foundation | Phaser 3 setup, ATG map, Mamma Cat movement, Blacky NPC, day/night cycle | In progress |
+| 2. Core Mechanics | Hunger/thirst/energy stats, food/water sources, NPC cats, threat indicators | Not started |
+| 3. Social & Story | Named NPC cats, body language animations, trust system, Chapters 1-3 | Not started |
+| 4. Camille & Endgame | Camille encounters, Chapters 4-6, snatchers, epilogue, save/load | Not started |
+| 5. Polish & Release | Playtesting, audio, PWA/offline, deployment | Not started |
 
 ## Tech Stack
 
-| Technology                                    | Role                                            |
-| --------------------------------------------- | ----------------------------------------------- |
-| [RPG JS v4](https://rpgjs.dev)                | Game framework (TypeScript, 2D RPG engine)      |
-| [PixiJS v7](https://pixijs.com)               | WebGL rendering                                 |
-| [Vue 3](https://vuejs.org)                    | GUI layer (dialogue boxes, menus, HUD)          |
-| [Tiled Map Editor](https://www.mapeditor.org) | Map creation (`.tmx` / `.tsx` / `.world` files) |
-| [ViteJS v4](https://vitejs.dev)               | Build tooling and hot-reload                    |
-| TypeScript 5                                  | Language                                        |
+| Technology | Role |
+|------------|------|
+| [Phaser 3](https://phaser.io) | Game framework (WebGL/Canvas 2D game engine) |
+| [Vite](https://vitejs.dev) | Build tooling and hot-reload |
+| [TypeScript](https://www.typescriptlang.org) | Language |
+| [Tiled Map Editor](https://www.mapeditor.org) | Map creation (JSON export consumed by Phaser) |
 
 ## Getting Started
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org) >= 14
+- [Node.js](https://nodejs.org) >= 18
 - npm (comes with Node.js)
-- [Tiled Map Editor](https://www.mapeditor.org) (for map editing, when development begins)
 
 ### Install and Run
 
@@ -62,61 +57,48 @@ npm install
 npm run dev
 ```
 
-Navigate to [localhost:3000](http://localhost:3000). You should see the RPG JS starter game running.
-
-To launch in single-player RPG mode (the intended build mode for Ayala):
-
-```bash
-RPG_TYPE=rpg npm run dev
-```
+Navigate to [localhost:5173](http://localhost:5173). You should see the game running.
 
 ### Production Build
 
 ```bash
-NODE_ENV=production npm run build
+npm run build
 ```
 
-Output goes to `dist/standalone/` -- static files deployable to any host. PWA/offline support is built in.
+Output goes to `dist/` -- static files deployable to any host.
 
-### Docker
+### Preview Production Build
 
 ```bash
-docker build -t ayala .
-docker run -p 3000:3000 -d ayala
+npm run preview
 ```
 
 ## Architecture
 
-Configuration lives in `rpg.toml`. The game is organized as modules under `main/`:
-
-```bash
-main/
-  player.ts                  # Server-side player hooks (onConnected, onInput, onJoinMap)
-  events/                    # NPC event classes (@EventData decorator)
-  spritesheets/              # Client-side spritesheet definitions (@Spritesheet decorator)
-    characters/              # Character PNGs and config
-  worlds/                    # Tiled world/map files
-    maps/                    # .tmx maps, .tsx tilesets, tile PNGs
 ```
-
-Key patterns:
-
-- **Decorators** for configuration (`@EventData`, `@Spritesheet`)
-- **Player variables** for game state (`player.setVariable()` / `player.getVariable()`)
-- **Tiled maps** authored as `.tmx` files with `.tsx` tileset references, stitched via `.world` files
-
-See the [GDD Section 8](docs/Ayala_GDD_v0.1.md#8-technical-architecture) for full technical architecture details.
+src/
+  main.ts                     # Entry point -- creates Phaser.Game
+  config/
+    GameConfig.ts             # Phaser game configuration
+  scenes/
+    BootScene.ts              # Asset loading
+    GameScene.ts              # Main gameplay scene
+  sprites/
+    MammaCat.ts               # Player character class
+    NPCCat.ts                 # NPC cat class (Blacky, etc.)
+  systems/
+    DayNightCycle.ts          # Day/night tint overlay
+    DialogueSystem.ts         # Text dialogue overlay
+public/
+  assets/
+    sprites/                  # Cat spritesheets
+    tilemaps/                 # Tiled JSON maps
+    tilesets/                 # Tileset images
+```
 
 ## Game Design
 
-The full game design document covers:
-
-- **Story** -- Six chapters from abandonment to adoption, plus an epilogue with real-world cat welfare information
-- **Characters** -- 8+ named NPC cats (based on real ATG cats), human NPCs (friendly, neutral, threatening), and dogs
-- **Mechanics** -- Day/night cycle, hunger/thirst/energy stats, trust/reputation system, territory claiming, cat body language communication, threat indicators
-- **Map** -- Seven zones modelled on real ATG landmarks (Makati Ave edge, Central Gardens, The Shops / Pyramid Steps, Paseo de Roxas underpass, and more)
-- **Art** -- Pixel art, top-down perspective, warm tropical palette. Free sprite assets from itch.io and OpenGameArt for v1
-- **Audio** -- Ambient city/park sounds and gentle background music sourced from free libraries
+The full game design document covers story (6 chapters from abandonment to adoption), characters (8+ named NPC cats based on real ATG cats), mechanics (day/night cycle, survival stats, trust system, territory), and a map modelled on the real Ayala Triangle Gardens.
 
 Read the full document: [docs/Ayala_GDD_v0.1.md](docs/Ayala_GDD_v0.1.md)
 
@@ -125,24 +107,16 @@ Read the full document: [docs/Ayala_GDD_v0.1.md](docs/Ayala_GDD_v0.1.md)
 - **Primary:** Browser-based (Chrome), playable offline via PWA
 - **Ideal form factor:** iPad landscape
 - **Secondary:** iPhone landscape, desktop with keyboard
-- **Mobile controls:** Virtual d-pad via `@rpgjs/mobile-gui` plugin
+
+## Developers
+
+- **Manu** -- Developer
+- **Claude** -- AI co-developer
 
 ## License
 
 TBD
 
-## Credits
-
-### Starter Template
-
-This project was scaffolded from the [RPG JS Starter](https://github.com/rpgjs/starter).
-
-### Sample Assets (Starter Template)
-
-- **Sounds:** [Davidvitas](https://www.davidvitas.com/portfolio/2016/5/12/rpg-music-pack) -- [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
-- **Graphics:** [Pipoya](https://pipoya.itch.io)
-- **Icons:** [game-icons.net](https://game-icons.net)
-
 ---
 
-_There are millions of cats like Mamma Cat. What can you do?_
+*There are millions of cats like Mamma Cat. What can you do?*
