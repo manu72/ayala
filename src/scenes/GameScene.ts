@@ -1,6 +1,9 @@
 import Phaser from 'phaser'
+import { MammaCat } from '../sprites/MammaCat'
 
 export class GameScene extends Phaser.Scene {
+  private player!: MammaCat
+
   constructor() {
     super({ key: 'GameScene' })
   }
@@ -25,10 +28,24 @@ export class GameScene extends Phaser.Scene {
       overheadLayer.setDepth(10)
     }
 
+    // Spawn Mamma Cat at the designated point
+    const spawnPoint = map.findObject('spawns', obj => obj.name === 'spawn_mammacat')
+    const spawnX = spawnPoint?.x ?? map.widthInPixels / 2
+    const spawnY = spawnPoint?.y ?? map.heightInPixels / 2
+
+    this.player = new MammaCat(this, spawnX, spawnY)
+
+    if (objectsLayer) {
+      this.physics.add.collider(this.player, objectsLayer)
+    }
+
+    // Camera setup
     this.cameras.main.setBounds(0, 0, map.widthInPixels, map.heightInPixels)
     this.physics.world.setBounds(0, 0, map.widthInPixels, map.heightInPixels)
+    this.cameras.main.startFollow(this.player, true, 0.08, 0.08)
+  }
 
-    this.cameras.main.centerOn(map.widthInPixels / 2, map.heightInPixels / 2)
-    this.cameras.main.setZoom(0.5)
+  update(): void {
+    this.player.update()
   }
 }
