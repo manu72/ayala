@@ -1,4 +1,6 @@
-name = 'My Game'
+name = 'Ayala'
+shortName = 'Ayala'
+description = 'A 2D adventure game about a homeless cat finding love in Manila'
 
 modules = [
     './main',
@@ -8,6 +10,6 @@ modules = [
 ]
 
 [start]
-    map = 'simplemap'
-    graphic = 'hero'
+    map = 'atg'
+    graphic = 'mc'
     hitbox = [16, 16]

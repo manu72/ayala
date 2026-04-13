@@ -1,9 +1,9 @@
-# Phase 1 Technical Brief — Claude Code
+# Phase 1 Technical Brief v0.2 — Claude Code
 
 **Project:** Ayala (2D top-down cat adventure game)
 **Framework:** RPG JS v4 (already scaffolded)
 **Branch:** `sit`
-**Context:** Read `docs/Ayala_GDD_v0.1.md` for full game design context before starting.
+**Context:** Read `docs/Ayala_Game_Design_Document_v0.1.md` for full game design context before starting.
 
 ---
 
@@ -11,7 +11,7 @@
 
 Replace the RPG JS starter demo with the foundations of our game:
 
-1. A playable cat character (Mamma Cat) on a custom map
+1. A playable cat character (MC) on a custom map
 2. A simplified but geographically accurate map of Ayala Triangle Gardens
 3. Basic day/night visual cycle
 4. One NPC cat (Blacky) with simple dialogue
@@ -49,7 +49,7 @@ Find and download free cat pixel art sprites. Priority sources:
 
 We need at minimum:
 
-- A sprite for Mamma Cat (black and white spotted cat) — if no black-and-white variant exists, use whatever is available and note it for later customization
+- A sprite for MC (black and white spotted cat) — if no black-and-white variant exists, use whatever is available and note it for later customization
 - A sprite for Blacky (black cat) — can be a color variant
 - Walking animations (4 directions)
 - Idle animation
@@ -95,7 +95,7 @@ Think of the triangle with NORTH at the top of the screen:
 
 - This is where Makati Ave meets Paseo de Roxas
 - A large stepped/pyramid structure leading down to an underground mall
-- Mamma Cat's eventual home territory
+- MC's eventual home territory
 - Adjacent to two tall office towers (Ayala Triangle Gardens Tower 1 & 2)
 - A circular helipad feature is visible on the tower podium nearby
 - Below the steps: Starbucks with glass facade and outdoor seating
@@ -103,7 +103,7 @@ Think of the triangle with NORTH at the top of the screen:
 **EAST EDGE (right side): Zone 1 — Makati Ave Edge (Starting Zone)**
 
 - Busy sidewalk along Makati Avenue
-- The Sto. Tomas corner (southeast) is where Mamma Cat starts the game
+- The Sto. Tomas corner (southeast) is where MC starts the game
 - Entry point to the Ayala Triangle Walkways
 - The Shops building's terraced exterior wall with plantings runs along here
 
@@ -180,7 +180,7 @@ The map doesn't need to be beautiful in Phase 1 — it needs to be GEOGRAPHICALL
 
 **Key interactive locations (mark with Tiled object layer points):**
 
-- Mamma Cat's start position (Makati Ave / Sto. Tomas corner, southeast)
+- MC's start position (Makati Ave / Sto. Tomas corner, southeast)
 - Blacky's position (top of underpass escalator, north/northwest along Paseo de Roxas)
 - Starbucks at The Shops (northeast, below the pyramid steps)
 - The fountain near Exchange Plaza (southwest)
@@ -190,7 +190,7 @@ The map doesn't need to be beautiful in Phase 1 — it needs to be GEOGRAPHICALL
 
 ## TASK 4: REPLACE THE PLAYER CHARACTER
 
-Replace the default RPG JS demo character with Mamma Cat (the cat).
+Replace the default RPG JS demo character with MC (the cat).
 
 - Use the cat spritesheet from Task 2
 - Set up 4-directional walking
@@ -210,7 +210,7 @@ Create Blacky as an Event (NPC) in RPG JS:
 - **Sprite:** Black cat sprite
 - **Behavior:** Mostly stationary (sitting idle). Blacky doesn't wander much — he's a calm, wise presence.
 - **Mode:** Scenario mode (per-player state)
-- **Dialogue:** When Mamma Cat approaches and presses action:
+- **Dialogue:** When MC approaches and presses action:
 
 First encounter:
 
@@ -264,7 +264,7 @@ npx serve dist/standalone
 
 ## IMPORTANT NOTES
 
-- **Do NOT delete or overwrite** `docs/Ayala_GDD_v0.1.md`
+- **Do NOT delete or overwrite** `docs/Ayala_Game_Design_Document_v0.1.md`
 - **Commit frequently** with descriptive messages
 - **Test in browser** after each major change (`RPG_TYPE=rpg npm run dev`)
 - If you cannot find suitable free cat sprites to download (network restrictions may apply), create PLACEHOLDER sprites (simple colored rectangles or basic shapes) and document what needs to be replaced. Getting the map and game structure right is more important than final art.

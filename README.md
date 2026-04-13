@@ -89,7 +89,7 @@ docker run -p 3000:3000 -d ayala
 
 Configuration lives in `rpg.toml`. The game is organized as modules under `main/`:
 
-```
+```bash
 main/
   player.ts                  # Server-side player hooks (onConnected, onInput, onJoinMap)
   events/                    # NPC event classes (@EventData decorator)
