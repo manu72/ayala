@@ -1,8 +1,8 @@
-# Ayala
+# Ayala Triangle
 
 **A 2D browser-based adventure game about a homeless cat finding love in the heart of Manila.**
 
-_For Camille -- and every cat who needs a forever home._
+_For Camille and Mamma Cat._
 
 ---
 
@@ -89,7 +89,7 @@ docker run -p 3000:3000 -d ayala
 
 Configuration lives in `rpg.toml`. The game is organized as modules under `main/`:
 
-```
+```bash
 main/
   player.ts                  # Server-side player hooks (onConnected, onInput, onJoinMap)
   events/                    # NPC event classes (@EventData decorator)
@@ -126,11 +126,6 @@ Read the full document: [docs/Ayala_GDD_v0.1.md](docs/Ayala_GDD_v0.1.md)
 - **Ideal form factor:** iPad landscape
 - **Secondary:** iPhone landscape, desktop with keyboard
 - **Mobile controls:** Virtual d-pad via `@rpgjs/mobile-gui` plugin
-
-## Developers
-
-- **Manu** -- Developer
-- **Claude** -- AI co-developer
 
 ## License
 

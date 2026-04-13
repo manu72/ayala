@@ -49,7 +49,7 @@ Operating hours: 6:00 AM – 10:00 PM daily.
 
 ATG is home to an established colony of approximately 40-50 stray cats. These cats are collectively cared for by the community — volunteer feeders, the @atgcats Instagram community, and (historically) CARA Welfare Philippines, which ran cat welfare programs in the area for 15 years before financial constraints forced them to stop at end of 2024. New volunteers have since stepped in to fill the gap.
 
-The cats are mostly former pets (dumped) or kittens born in the gardens. They are generally clean, healthy, and socialized to humans — comfortable approaching people, especially those with food. Dedicated feeding stations exist, and cats gather at specific hotspots throughout the park.
+The cats are mostly former pets (dumped) or kittens born in the gardens. They are generally clean, healthy, and socialised to humans — comfortable approaching people, especially those with food. Dedicated feeding stations exist, and cats gather at specific hotspots throughout the park.
 
 There is also a dark side: mysterious individuals (typically appearing at night, dark-clad, faces covered) who snatch unwary cats. These cats are never seen again. This is a real and documented threat.
 
@@ -77,10 +77,10 @@ Southwest edge along Ayala Avenue. A dramatic sweeping concrete canopy over a la
 An underpass leading under Paseo de Roxas into the gardens from the western/Salcedo Village side. An escalator brings people up into the park. Blacky (an NPC cat) always sits at the top of this escalator. This is Camille's entry point into the park.
 
 **Blackbird / Nielson Tower**
-The historic former airport control tower, now a fine dining restaurant called Blackbird, located in the southeast portion of the triangle, surrounded by trees.
+The historic former airport control tower, now a fine dining restaurant called Blackbird, located in the southeast portion of the triangle, surrounded by trees. This area is not public space and volunteer feeders do not enter. Cats can hide in the trees and bushes but are largely out of sight apart from the Blackbird guards who may or may not be friendly.
 
-**Ninoy Aquino Monument**
-Northwest apex of the triangle. A monument to the assassinated opposition leader. Quieter, more secluded area.
+**Children's Playground**
+Northwest edge of the triangle. Playground sculptures are unique and visually incredible — a giant geometric/origami-style carabao (water buffalo, the Philippines' national animal!) and a hornbill bird, both serving as climbing structures for kids. The colorful rubberized ground with those swirling blue and green patterns, the exercise equipment nearby, the trees framing everything. It's a daytime zone full of children and families and old people exercising in the mornings and early evenings. The carabao and hornbill would make distinctive pixel art landmarks that players would recognize instantly.
 
 **Manam at the Triangle**
 A Filipino restaurant on the southeast edge. Outdoor dining area with white umbrellas. A potential food source area for cats.
@@ -92,7 +92,7 @@ Open lawns between the walkways. Popular with joggers, picnickers, families, and
 
 ## 3. CHARACTERS
 
-### 3.1 Mamma Cat (Mamma Cat) — The Player Character
+### 3.1 Mamma Cat — The Player Character
 
 - **Appearance:** Black and white spotted cat (based on a real ATG cat). Distinctive markings that Camille can recognise.
 - **Backstory:** A former pet, dumped on the Makati Ave sidewalk from a car by unseen owners. She retains some trust in humans but is confused and frightened.
@@ -262,7 +262,7 @@ Mamma Cat begins exploring the gardens during the safer dawn/evening periods. Sh
 Mamma Cat has survived the initial days. She's made a few allies (perhaps Blacky, who is wise and helpful). She's learned to avoid threats. She begins ranging further through the gardens. A conflict or challenge — perhaps a confrontation with a territorial cat, or a close call with a snatcher — raises the stakes.
 
 **Chapter 4: The Steps**
-Mamma Cat discovers the pyramid steps / Starbucks area and recognizes it as a good territory — warm, close to food, sheltered sleeping spots. She begins establishing herself there, with or without the cooperation of cats already in the area. This may involve building trust with local cats.
+Mamma Cat discovers the pyramid steps / Starbucks area and recognises it as a good territory — warm, close to food, sheltered sleeping spots. She begins establishing herself there, with or without the cooperation of cats already in the area. This may involve building trust with local cats.
 
 **Chapter 5: Camille**
 Camille appears. Mamma Cat observes her from a distance at first. Camille is kind to the cats, brings treats, sits quietly. Mamma Cat is drawn to her but cautious (she was betrayed by her previous owners). Over several encounters, Mamma Cat approaches closer. The slow blink. The first touch. The first time Camille offers food and Mamma Cat eats from her hand.
@@ -273,13 +273,40 @@ Camille decides to adopt Mamma Cat. The final sequence. Mamma Cat leaves the gar
 **Epilogue / End Screen:**
 Information about real cat welfare. Links to organizations (CARA, local shelters). A gentle prompt: "There are millions of cats like Mamma Cat. What can you do?"
 
-### 5.2 Side Content (v1 stretch goals)
+### 5.2 Colony Dynamics — A Living Population
+
+The colony is not static. Throughout the game, cats arrive and leave, and the population fluctuates — just as it does in real life.
+
+**Cats arriving:**
+
+- **Dumped by owners** — 2-3 scripted "dumping events" occur during a playthrough. MC observes from a distance as a car pulls up on Makati Ave and a cat is placed on the sidewalk. She cannot intervene. Each event is different:
+  - _The cruel dump:_ Owner opens the car door, pushes the cat out, drives away immediately. The cat freezes in terror.
+  - _The reluctant goodbye:_ Owner kneels, pets the cat, lingers. They are clearly upset — maybe they are moving overseas, maybe they lost their job, maybe their landlord won't allow pets. They leave slowly, looking back. The cat sits and waits for them to return.
+  - _The confused arrival:_ A cat is left in a carrier near the park entrance. By the time anyone notices, the owner is gone. The cat meows inside the carrier until someone opens it.
+- **Kittens born** — Colony cats occasionally have kittens, adding to the population.
+- These events mirror MC's own Chapter 1 experience. Early in the game, MC identifies with the terror. Later, as she is more established, she may feel protective — or helpless.
+
+**Cats leaving:**
+
+- **Snatched** — Cats disappear after being taken by snatchers at night. Their absence is noticed — an empty sleeping spot, a name in the colony journal marked "not seen since..."
+- **Adopted** — Volunteers occasionally take cats to forever homes. A positive departure, but still a loss for the colony.
+- **Wandered off** — Some cats cross the roads (dangerous) or leave via the underpass, seeking other territory. They simply stop appearing.
+- **Taken for vet care** — Temporarily absent, then return (distinguishable from snatching only after the cat comes back).
+
+**Effect on gameplay:**
+
+- The colony journal reflects these changes dynamically
+- Background colony cats (unnamed) may appear or disappear between game chapters
+- Named NPCs are protected from random departure in v1 (they are essential to the story), but their dialogue may reference cats who have left
+- The overall effect is that ATG feels alive — it's not a museum, it's an ecosystem with real churn and real stakes
+
+### 5.3 Side Content (v1 stretch goals)
 
 - Individual storylines for named NPC cats (learning their backstories through repeated interaction)
-- A "colony journal" that fills in as Mamma Cat meets and befriends cats
+- A "colony journal" that fills in as MC meets and befriends cats
 - Environmental storytelling (finding discarded collars, old feeding bowls, signs of cats who were snatched)
 - The Festival of Lights Christmas event (a special visual sequence)
-- Car-Free Sundays (a different, calmer gameplay experience on Sundays)
+- Car-Free Sunday mornings (Paseo de Roxas, Ayala Ave and Makati Ave are closed to cars leading to a different gameplay experience on Sundays with more people and activities, no traffic)
 
 ---
 
@@ -342,7 +369,7 @@ The game world is divided into interconnected zones that correspond to real area
 
 - A beautiful children's playground surrounded by trees
 - Large geometric/origami-style sculptures: a carabao (water buffalo) and a hornbill bird, both functioning as climbing structures
-- Colorful rubberized ground with swirling blue and green patterns
+- Colorful rubberised ground with swirling blue and green patterns
 - Exercise equipment nearby
 - Popular with families and children during daytime — a lively, noisy zone
 - Potential food source (families with snacks) but also a dog-heavy, unpredictable area for cats
@@ -437,7 +464,7 @@ Key technologies:
 
 ### 8.5 Save System
 
-- `player.save()` serializes all player state to JSON
+- `player.save()` serialises all player state to JSON
 - In standalone mode, save to `localStorage`
 - Auto-save at key story moments
 - Manual save via interaction (e.g., sleeping in Mamma Cat's safe spot)
@@ -574,7 +601,7 @@ Photos on file documenting:
 1. **Named cat personalities:** Need detailed descriptions for Tiger, Jayco, Jayco Junior, Fluffy Cat, Pedigree Cat, the Ginger Twins, Pedigree Cat's companion, and Mamma Cat's two friends (names, appearances, personalities, locations, backstories). Developer has details and will fill in progressively.
 2. ~~**Trust/reputation system?**~~ **RESOLVED:** Points-based. Positive interactions earn trust points; thresholds unlock story chapters and territory.
 3. ~~**Snatcher consequence?**~~ **RESOLVED:** Reset to last save. Not game over — too harsh for the tone.
-4. ~~**Camille relationship mechanic?**~~ **RESOLVED:** Fixed encounter sequence triggered by story progress. Encounters feel organic — Mamma Cat meets many humans but recognizes Camille as special.
+4. ~~**Camille relationship mechanic?**~~ **RESOLVED:** Fixed encounter sequence triggered by story progress. Encounters feel organic — Mamma Cat meets many humans but recognises Camille as special.
 5. ~~**Colony journal?**~~ **RESOLVED:** Yes. A "cat-dex" or colony journal that fills in as Mamma Cat meets and befriends cats.
 6. ~~**Art style?**~~ **RESOLVED:** Free existing sprites (itch.io, OpenGameArt) with color modifications. No commissioned art for v1.
 7. **Custom tiles:** Minimal. Confirmed needed: carabao sculpture, hornbill sculpture, fountain(s). Possibly Starbucks facade and pyramid steps. Keep as few as possible.
