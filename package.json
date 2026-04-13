@@ -9,7 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "phaser": "^4.0.0"
+    "phaser": "^3.90.0"
   },
   "devDependencies": {
     "pngjs": "^7.0.0",
