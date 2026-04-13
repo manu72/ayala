@@ -1,6 +1,7 @@
 import Phaser from 'phaser'
 import { MammaCat } from '../sprites/MammaCat'
 import { NPCCat } from '../sprites/NPCCat'
+import { DayNightCycle } from '../systems/DayNightCycle'
 import { DialogueSystem } from '../systems/DialogueSystem'
 
 const INTERACTION_DISTANCE = 50
@@ -9,6 +10,7 @@ export class GameScene extends Phaser.Scene {
   private player!: MammaCat
   private blacky!: NPCCat
   private dialogue!: DialogueSystem
+  private dayNight!: DayNightCycle
   private actionKey!: Phaser.Input.Keyboard.Key
 
   constructor() {
@@ -63,13 +65,18 @@ export class GameScene extends Phaser.Scene {
       this.actionKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER)
     }
 
+    // Day/night cycle
+    this.dayNight = new DayNightCycle(this)
+
     // Camera
     this.cameras.main.setBounds(0, 0, map.widthInPixels, map.heightInPixels)
     this.physics.world.setBounds(0, 0, map.widthInPixels, map.heightInPixels)
     this.cameras.main.startFollow(this.player, true, 0.08, 0.08)
   }
 
-  update(): void {
+  update(_time: number, delta: number): void {
+    this.dayNight.update(delta)
+
     if (!this.dialogue.isActive) {
       this.player.update()
     }
