@@ -2,7 +2,7 @@
 
 **A 2D browser-based adventure game about a homeless cat finding love in the heart of Manila.**
 
-_For Camille -- and every cat who needs a forever home._
+_For Camille and Mamma Cat._
 
 ---
 
@@ -126,11 +126,6 @@ Read the full document: [docs/Ayala_GDD_v0.1.md](docs/Ayala_GDD_v0.1.md)
 - **Ideal form factor:** iPad landscape
 - **Secondary:** iPhone landscape, desktop with keyboard
 - **Mobile controls:** Virtual d-pad via `@rpgjs/mobile-gui` plugin
-
-## Developers
-
-- **Manu** -- Developer
-- **Claude** -- AI co-developer
 
 ## License
 

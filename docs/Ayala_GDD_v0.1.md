@@ -77,7 +77,7 @@ Southwest edge along Ayala Avenue. A dramatic sweeping concrete canopy over a la
 An underpass leading under Paseo de Roxas into the gardens from the western/Salcedo Village side. An escalator brings people up into the park. Blacky (an NPC cat) always sits at the top of this escalator. This is Camille's entry point into the park.
 
 **Blackbird / Nielson Tower**
-The historic former airport control tower, now a fine dining restaurant called Blackbird, located in the southeast portion of the triangle, surrounded by trees. This area is not public space and volunteer feeders do not enter. Cats can hide in the trees and bushes but are largely out of sight apart from the Blackbird guards who may mor may not be friendly.
+The historic former airport control tower, now a fine dining restaurant called Blackbird, located in the southeast portion of the triangle, surrounded by trees. This area is not public space and volunteer feeders do not enter. Cats can hide in the trees and bushes but are largely out of sight apart from the Blackbird guards who may or may not be friendly.
 
 **Children's Playground**
 Northwest edge of the triangle. Playground sculptures are unique and visually incredible — a giant geometric/origami-style carabao (water buffalo, the Philippines' national animal!) and a hornbill bird, both serving as climbing structures for kids. The colorful rubberized ground with those swirling blue and green patterns, the exercise equipment nearby, the trees framing everything. It's a daytime zone full of children and families and old people exercising in the mornings and early evenings. The carabao and hornbill would make distinctive pixel art landmarks that players would recognize instantly.
