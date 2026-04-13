@@ -2,7 +2,7 @@
 
 **A 2D browser-based adventure game about a homeless cat finding love in the heart of Manila.**
 
-*For Camille -- and every cat who needs a forever home.*
+_For Camille -- and every cat who needs a forever home._
 
 ---
 
@@ -26,24 +26,24 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 
 Development follows the five-phase roadmap outlined in the GDD:
 
-| Phase | Focus | Status |
-|-------|-------|--------|
-| 1. Foundation | Dev environment, basic ATG map in Tiled, MC movement, day/night cycle, standalone build | Not started |
-| 2. Core Mechanics | Hunger/thirst/energy stats, food/water sources, NPC cats, threat indicators, Blacky NPC | Not started |
-| 3. Social & Story | Named NPC cats, body language animations, trust system, Chapters 1-3, human/dog NPCs | Not started |
-| 4. Camille & Endgame | Camille encounters, Chapters 4-6, snatchers, epilogue, save/load, mobile testing | Not started |
-| 5. Polish & Release | Playtesting, bug fixes, audio, PWA/offline, deployment | Not started |
+| Phase                | Focus                                                                                          | Status      |
+| -------------------- | ---------------------------------------------------------------------------------------------- | ----------- |
+| 1. Foundation        | Dev environment, basic ATG map in Tiled, Mamma Cat movement, day/night cycle, standalone build | Not started |
+| 2. Core Mechanics    | Hunger/thirst/energy stats, food/water sources, NPC cats, threat indicators, Blacky NPC        | Not started |
+| 3. Social & Story    | Named NPC cats, body language animations, trust system, Chapters 1-3, human/dog NPCs           | Not started |
+| 4. Camille & Endgame | Camille encounters, Chapters 4-6, snatchers, epilogue, save/load, mobile testing               | Not started |
+| 5. Polish & Release  | Playtesting, bug fixes, audio, PWA/offline, deployment                                         | Not started |
 
 ## Tech Stack
 
-| Technology | Role |
-|------------|------|
-| [RPG JS v4](https://rpgjs.dev) | Game framework (TypeScript, 2D RPG engine) |
-| [PixiJS v7](https://pixijs.com) | WebGL rendering |
-| [Vue 3](https://vuejs.org) | GUI layer (dialogue boxes, menus, HUD) |
+| Technology                                    | Role                                            |
+| --------------------------------------------- | ----------------------------------------------- |
+| [RPG JS v4](https://rpgjs.dev)                | Game framework (TypeScript, 2D RPG engine)      |
+| [PixiJS v7](https://pixijs.com)               | WebGL rendering                                 |
+| [Vue 3](https://vuejs.org)                    | GUI layer (dialogue boxes, menus, HUD)          |
 | [Tiled Map Editor](https://www.mapeditor.org) | Map creation (`.tmx` / `.tsx` / `.world` files) |
-| [ViteJS v4](https://vitejs.dev) | Build tooling and hot-reload |
-| TypeScript 5 | Language |
+| [ViteJS v4](https://vitejs.dev)               | Build tooling and hot-reload                    |
+| TypeScript 5                                  | Language                                        |
 
 ## Getting Started
 
@@ -100,6 +100,7 @@ main/
 ```
 
 Key patterns:
+
 - **Decorators** for configuration (`@EventData`, `@Spritesheet`)
 - **Player variables** for game state (`player.setVariable()` / `player.getVariable()`)
 - **Tiled maps** authored as `.tmx` files with `.tsx` tileset references, stitched via `.world` files
@@ -149,4 +150,4 @@ This project was scaffolded from the [RPG JS Starter](https://github.com/rpgjs/s
 
 ---
 
-*There are millions of cats like Mamma Cat. What can you do?*
+_There are millions of cats like Mamma Cat. What can you do?_
