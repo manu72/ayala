@@ -1,4 +1,4 @@
-# Ayala
+# Ayala Triangle
 
 **A 2D browser-based adventure game about a homeless cat finding love in the heart of Manila.**
 

@@ -77,10 +77,10 @@ Southwest edge along Ayala Avenue. A dramatic sweeping concrete canopy over a la
 An underpass leading under Paseo de Roxas into the gardens from the western/Salcedo Village side. An escalator brings people up into the park. Blacky (an NPC cat) always sits at the top of this escalator. This is Camille's entry point into the park.
 
 **Blackbird / Nielson Tower**
-The historic former airport control tower, now a fine dining restaurant called Blackbird, located in the southeast portion of the triangle, surrounded by trees.
+The historic former airport control tower, now a fine dining restaurant called Blackbird, located in the southeast portion of the triangle, surrounded by trees. This area is not public space and volunteer feeders do not enter. Cats can hide in the trees and bushes but are largely out of sight apart from the Blackbird guards who may mor may not be friendly.
 
-**Ninoy Aquino Monument**
-Northwest apex of the triangle. A monument to the assassinated opposition leader. Quieter, more secluded area.
+**Children's Playground**
+Northwest edge of the triangle. Playground sculptures are unique and visually incredible — a giant geometric/origami-style carabao (water buffalo, the Philippines' national animal!) and a hornbill bird, both serving as climbing structures for kids. The colorful rubberized ground with those swirling blue and green patterns, the exercise equipment nearby, the trees framing everything. It's a daytime zone full of children and families and old people exercising in the mornings and early evenings. The carabao and hornbill would make distinctive pixel art landmarks that players would recognize instantly.
 
 **Manam at the Triangle**
 A Filipino restaurant on the southeast edge. Outdoor dining area with white umbrellas. A potential food source area for cats.
@@ -273,13 +273,40 @@ Camille decides to adopt Mamma Cat. The final sequence. Mamma Cat leaves the gar
 **Epilogue / End Screen:**
 Information about real cat welfare. Links to organizations (CARA, local shelters). A gentle prompt: "There are millions of cats like Mamma Cat. What can you do?"
 
-### 5.2 Side Content (v1 stretch goals)
+### 5.2 Colony Dynamics — A Living Population
+
+The colony is not static. Throughout the game, cats arrive and leave, and the population fluctuates — just as it does in real life.
+
+**Cats arriving:**
+
+- **Dumped by owners** — 2-3 scripted "dumping events" occur during a playthrough. MC observes from a distance as a car pulls up on Makati Ave and a cat is placed on the sidewalk. She cannot intervene. Each event is different:
+  - _The cruel dump:_ Owner opens the car door, pushes the cat out, drives away immediately. The cat freezes in terror.
+  - _The reluctant goodbye:_ Owner kneels, pets the cat, lingers. They are clearly upset — maybe they are moving overseas, maybe they lost their job, maybe their landlord won't allow pets. They leave slowly, looking back. The cat sits and waits for them to return.
+  - _The confused arrival:_ A cat is left in a carrier near the park entrance. By the time anyone notices, the owner is gone. The cat meows inside the carrier until someone opens it.
+- **Kittens born** — Colony cats occasionally have kittens, adding to the population.
+- These events mirror MC's own Chapter 1 experience. Early in the game, MC identifies with the terror. Later, as she is more established, she may feel protective — or helpless.
+
+**Cats leaving:**
+
+- **Snatched** — Cats disappear after being taken by snatchers at night. Their absence is noticed — an empty sleeping spot, a name in the colony journal marked "not seen since..."
+- **Adopted** — Volunteers occasionally take cats to forever homes. A positive departure, but still a loss for the colony.
+- **Wandered off** — Some cats cross the roads (dangerous) or leave via the underpass, seeking other territory. They simply stop appearing.
+- **Taken for vet care** — Temporarily absent, then return (distinguishable from snatching only after the cat comes back).
+
+**Effect on gameplay:**
+
+- The colony journal reflects these changes dynamically
+- Background colony cats (unnamed) may appear or disappear between game chapters
+- Named NPCs are protected from random departure in v1 (they are essential to the story), but their dialogue may reference cats who have left
+- The overall effect is that ATG feels alive — it's not a museum, it's an ecosystem with real churn and real stakes
+
+### 5.3 Side Content (v1 stretch goals)
 
 - Individual storylines for named NPC cats (learning their backstories through repeated interaction)
-- A "colony journal" that fills in as Mamma Cat meets and befriends cats
+- A "colony journal" that fills in as MC meets and befriends cats
 - Environmental storytelling (finding discarded collars, old feeding bowls, signs of cats who were snatched)
 - The Festival of Lights Christmas event (a special visual sequence)
-- Car-Free Sundays (a different, calmer gameplay experience on Sundays)
+- Car-Free Sunday mornings (Paseo de Roxas, Ayala Ave and Makati Ave are closed to cars leading to a different gameplay experience on Sundays with more people and activities, no traffic)
 
 ---
 
