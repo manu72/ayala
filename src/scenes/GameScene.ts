@@ -1,8 +1,15 @@
 import Phaser from 'phaser'
 import { MammaCat } from '../sprites/MammaCat'
+import { NPCCat } from '../sprites/NPCCat'
+import { DialogueSystem } from '../systems/DialogueSystem'
+
+const INTERACTION_DISTANCE = 50
 
 export class GameScene extends Phaser.Scene {
   private player!: MammaCat
+  private blacky!: NPCCat
+  private dialogue!: DialogueSystem
+  private actionKey!: Phaser.Input.Keyboard.Key
 
   constructor() {
     super({ key: 'GameScene' })
@@ -28,7 +35,7 @@ export class GameScene extends Phaser.Scene {
       overheadLayer.setDepth(10)
     }
 
-    // Spawn Mamma Cat at the designated point
+    // Spawn Mamma Cat
     const spawnPoint = map.findObject('spawns', obj => obj.name === 'spawn_mammacat')
     const spawnX = spawnPoint?.x ?? map.widthInPixels / 2
     const spawnY = spawnPoint?.y ?? map.heightInPixels / 2
@@ -39,13 +46,62 @@ export class GameScene extends Phaser.Scene {
       this.physics.add.collider(this.player, objectsLayer)
     }
 
-    // Camera setup
+    // Spawn Blacky
+    const blackyPoint = map.findObject('spawns', obj => obj.name === 'spawn_blacky')
+    this.blacky = new NPCCat(this, {
+      name: 'Blacky',
+      spriteKey: 'blacky',
+      x: blackyPoint?.x ?? 832,
+      y: blackyPoint?.y ?? 416,
+    })
+
+    // Dialogue system
+    this.dialogue = new DialogueSystem(this)
+
+    // Action key (Enter) for NPC interaction
+    if (this.input.keyboard) {
+      this.actionKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER)
+    }
+
+    // Camera
     this.cameras.main.setBounds(0, 0, map.widthInPixels, map.heightInPixels)
     this.physics.world.setBounds(0, 0, map.widthInPixels, map.heightInPixels)
     this.cameras.main.startFollow(this.player, true, 0.08, 0.08)
   }
 
   update(): void {
-    this.player.update()
+    if (!this.dialogue.isActive) {
+      this.player.update()
+    }
+
+    if (this.actionKey?.isDown && !this.dialogue.isActive) {
+      this.tryInteract()
+    }
+  }
+
+  private tryInteract(): void {
+    const dist = Phaser.Math.Distance.Between(
+      this.player.x, this.player.y,
+      this.blacky.x, this.blacky.y,
+    )
+
+    if (dist > INTERACTION_DISTANCE) return
+
+    const metBlacky = this.registry.get('MET_BLACKY') as boolean | undefined
+
+    if (!metBlacky) {
+      this.dialogue.show([
+        'Mrrp. New here, are you?',
+        'This is Ayala Triangle. The gardens are home to all of us.',
+        'Find shade. Find food. Stay away from the roads.',
+        'And at night... stay hidden. Not all humans are kind.',
+      ], () => {
+        this.registry.set('MET_BLACKY', true)
+      })
+    } else {
+      this.dialogue.show([
+        "Still here? Good. You're tougher than you look.",
+      ])
+    }
   }
 }
