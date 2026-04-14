@@ -14,19 +14,26 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 
 ## Project Status
 
-> **Phase 1 -- Foundation.** Building the playable foundation with Phaser 3.
+> **Phase 1.5 -- Visual Polish.** Refining the prototype into something that looks and feels like a real game.
 
 ### What exists
 
-- Vite + TypeScript + Phaser 3 project scaffold
+- Playable Phaser 3 game with 100x80 tile map of Ayala Triangle Gardens
+- Mamma Cat player character with animated walk/idle cycles
+- Blacky NPC with dialogue system at the Paseo de Roxas underpass
+- Day/night cycle with smooth phase transitions
+- Textured tileset with grass, stone paths, roads, buildings, water, and environmental objects
+- Camera zoom (2.5x) making Mamma Cat feel small in a large world
 - [Game Design Document v0.1](docs/Ayala_GDD_v0.1.md) -- comprehensive design covering story, mechanics, map zones, characters, art direction, and technical architecture
-- [Phase 1 Build Brief](docs/Phase1_Brief_Phaser3.md) -- detailed implementation plan for the foundation phase
+- [Phase 1 Build Brief](docs/Phase1_Brief_Phaser3.md) -- foundation implementation plan
+- [Phase 1.5 Visual Polish Brief](docs/Phase1_5_Visual_Polish_Brief.md) -- visual refinement plan
 
 ### Development Roadmap
 
 | Phase | Focus | Status |
 |-------|-------|--------|
-| 1. Foundation | Phaser 3 setup, ATG map, Mamma Cat movement, Blacky NPC, day/night cycle | In progress |
+| 1. Foundation | Phaser 3 setup, ATG map, Mamma Cat movement, Blacky NPC, day/night cycle | Complete |
+| 1.5 Visual Polish | Camera zoom, textured tiles, animated sprites, map expansion, dense trees | Complete |
 | 2. Core Mechanics | Hunger/thirst/energy stats, food/water sources, NPC cats, threat indicators | Not started |
 | 3. Social & Story | Named NPC cats, body language animations, trust system, Chapters 1-3 | Not started |
 | 4. Camille & Endgame | Camille encounters, Chapters 4-6, snatchers, epilogue, save/load | Not started |
