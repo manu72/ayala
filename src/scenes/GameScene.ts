@@ -50,6 +50,7 @@ export class GameScene extends Phaser.Scene {
   private tabKey!: Phaser.Input.Keyboard.Key;
   private escapeKey!: Phaser.Input.Keyboard.Key;
   private journalKey!: Phaser.Input.Keyboard.Key;
+  private journalToggleLocked = false;
   private objectsLayer: Phaser.Tilemaps.TilemapLayer | null = null;
   private overheadLayer!: Phaser.Tilemaps.TilemapLayer | null;
   private map!: Phaser.Tilemaps.Tilemap;
@@ -234,9 +235,21 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
-    // J opens the colony journal
-    if (this.journalKey && Phaser.Input.Keyboard.JustDown(this.journalKey) && !this.isPaused) {
-      this.openJournal();
+    // Release J toggle lock only after the key is fully released.
+    if (this.journalKey && !this.journalKey.isDown) {
+      this.journalToggleLocked = false;
+    }
+
+    // J toggles the colony journal. Use key-locking to avoid double-toggles
+    // when multiple scenes process the same key-down event in one frame.
+    if (this.journalKey?.isDown && !this.journalToggleLocked) {
+      this.journalToggleLocked = true;
+      if (this.scene.isActive("JournalScene")) {
+        this.scene.stop("JournalScene");
+        this.resumeGame();
+      } else if (!this.isPaused) {
+        this.openJournal();
+      }
       return;
     }
 
