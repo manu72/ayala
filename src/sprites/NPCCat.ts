@@ -39,7 +39,6 @@ const ALERT_DURATION_MS = 2_000
 export class NPCCat extends Phaser.Physics.Arcade.Sprite {
   readonly npcName: string
   readonly config: NPCCatConfig
-  private nameLabel: Phaser.GameObjects.Text
 
   /** Current AI state. */
   state: CatState = 'idle'
@@ -79,13 +78,6 @@ export class NPCCat extends Phaser.Physics.Arcade.Sprite {
 
     this.createAnimations(scene, config.spriteKey)
     this.anims.play(`${config.spriteKey}-idle`, true)
-
-    this.nameLabel = scene.add.text(config.x, config.y - 20, config.name, {
-      fontSize: '10px',
-      color: '#ffffff',
-      stroke: '#000000',
-      strokeThickness: 2,
-    }).setOrigin(0.5, 1).setDepth(5)
 
     this.enterState('idle')
   }
@@ -152,7 +144,6 @@ export class NPCCat extends Phaser.Physics.Arcade.Sprite {
       }
     }
 
-    this.nameLabel.setPosition(this.x, this.y - 20)
   }
 
   private enterState(next: CatState): void {
@@ -247,7 +238,6 @@ export class NPCCat extends Phaser.Physics.Arcade.Sprite {
   }
 
   destroy(fromScene?: boolean): void {
-    this.nameLabel.destroy()
     super.destroy(fromScene)
   }
 }
