@@ -6,11 +6,11 @@ export interface CatStats {
 
 /** Per-second base decay rates (subtracted each real-time second). */
 const DECAY = {
-  hunger: 0.15,
-  thirst: 0.25,
-  energyRest: 0.1,
-  energyMoving: 0.3,
-  energyRunning: 0.5,
+  hunger: 0.05,
+  thirst: 0.1,
+  energyRest: 0.05,
+  energyMoving: 0.15,
+  energyRunning: 0.3,
 } as const;
 
 const HEAT_MULTIPLIER = 1.5;

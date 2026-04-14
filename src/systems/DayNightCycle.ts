@@ -19,6 +19,17 @@ const PHASES: Record<TimeOfDay, PhaseConfig> = {
 
 const TRANSITION_MS = 8_000;
 
+const FULL_CYCLE_MS =
+  PHASES.dawn.durationMs + PHASES.day.durationMs +
+  PHASES.evening.durationMs + PHASES.night.durationMs;
+
+const PHASE_LABELS: Record<TimeOfDay, string> = {
+  dawn: 'Dawn',
+  day: 'Daytime',
+  evening: 'Evening',
+  night: 'Night',
+}
+
 export class DayNightCycle {
   private overlay: Phaser.GameObjects.Rectangle;
   private phase: TimeOfDay = "dawn";
@@ -60,26 +71,13 @@ export class DayNightCycle {
     return Math.min(this.phaseTimer / PHASES[this.phase].durationMs, 1);
   }
 
-  get gameHour(): number {
-    const cfg = PHASES[this.phase];
-    const nextCfg = PHASES[cfg.next];
-    const hoursInPhase = (nextCfg.startHour - cfg.startHour + 24) % 24 || 24;
-    return (cfg.startHour + hoursInPhase * this.phaseProgress) % 24;
+  /** Number of full day/night cycles completed (1-indexed: starts on Day 1). */
+  get dayCount(): number {
+    return Math.floor(this.gameTimeMs / FULL_CYCLE_MS) + 1
   }
 
   get clockText(): string {
-    const h = this.gameHour;
-    const hour12 = Math.floor(h) % 12 || 12;
-    const mins = Math.floor((h % 1) * 60);
-    const ampm = h >= 12 && h < 24 ? "PM" : "AM";
-    const pad = mins < 10 ? "0" : "";
-    const names: Record<TimeOfDay, string> = {
-      dawn: "Dawn",
-      day: "Day",
-      evening: "Evening",
-      night: "Night",
-    };
-    return `${names[this.phase]} ${hour12}:${pad}${mins} ${ampm}`;
+    return `${PHASE_LABELS[this.phase]}  Day ${this.dayCount}`
   }
 
   restore(phase: TimeOfDay, gameTimeMs: number): void {
