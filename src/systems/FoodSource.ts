@@ -102,7 +102,8 @@ export class FoodSourceManager {
       y: worldY,
       marker,
       statusLabel,
-      lastUsedAt: 0,
+      // Start sources as immediately available at time ~0 without using -Infinity.
+      lastUsedAt: -def.cooldownMs,
     });
   }
 

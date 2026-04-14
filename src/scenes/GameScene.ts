@@ -244,7 +244,7 @@ export class GameScene extends Phaser.Scene {
           this.autoSave();
         }
       }
-    } else if (!this.restKey?.isDown) {
+    } else {
       this.restHoldTimer = 0;
       this.restHoldActive = false;
     }

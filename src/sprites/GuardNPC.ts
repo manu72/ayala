@@ -10,6 +10,9 @@ const DETECT_RANGE_CROUCHING_COVER = 40;
 const DETECT_RANGE_CROUCHING_OPEN = 80;
 const CHASE_RANGE = 250;
 const PUSHBACK_FORCE = 300;
+const GUARD_FRAME_SIZE = 64;
+const GUARD_BODY_WIDTH = 18;
+const GUARD_BODY_HEIGHT = 16;
 
 type GuardState = "patrol" | "chasing" | "returning";
 
@@ -22,6 +25,7 @@ export class GuardNPC extends Phaser.Physics.Arcade.Sprite {
   private homeX: number;
   private homeY: number;
   private patrolDir = new Phaser.Math.Vector2(1, 0);
+  private readonly scratchVec = new Phaser.Math.Vector2(0, 0);
   private patrolTimer = 0;
   private target: MammaCat | null = null;
 
@@ -36,8 +40,10 @@ export class GuardNPC extends Phaser.Physics.Arcade.Sprite {
     this.setCollideWorldBounds(true);
 
     const body = this.body as Phaser.Physics.Arcade.Body;
-    body.setSize(18, 18);
-    body.setOffset(7, 12);
+    body.setSize(GUARD_BODY_WIDTH, GUARD_BODY_HEIGHT);
+    // Anchor collisions to the lower body/feet so the larger sprite frame
+    // doesn't snag on map objects around the guard's head/arms.
+    body.setOffset((GUARD_FRAME_SIZE - GUARD_BODY_WIDTH) / 2, GUARD_FRAME_SIZE - GUARD_BODY_HEIGHT);
 
     this.createAnimations(scene);
     this.anims.play(`${SPRITE_KEY}-idle`, true);
@@ -102,8 +108,8 @@ export class GuardNPC extends Phaser.Physics.Arcade.Sprite {
     // Keep near home
     const distToHome = Phaser.Math.Distance.Between(this.x, this.y, this.homeX, this.homeY);
     if (distToHome > 80) {
-      const toHome = new Phaser.Math.Vector2(this.homeX - this.x, this.homeY - this.y).normalize();
-      this.patrolDir.lerp(toHome, 0.1).normalize();
+      this.scratchVec.set(this.homeX - this.x, this.homeY - this.y).normalize();
+      this.patrolDir.lerp(this.scratchVec, 0.1).normalize();
     }
 
     this.setVelocity(this.patrolDir.x * PATROL_SPEED, this.patrolDir.y * PATROL_SPEED);
@@ -112,23 +118,23 @@ export class GuardNPC extends Phaser.Physics.Arcade.Sprite {
 
   private chasePlayer(): void {
     if (!this.target) return;
-    const dir = new Phaser.Math.Vector2(this.target.x - this.x, this.target.y - this.y).normalize();
-    this.setVelocity(dir.x * CHASE_SPEED, dir.y * CHASE_SPEED);
-    this.playWalkAnim(dir);
+    this.scratchVec.set(this.target.x - this.x, this.target.y - this.y).normalize();
+    this.setVelocity(this.scratchVec.x * CHASE_SPEED, this.scratchVec.y * CHASE_SPEED);
+    this.playWalkAnim(this.scratchVec);
   }
 
   private returnHome(): void {
-    const dir = new Phaser.Math.Vector2(this.homeX - this.x, this.homeY - this.y).normalize();
-    this.setVelocity(dir.x * PATROL_SPEED, dir.y * PATROL_SPEED);
-    this.playWalkAnim(dir);
+    this.scratchVec.set(this.homeX - this.x, this.homeY - this.y).normalize();
+    this.setVelocity(this.scratchVec.x * PATROL_SPEED, this.scratchVec.y * PATROL_SPEED);
+    this.playWalkAnim(this.scratchVec);
   }
 
   /** Push the player character away from the guard. */
   private pushPlayerAway(): void {
     if (!this.target) return;
     const body = this.target.body as Phaser.Physics.Arcade.Body;
-    const away = new Phaser.Math.Vector2(this.target.x - this.x, this.target.y - this.y).normalize();
-    body.setVelocity(away.x * PUSHBACK_FORCE, away.y * PUSHBACK_FORCE);
+    this.scratchVec.set(this.target.x - this.x, this.target.y - this.y).normalize();
+    body.setVelocity(this.scratchVec.x * PUSHBACK_FORCE, this.scratchVec.y * PUSHBACK_FORCE);
   }
 
   private playWalkAnim(dir: Phaser.Math.Vector2): void {

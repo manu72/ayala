@@ -188,10 +188,14 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
         this.anims.play(`${SPRITE_KEY}-run`, true);
       } else {
         const walkAnim = `${SPRITE_KEY}-walk`;
-        this.anims.play(walkAnim, true);
-        if (this.anims.currentAnim) {
-          const frameRate = wantsCrouch ? 4 : 8;
-          this.anims.msPerFrame = 1000 / frameRate;
+        if (this.scene.anims.exists(walkAnim)) {
+          this.anims.play(walkAnim, true);
+          if (this.anims.currentAnim?.key === walkAnim) {
+            const frameRate = wantsCrouch ? 4 : 8;
+            this.anims.msPerFrame = 1000 / frameRate;
+          } else {
+            this.anims.play(`${SPRITE_KEY}-sit-${this.lastDirection}`, true);
+          }
         } else {
           this.anims.play(`${SPRITE_KEY}-sit-${this.lastDirection}`, true);
         }
