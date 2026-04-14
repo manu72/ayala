@@ -23,6 +23,21 @@ export class BootScene extends Phaser.Scene {
       frameWidth: 64,
       frameHeight: 64,
     });
+
+    // Dog spritesheets: 4 cols x 9 rows of 32x32 frames
+    const dogs = ["SmallDog", "WhiteDog", "BrownDog"];
+    for (const key of dogs) {
+      this.load.spritesheet(key, `assets/sprites/${key}.png`, {
+        frameWidth: 32,
+        frameHeight: 32,
+      });
+    }
+
+    // Dog walker human spritesheet: 7 cols x 3 rows of 50x45 frames
+    this.load.spritesheet("dogwalker", "assets/sprites/dogwalker.png", {
+      frameWidth: 50,
+      frameHeight: 45,
+    });
   }
 
   create(): void {

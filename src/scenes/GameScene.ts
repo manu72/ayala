@@ -826,6 +826,9 @@ export class GameScene extends Phaser.Scene {
       },
     ];
 
+    const walkerDogKeys = Phaser.Utils.Array.Shuffle(["SmallDog", "BrownDog"]);
+    let walkerDogIdx = 0;
+
     for (const config of configs) {
       const human = new HumanNPC(this, config);
       if (this.objectsLayer) {
@@ -834,7 +837,9 @@ export class GameScene extends Phaser.Scene {
       this.humans.push(human);
 
       if (config.type === "dogwalker") {
-        this.dogs.push(new DogNPC(this, human));
+        const dogKey = walkerDogKeys[walkerDogIdx % walkerDogKeys.length]!;
+        this.dogs.push(new DogNPC(this, human, dogKey));
+        walkerDogIdx++;
       }
     }
   }

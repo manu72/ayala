@@ -14,11 +14,54 @@ export interface HumanConfig {
   lingerWaypointIndex?: number;
 }
 
-const SPRITE_KEY = "guard";
-const COLS = 8;
-const FRAME_SIZE = 64;
-const BODY_W = 18;
-const BODY_H = 16;
+interface SpriteProfile {
+  key: string;
+  cols: number;
+  frameSize: number;
+  bodyW: number;
+  bodyH: number;
+  anims: {
+    walkDown: { row: number; count: number };
+    walkLeft: { row: number; count: number };
+    walkRight: { row: number; count: number };
+    walkUp: { row: number; count: number };
+    idle: { row: number; count: number };
+  };
+}
+
+const GUARD_PROFILE: SpriteProfile = {
+  key: "guard",
+  cols: 8,
+  frameSize: 64,
+  bodyW: 18,
+  bodyH: 16,
+  anims: {
+    walkDown: { row: 0, count: 4 },
+    walkLeft: { row: 1, count: 4 },
+    walkRight: { row: 2, count: 4 },
+    walkUp: { row: 3, count: 4 },
+    idle: { row: 4, count: 3 },
+  },
+};
+
+const DOGWALKER_PROFILE: SpriteProfile = {
+  key: "dogwalker",
+  cols: 7,
+  frameSize: 50,
+  bodyW: 18,
+  bodyH: 16,
+  anims: {
+    walkRight: { row: 0, count: 7 },
+    walkDown: { row: 0, count: 7 },
+    walkLeft: { row: 2, count: 7 },
+    walkUp: { row: 2, count: 7 },
+    idle: { row: 0, count: 1 },
+  },
+};
+
+function profileForType(type: HumanType): SpriteProfile {
+  return type === "dogwalker" ? DOGWALKER_PROFILE : GUARD_PROFILE;
+}
 
 /**
  * A human NPC that follows a waypoint path during active time-of-day phases.
@@ -36,12 +79,15 @@ export class HumanNPC extends Phaser.Physics.Arcade.Sprite {
   private lingerTimer = 0;
   private lingering = false;
   private readonly scratchVec = new Phaser.Math.Vector2(0, 0);
+  private readonly profile: SpriteProfile;
 
   constructor(scene: Phaser.Scene, config: HumanConfig) {
+    const prof = profileForType(config.type);
     const start = config.path[0]!;
-    super(scene, start.x, start.y, SPRITE_KEY);
+    super(scene, start.x, start.y, prof.key);
     this.humanType = config.type;
     this.config = config;
+    this.profile = prof;
     this.waypointPath = config.path;
     this.activePhases = new Set(config.activePhases);
 
@@ -51,24 +97,20 @@ export class HumanNPC extends Phaser.Physics.Arcade.Sprite {
     this.setCollideWorldBounds(true);
 
     const body = this.body as Phaser.Physics.Arcade.Body;
-    body.setSize(BODY_W, BODY_H);
-    body.setOffset((FRAME_SIZE - BODY_W) / 2, FRAME_SIZE - BODY_H);
+    body.setSize(prof.bodyW, prof.bodyH);
+    body.setOffset(
+      (prof.frameSize - prof.bodyW) / 2,
+      prof.frameSize - prof.bodyH,
+    );
 
     this.createAnimations(scene);
     this.setVisible(false);
     this.setActive(false);
 
-    // Tint to differentiate human types
-    switch (config.type) {
-      case "jogger":
-        this.setTint(0x88aaff);
-        break;
-      case "feeder":
-        this.setTint(0x88ff88);
-        break;
-      case "dogwalker":
-        this.setTint(0xddcc88);
-        break;
+    if (config.type === "jogger") {
+      this.setTint(0x88aaff);
+    } else if (config.type === "feeder") {
+      this.setTint(0x88ff88);
     }
   }
 
@@ -84,7 +126,8 @@ export class HumanNPC extends Phaser.Physics.Arcade.Sprite {
   update(delta: number): void {
     if (!this.isActive) return;
 
-    // Feeder lingering at station
+    const key = this.profile.key;
+
     if (this.lingering) {
       this.setVelocity(0);
       this.lingerTimer -= delta;
@@ -103,7 +146,6 @@ export class HumanNPC extends Phaser.Physics.Arcade.Sprite {
 
     const dist = Phaser.Math.Distance.Between(this.x, this.y, target.x, target.y);
     if (dist < 8) {
-      // Reached waypoint
       if (
         this.humanType === "feeder" &&
         this.config.lingerSec &&
@@ -113,7 +155,7 @@ export class HumanNPC extends Phaser.Physics.Arcade.Sprite {
         this.lingering = true;
         this.lingerTimer = this.config.lingerSec * 1000;
         this.setVelocity(0);
-        this.anims.play(`${SPRITE_KEY}-idle`, true);
+        this.anims.play(`${key}-idle`, true);
         return;
       }
       this.advanceWaypoint();
@@ -137,7 +179,6 @@ export class HumanNPC extends Phaser.Physics.Arcade.Sprite {
     this.setActive(true);
     const start = this.waypointPath[0]!;
     this.setPosition(start.x, start.y);
-    // Feeders spawn at waypoint 0 and should head to configured station first.
     if (this.humanType === "feeder" && this.waypointPath.length > 1) {
       const targetIdx = this.config.lingerWaypointIndex ?? 1;
       this.currentWaypoint = Math.max(0, Math.min(targetIdx, this.waypointPath.length - 1));
@@ -155,48 +196,50 @@ export class HumanNPC extends Phaser.Physics.Arcade.Sprite {
   }
 
   private playWalkAnim(dir: Phaser.Math.Vector2): void {
+    const key = this.profile.key;
     if (Math.abs(dir.x) > Math.abs(dir.y)) {
-      this.anims.play(dir.x < 0 ? `${SPRITE_KEY}-walk-left` : `${SPRITE_KEY}-walk-right`, true);
+      this.anims.play(dir.x < 0 ? `${key}-walk-left` : `${key}-walk-right`, true);
     } else {
-      this.anims.play(dir.y < 0 ? `${SPRITE_KEY}-walk-up` : `${SPRITE_KEY}-walk-down`, true);
+      this.anims.play(dir.y < 0 ? `${key}-walk-up` : `${key}-walk-down`, true);
     }
   }
 
   private createAnimations(scene: Phaser.Scene): void {
-    if (scene.anims.exists(`${SPRITE_KEY}-idle`)) return;
+    const { key, cols, anims: a } = this.profile;
+    if (scene.anims.exists(`${key}-idle`)) return;
 
-    const row = (r: number, count = 4) => {
-      const start = r * COLS;
-      return { start, end: start + count - 1 };
-    };
+    const row = (r: number, count: number) => ({
+      start: r * cols,
+      end: r * cols + count - 1,
+    });
 
     scene.anims.create({
-      key: `${SPRITE_KEY}-walk-down`,
-      frames: scene.anims.generateFrameNumbers(SPRITE_KEY, row(0)),
+      key: `${key}-walk-down`,
+      frames: scene.anims.generateFrameNumbers(key, row(a.walkDown.row, a.walkDown.count)),
       frameRate: 6,
       repeat: -1,
     });
     scene.anims.create({
-      key: `${SPRITE_KEY}-walk-left`,
-      frames: scene.anims.generateFrameNumbers(SPRITE_KEY, row(1)),
+      key: `${key}-walk-left`,
+      frames: scene.anims.generateFrameNumbers(key, row(a.walkLeft.row, a.walkLeft.count)),
       frameRate: 6,
       repeat: -1,
     });
     scene.anims.create({
-      key: `${SPRITE_KEY}-walk-right`,
-      frames: scene.anims.generateFrameNumbers(SPRITE_KEY, row(2)),
+      key: `${key}-walk-right`,
+      frames: scene.anims.generateFrameNumbers(key, row(a.walkRight.row, a.walkRight.count)),
       frameRate: 6,
       repeat: -1,
     });
     scene.anims.create({
-      key: `${SPRITE_KEY}-walk-up`,
-      frames: scene.anims.generateFrameNumbers(SPRITE_KEY, row(3)),
+      key: `${key}-walk-up`,
+      frames: scene.anims.generateFrameNumbers(key, row(a.walkUp.row, a.walkUp.count)),
       frameRate: 6,
       repeat: -1,
     });
     scene.anims.create({
-      key: `${SPRITE_KEY}-idle`,
-      frames: scene.anims.generateFrameNumbers(SPRITE_KEY, row(4, 3)),
+      key: `${key}-idle`,
+      frames: scene.anims.generateFrameNumbers(key, row(a.idle.row, a.idle.count)),
       frameRate: 3,
       repeat: -1,
     });
