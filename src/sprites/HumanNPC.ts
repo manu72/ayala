@@ -221,6 +221,8 @@ export class HumanNPC extends Phaser.Physics.Arcade.Sprite {
     this.isActive = true;
     this.setVisible(true);
     this.setActive(true);
+    const body = this.body as Phaser.Physics.Arcade.Body | undefined;
+    body?.setEnable(true);
     const start = this.waypointPath[0]!;
     this.setPosition(start.x, start.y);
     if (this.humanType === "feeder" && this.waypointPath.length > 1) {
@@ -237,6 +239,8 @@ export class HumanNPC extends Phaser.Physics.Arcade.Sprite {
     this.setVisible(false);
     this.setActive(false);
     this.setVelocity(0);
+    const body = this.body as Phaser.Physics.Arcade.Body | undefined;
+    body?.setEnable(false);
   }
 
   private playWalkAnim(dir: Phaser.Math.Vector2): void {
