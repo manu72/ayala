@@ -461,10 +461,13 @@ export class GameScene extends Phaser.Scene {
   // ──────────── Chapters ────────────
 
   private checkChapterProgression(): void {
+    const namedKnown = new Set(
+      [...this.knownCats].filter((name) => !name.startsWith("Colony Cat")),
+    );
     const triggered = this.chapters.check({
       trust: this.trust,
       dayNight: this.dayNight,
-      knownCats: this.knownCats,
+      knownCats: namedKnown,
       registry: this.registry,
     });
     if (triggered) {
