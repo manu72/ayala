@@ -1,5 +1,7 @@
 import Phaser from 'phaser'
 
+const COLS = 8
+
 export interface NPCCatConfig {
   name: string
   spriteKey: string
@@ -7,9 +9,6 @@ export interface NPCCatConfig {
   y: number
 }
 
-/**
- * A stationary NPC cat with a name label and idle animation.
- */
 export class NPCCat extends Phaser.Physics.Arcade.Sprite {
   readonly npcName: string
   private nameLabel: Phaser.GameObjects.Text
@@ -20,7 +19,8 @@ export class NPCCat extends Phaser.Physics.Arcade.Sprite {
     this.npcName = config.name
 
     scene.add.existing(this)
-    scene.physics.add.existing(this, true) // static body
+    scene.physics.add.existing(this, true)
+    this.setDepth(3)
 
     this.createAnimations(scene, config.spriteKey)
     this.anims.play(`${config.spriteKey}-idle`, true)
@@ -36,10 +36,11 @@ export class NPCCat extends Phaser.Physics.Arcade.Sprite {
   private createAnimations(scene: Phaser.Scene, key: string): void {
     if (scene.anims.exists(`${key}-idle`)) return
 
+    // Row 4 (frames 32-34) for idle in 8-col layout
     scene.anims.create({
       key: `${key}-idle`,
-      frames: scene.anims.generateFrameNumbers(key, { start: 16, end: 17 }),
-      frameRate: 2,
+      frames: scene.anims.generateFrameNumbers(key, { start: 4 * COLS, end: 4 * COLS + 2 }),
+      frameRate: 3,
       repeat: -1,
     })
   }
