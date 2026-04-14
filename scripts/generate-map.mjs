@@ -378,17 +378,37 @@ for (let x = 15; x < 88; x += 8) {
 // ─────────────────────────────────────────
 
 const objectPoints = [
+  // Player & NPC spawns
   { name: 'spawn_mammacat', x: 85, y: 50 },
   { name: 'spawn_blacky',   x: 32, y: 17 },
+  { name: 'spawn_tiger',    x: 50, y: 36 },
+  { name: 'spawn_jayco',    x: 80, y: 16 },
+
+  // POIs — landmarks
   { name: 'poi_starbucks',  x: 83, y: 19 },
   { name: 'poi_fountain',   x: 25, y: 52 },
-  { name: 'poi_feeding_station_1', x: 48, y: 34 },
-  { name: 'poi_feeding_station_2', x: 62, y: 30 },
   { name: 'poi_monument',   x: 16, y: 34 },
   { name: 'poi_blackbird',  x: 69, y: 53 },
   { name: 'poi_playground', x: 22, y: 31 },
-  { name: 'poi_dining',     x: 75, y: 56 },
   { name: 'poi_pyramid_steps', x: 82, y: 14 },
+
+  // Food sources — feeding stations
+  { name: 'poi_feeding_station_1', x: 48, y: 34 },
+  { name: 'poi_feeding_station_2', x: 62, y: 30 },
+
+  // Water sources — bowls near feeding stations
+  { name: 'poi_water_bowl_1', x: 49, y: 35 },
+  { name: 'poi_water_bowl_2', x: 63, y: 31 },
+
+  // Restaurant scraps (Manam / Blackbird area)
+  { name: 'poi_restaurant_scraps', x: 75, y: 56 },
+  { name: 'poi_dining',     x: 74, y: 55 },
+
+  // Guard patrol near restaurants
+  { name: 'spawn_guard',    x: 73, y: 54 },
+
+  // Safe sleeping spot near start zone
+  { name: 'poi_safe_sleep', x: 86, y: 48 },
 ]
 
 // ─────────────────────────────────────────

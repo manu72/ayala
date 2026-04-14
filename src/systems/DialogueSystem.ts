@@ -1,8 +1,10 @@
 import Phaser from 'phaser'
 
+const FONT_FAMILY = 'Arial, Helvetica, sans-serif'
+
 /**
- * Simple dialogue overlay anchored to the bottom of the camera viewport.
- * Shows lines of text one at a time, advancing on Space/Enter.
+ * Dialogue overlay rendered inside a given scene.
+ * Shows lines of text one at a time, advancing on Space.
  */
 export class DialogueSystem {
   private container: Phaser.GameObjects.Container
@@ -15,33 +17,36 @@ export class DialogueSystem {
   private advanceKey: Phaser.Input.Keyboard.Key | null = null
 
   constructor(scene: Phaser.Scene) {
+    const { width, height } = scene.cameras.main
+    const boxW = width - 40
+    const boxH = 90
 
-    const cam = scene.cameras.main
-    const boxW = cam.width - 40
-    const boxH = 80
-
-    const background = scene.add.rectangle(0, 0, boxW, boxH, 0x000000, 0.75)
+    const background = scene.add
+      .rectangle(0, 0, boxW, boxH, 0x000000, 0.8)
       .setOrigin(0.5)
-      .setStrokeStyle(2, 0xffffff, 0.5)
+      .setStrokeStyle(1, 0xffffff, 0.3)
 
-    this.text = scene.add.text(0, -10, '', {
-      fontSize: '14px',
-      color: '#ffffff',
-      wordWrap: { width: boxW - 30 },
-      lineSpacing: 4,
-    }).setOrigin(0.5, 0.5)
+    this.text = scene.add
+      .text(0, -8, '', {
+        fontFamily: FONT_FAMILY,
+        fontSize: '16px',
+        color: '#ffffff',
+        wordWrap: { width: boxW - 40 },
+        lineSpacing: 6,
+      })
+      .setOrigin(0.5, 0.5)
 
-    this.promptText = scene.add.text(boxW / 2 - 20, boxH / 2 - 16, '[Space]', {
-      fontSize: '10px',
-      color: '#aaaaaa',
-    }).setOrigin(1, 1)
+    this.promptText = scene.add
+      .text(boxW / 2 - 14, boxH / 2 - 12, '[Space]', {
+        fontFamily: FONT_FAMILY,
+        fontSize: '11px',
+        color: '#888888',
+      })
+      .setOrigin(1, 1)
 
-    this.container = scene.add.container(cam.width / 2, cam.height - 60, [
-      background,
-      this.text,
-      this.promptText,
+    this.container = scene.add.container(width / 2, height - 65, [
+      background, this.text, this.promptText,
     ])
-    this.container.setScrollFactor(0)
     this.container.setDepth(100)
     this.container.setVisible(false)
 

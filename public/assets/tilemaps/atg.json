@@ -11,7 +11,7 @@
   "type": "map",
   "version": "1.10",
   "nextlayerid": 5,
-  "nextobjectid": 12,
+  "nextobjectid": 19,
   "tilesets": [
     {
       "columns": 8,
@@ -24220,6 +24220,26 @@
         },
         {
           "id": 3,
+          "name": "spawn_tiger",
+          "type": "",
+          "x": 1600,
+          "y": 1152,
+          "width": 32,
+          "height": 32,
+          "visible": true
+        },
+        {
+          "id": 4,
+          "name": "spawn_jayco",
+          "type": "",
+          "x": 2560,
+          "y": 512,
+          "width": 32,
+          "height": 32,
+          "visible": true
+        },
+        {
+          "id": 5,
           "name": "poi_starbucks",
           "type": "",
           "x": 2656,
@@ -24229,31 +24249,11 @@
           "visible": true
         },
         {
-          "id": 4,
+          "id": 6,
           "name": "poi_fountain",
           "type": "",
           "x": 800,
           "y": 1664,
-          "width": 32,
-          "height": 32,
-          "visible": true
-        },
-        {
-          "id": 5,
-          "name": "poi_feeding_station_1",
-          "type": "",
-          "x": 1536,
-          "y": 1088,
-          "width": 32,
-          "height": 32,
-          "visible": true
-        },
-        {
-          "id": 6,
-          "name": "poi_feeding_station_2",
-          "type": "",
-          "x": 1984,
-          "y": 960,
           "width": 32,
           "height": 32,
           "visible": true
@@ -24290,7 +24290,57 @@
         },
         {
           "id": 10,
-          "name": "poi_dining",
+          "name": "poi_pyramid_steps",
+          "type": "",
+          "x": 2624,
+          "y": 448,
+          "width": 32,
+          "height": 32,
+          "visible": true
+        },
+        {
+          "id": 11,
+          "name": "poi_feeding_station_1",
+          "type": "",
+          "x": 1536,
+          "y": 1088,
+          "width": 32,
+          "height": 32,
+          "visible": true
+        },
+        {
+          "id": 12,
+          "name": "poi_feeding_station_2",
+          "type": "",
+          "x": 1984,
+          "y": 960,
+          "width": 32,
+          "height": 32,
+          "visible": true
+        },
+        {
+          "id": 13,
+          "name": "poi_water_bowl_1",
+          "type": "",
+          "x": 1568,
+          "y": 1120,
+          "width": 32,
+          "height": 32,
+          "visible": true
+        },
+        {
+          "id": 14,
+          "name": "poi_water_bowl_2",
+          "type": "",
+          "x": 2016,
+          "y": 992,
+          "width": 32,
+          "height": 32,
+          "visible": true
+        },
+        {
+          "id": 15,
+          "name": "poi_restaurant_scraps",
           "type": "",
           "x": 2400,
           "y": 1792,
@@ -24299,11 +24349,31 @@
           "visible": true
         },
         {
-          "id": 11,
-          "name": "poi_pyramid_steps",
+          "id": 16,
+          "name": "poi_dining",
           "type": "",
-          "x": 2624,
-          "y": 448,
+          "x": 2368,
+          "y": 1760,
+          "width": 32,
+          "height": 32,
+          "visible": true
+        },
+        {
+          "id": 17,
+          "name": "spawn_guard",
+          "type": "",
+          "x": 2336,
+          "y": 1728,
+          "width": 32,
+          "height": 32,
+          "visible": true
+        },
+        {
+          "id": 18,
+          "name": "poi_safe_sleep",
+          "type": "",
+          "x": 2752,
+          "y": 1536,
           "width": 32,
           "height": 32,
           "visible": true
