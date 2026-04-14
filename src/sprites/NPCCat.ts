@@ -50,6 +50,9 @@ export class NPCCat extends Phaser.Physics.Arcade.Sprite {
   /** Walking direction (unit vector). */
   private walkDir = new Phaser.Math.Vector2(0, 0);
 
+  /** Last facing direction for idle pose. */
+  private lastDirection: "down" | "left" | "right" | "up" = "down";
+
   /** Home zone center and radius. */
   private homeX: number;
   private homeY: number;
@@ -77,7 +80,7 @@ export class NPCCat extends Phaser.Physics.Arcade.Sprite {
     body.setOffset(7, 12);
 
     this.createAnimations(scene, config.spriteKey);
-    this.anims.play(`${config.spriteKey}-idle`, true);
+    this.anims.play(`${config.spriteKey}-sit-down`, true);
 
     this.enterState("idle");
   }
@@ -153,7 +156,7 @@ export class NPCCat extends Phaser.Physics.Arcade.Sprite {
         this.stateTimer = Phaser.Math.Between(PAUSE_MIN_MS, PAUSE_MAX_MS);
         this.setVelocity(0);
         this.setAlpha(1);
-        this.anims.play(`${this.config.spriteKey}-idle`, true);
+        this.anims.play(`${this.config.spriteKey}-sit-${this.lastDirection}`, true);
         break;
 
       case "walking":
@@ -164,7 +167,7 @@ export class NPCCat extends Phaser.Physics.Arcade.Sprite {
       case "sleeping":
         this.stateTimer = Phaser.Math.Between(SLEEP_MIN_MS, SLEEP_MAX_MS);
         this.setVelocity(0);
-        this.anims.play(`${this.config.spriteKey}-idle`, true);
+        this.anims.play(`${this.config.spriteKey}-rest`, true);
         this.setAlpha(0.7);
         break;
 
@@ -172,7 +175,7 @@ export class NPCCat extends Phaser.Physics.Arcade.Sprite {
         this.stateTimer = ALERT_DURATION_MS;
         this.setVelocity(0);
         this.setAlpha(1);
-        this.anims.play(`${this.config.spriteKey}-idle`, true);
+        this.anims.play(`${this.config.spriteKey}-sit-${this.lastDirection}`, true);
         break;
 
       case "fleeing":
@@ -214,50 +217,69 @@ export class NPCCat extends Phaser.Physics.Arcade.Sprite {
   }
 
   private playWalkAnim(): void {
-    const key = this.config.spriteKey;
     if (Math.abs(this.walkDir.x) > Math.abs(this.walkDir.y)) {
-      this.anims.play(this.walkDir.x < 0 ? `${key}-walk-left` : `${key}-walk-right`, true);
+      this.lastDirection = this.walkDir.x < 0 ? "left" : "right";
     } else {
-      this.anims.play(this.walkDir.y < 0 ? `${key}-walk-up` : `${key}-walk-down`, true);
+      this.lastDirection = this.walkDir.y < 0 ? "up" : "down";
     }
+
+    const key = this.config.spriteKey;
+    const animKey = this.state === "fleeing" ? `${key}-run` : `${key}-walk`;
+    this.anims.play(animKey, true);
   }
 
   private createAnimations(scene: Phaser.Scene, key: string): void {
-    if (scene.anims.exists(`${key}-idle`)) return;
+    if (scene.anims.exists(`${key}-sit-down`)) return;
 
     const row = (r: number, count = 4) => {
       const start = r * COLS;
       return { start, end: start + count - 1 };
     };
 
+    // Rows 0-3: directional sitting (stationary/idle)
     scene.anims.create({
-      key: `${key}-walk-down`,
+      key: `${key}-sit-down`,
       frames: scene.anims.generateFrameNumbers(key, row(0)),
-      frameRate: 6,
-      repeat: -1,
-    });
-    scene.anims.create({
-      key: `${key}-walk-left`,
-      frames: scene.anims.generateFrameNumbers(key, row(1)),
-      frameRate: 6,
-      repeat: -1,
-    });
-    scene.anims.create({
-      key: `${key}-walk-right`,
-      frames: scene.anims.generateFrameNumbers(key, row(2)),
-      frameRate: 6,
-      repeat: -1,
-    });
-    scene.anims.create({
-      key: `${key}-walk-up`,
-      frames: scene.anims.generateFrameNumbers(key, row(3)),
-      frameRate: 6,
-      repeat: -1,
-    });
-    scene.anims.create({
-      key: `${key}-idle`,
-      frames: scene.anims.generateFrameNumbers(key, row(4, 3)),
       frameRate: 3,
+      repeat: -1,
+    });
+    scene.anims.create({
+      key: `${key}-sit-left`,
+      frames: scene.anims.generateFrameNumbers(key, row(1)),
+      frameRate: 3,
+      repeat: -1,
+    });
+    scene.anims.create({
+      key: `${key}-sit-right`,
+      frames: scene.anims.generateFrameNumbers(key, row(2)),
+      frameRate: 3,
+      repeat: -1,
+    });
+    scene.anims.create({
+      key: `${key}-sit-up`,
+      frames: scene.anims.generateFrameNumbers(key, row(3)),
+      frameRate: 3,
+      repeat: -1,
+    });
+    // Row 5 (index 4): walking
+    scene.anims.create({
+      key: `${key}-walk`,
+      frames: scene.anims.generateFrameNumbers(key, row(4, 8)),
+      frameRate: 6,
+      repeat: -1,
+    });
+    // Row 6 (index 5): running / fleeing
+    scene.anims.create({
+      key: `${key}-run`,
+      frames: scene.anims.generateFrameNumbers(key, row(5, 8)),
+      frameRate: 12,
+      repeat: -1,
+    });
+    // Row 7 (index 6): resting / sleeping
+    scene.anims.create({
+      key: `${key}-rest`,
+      frames: scene.anims.generateFrameNumbers(key, row(6, 4)),
+      frameRate: 2,
       repeat: -1,
     });
   }
