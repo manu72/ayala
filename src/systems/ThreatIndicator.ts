@@ -1,17 +1,17 @@
-import Phaser from 'phaser'
-import type { Disposition } from '../sprites/NPCCat'
+import Phaser from "phaser";
+import type { Disposition } from "../sprites/NPCCat";
 
 interface IndicatorConfig {
-  symbol: string
-  color: string
+  symbol: string;
+  color: string;
 }
 
-const INDICATORS: Record<Disposition | 'dangerous', IndicatorConfig> = {
-  friendly:     { symbol: '\u2665', color: '#44DD44' },    // heart ♥
-  neutral:      { symbol: '\u2014', color: '#DDDD44' },    // em dash —
-  territorial:  { symbol: '!',      color: '#DD8800' },
-  dangerous:    { symbol: '\u2620', color: '#DD2222' },    // skull ☠
-}
+const INDICATORS: Record<Disposition | "dangerous", IndicatorConfig> = {
+  friendly: { symbol: "\u2665", color: "#44DD44" }, // heart ♥
+  neutral: { symbol: "\u2014", color: "#DDDD44" }, // em dash —
+  territorial: { symbol: "!", color: "#DD8800" },
+  dangerous: { symbol: "\u2620", color: "#DD2222" }, // skull ☠
+};
 
 /**
  * A floating icon + name label that tracks a parent sprite.
@@ -19,68 +19,76 @@ const INDICATORS: Record<Disposition | 'dangerous', IndicatorConfig> = {
  * based on whether the entity has been identified.
  */
 export class ThreatIndicator {
-  private icon: Phaser.GameObjects.Text
-  private label: Phaser.GameObjects.Text
-  private parent: Phaser.GameObjects.Sprite
-  private entityName: string
-  private _known = false
+  private icon: Phaser.GameObjects.Text;
+  private label: Phaser.GameObjects.Text;
+  private parent: Phaser.GameObjects.Sprite;
+  private entityName: string;
+  private _known = false;
 
   constructor(
     scene: Phaser.Scene,
     parent: Phaser.GameObjects.Sprite,
     name: string,
-    disposition: Disposition | 'dangerous',
+    disposition: Disposition | "dangerous",
     known = false,
   ) {
-    this.parent = parent
-    this.entityName = name
-    this._known = known
+    this.parent = parent;
+    this.entityName = name;
+    this._known = known;
 
-    const cfg = INDICATORS[disposition]
+    const cfg = INDICATORS[disposition];
 
-    this.icon = scene.add.text(0, 0, cfg.symbol, {
-      fontSize: '10px',
-      color: cfg.color,
-      stroke: '#000000',
-      strokeThickness: 2,
-    }).setOrigin(0.5, 1).setDepth(6)
+    this.icon = scene.add
+      .text(0, 0, cfg.symbol, {
+        fontSize: "10px",
+        color: cfg.color,
+        stroke: "#000000",
+        strokeThickness: 2,
+      })
+      .setOrigin(0.5, 1)
+      .setDepth(6);
 
-    this.label = scene.add.text(0, 0, known ? name : '???', {
-      fontSize: '8px',
-      color: '#cccccc',
-      stroke: '#000000',
-      strokeThickness: 1,
-    }).setOrigin(0.5, 1).setDepth(6)
+    this.label = scene.add
+      .text(0, 0, known ? name : "???", {
+        fontSize: "8px",
+        color: "#cccccc",
+        stroke: "#000000",
+        strokeThickness: 1,
+      })
+      .setOrigin(0.5, 1)
+      .setDepth(6);
 
-    this.updatePosition()
+    this.updatePosition();
   }
 
-  get known(): boolean { return this._known }
+  get known(): boolean {
+    return this._known;
+  }
 
   /** Mark the entity as identified (shows real name). */
   reveal(): void {
-    this._known = true
-    this.label.setText(this.entityName)
+    this._known = true;
+    this.label.setText(this.entityName);
   }
 
   /** Change disposition at runtime (e.g. territorial → friendly after befriending). */
-  setDisposition(d: Disposition | 'dangerous'): void {
-    const cfg = INDICATORS[d]
-    this.icon.setText(cfg.symbol)
-    this.icon.setColor(cfg.color)
+  setDisposition(d: Disposition | "dangerous"): void {
+    const cfg = INDICATORS[d];
+    this.icon.setText(cfg.symbol);
+    this.icon.setColor(cfg.color);
   }
 
   update(): void {
-    this.updatePosition()
+    this.updatePosition();
   }
 
   private updatePosition(): void {
-    this.icon.setPosition(this.parent.x, this.parent.y - 26)
-    this.label.setPosition(this.parent.x, this.parent.y - 34)
+    this.icon.setPosition(this.parent.x, this.parent.y - 26);
+    this.label.setPosition(this.parent.x, this.parent.y - 34);
   }
 
   destroy(): void {
-    this.icon.destroy()
-    this.label.destroy()
+    this.icon.destroy();
+    this.label.destroy();
   }
 }

@@ -1,45 +1,62 @@
-import Phaser from 'phaser'
-import type { StatsSystem } from './StatsSystem'
-import type { TimeOfDay } from './DayNightCycle'
+import Phaser from "phaser";
+import type { StatsSystem } from "./StatsSystem";
+import type { TimeOfDay } from "./DayNightCycle";
 
-export type SourceType =
-  | 'feeding_station'
-  | 'fountain'
-  | 'restaurant_scraps'
-  | 'water_bowl'
-  | 'bugs'
-  | 'safe_sleep'
+export type SourceType = "feeding_station" | "fountain" | "restaurant_scraps" | "water_bowl" | "bugs" | "safe_sleep";
 
 interface SourceDef {
-  type: SourceType
-  stat: 'hunger' | 'thirst' | 'energy'
-  amount: number
-  cooldownMs: number
+  type: SourceType;
+  stat: "hunger" | "thirst" | "energy";
+  amount: number;
+  cooldownMs: number;
   /** If set, only available during these phases. */
-  activePhases?: TimeOfDay[]
+  activePhases?: TimeOfDay[];
   /** Indicator character drawn on ground. */
-  symbol: string
-  symbolColor: string
+  symbol: string;
+  symbolColor: string;
 }
 
 const DEFS: Record<SourceType, SourceDef> = {
-  feeding_station:   { type: 'feeding_station',   stat: 'hunger', amount: 40, cooldownMs: 120_000, activePhases: ['dawn', 'evening'], symbol: '🍽', symbolColor: '#ff8c00' },
-  fountain:          { type: 'fountain',           stat: 'thirst', amount: 50, cooldownMs: 60_000,  symbol: '💧', symbolColor: '#4488ff' },
-  restaurant_scraps: { type: 'restaurant_scraps',  stat: 'hunger', amount: 20, cooldownMs: 90_000,  activePhases: ['evening'], symbol: '🍖', symbolColor: '#cc6600' },
-  water_bowl:        { type: 'water_bowl',         stat: 'thirst', amount: 30, cooldownMs: 45_000,  symbol: '💧', symbolColor: '#66aaff' },
-  bugs:              { type: 'bugs',               stat: 'hunger', amount: 5,  cooldownMs: 10_000,  symbol: '·',  symbolColor: '#88aa44' },
-  safe_sleep:        { type: 'safe_sleep',         stat: 'energy', amount: 100, cooldownMs: 0,      symbol: '★',  symbolColor: '#ffdd44' },
-}
+  feeding_station: {
+    type: "feeding_station",
+    stat: "hunger",
+    amount: 40,
+    cooldownMs: 120_000,
+    activePhases: ["dawn", "evening"],
+    symbol: "🍽",
+    symbolColor: "#ff8c00",
+  },
+  fountain: { type: "fountain", stat: "thirst", amount: 50, cooldownMs: 60_000, symbol: "💧", symbolColor: "#4488ff" },
+  restaurant_scraps: {
+    type: "restaurant_scraps",
+    stat: "hunger",
+    amount: 20,
+    cooldownMs: 90_000,
+    activePhases: ["evening"],
+    symbol: "🍖",
+    symbolColor: "#cc6600",
+  },
+  water_bowl: {
+    type: "water_bowl",
+    stat: "thirst",
+    amount: 30,
+    cooldownMs: 45_000,
+    symbol: "💧",
+    symbolColor: "#66aaff",
+  },
+  bugs: { type: "bugs", stat: "hunger", amount: 5, cooldownMs: 10_000, symbol: "·", symbolColor: "#88aa44" },
+  safe_sleep: { type: "safe_sleep", stat: "energy", amount: 100, cooldownMs: 0, symbol: "★", symbolColor: "#ffdd44" },
+};
 
-const INTERACT_RANGE = 32
+const INTERACT_RANGE = 32;
 
 interface Source {
-  type: SourceType
-  x: number
-  y: number
-  marker: Phaser.GameObjects.Text
-  statusLabel: Phaser.GameObjects.Text
-  lastUsedAt: number
+  type: SourceType;
+  x: number;
+  y: number;
+  marker: Phaser.GameObjects.Text;
+  statusLabel: Phaser.GameObjects.Text;
+  lastUsedAt: number;
 }
 
 /**
@@ -47,143 +64,148 @@ interface Source {
  * Sources are placed based on map object-layer POIs.
  */
 export class FoodSourceManager {
-  private scene: Phaser.Scene
-  private sources: Source[] = []
-  private floatingTexts: Phaser.GameObjects.Text[] = []
+  private scene: Phaser.Scene;
+  private sources: Source[] = [];
+  private floatingTexts: Phaser.GameObjects.Text[] = [];
 
   constructor(scene: Phaser.Scene) {
-    this.scene = scene
+    this.scene = scene;
   }
 
   /** Register a source at a world position. */
   addSource(type: SourceType, worldX: number, worldY: number): void {
-    const def = DEFS[type]
+    const def = DEFS[type];
 
-    const marker = this.scene.add.text(worldX, worldY, def.symbol, {
-      fontSize: type === 'bugs' ? '8px' : '12px',
-      color: def.symbolColor,
-      stroke: '#000000',
-      strokeThickness: 1,
-    }).setOrigin(0.5).setDepth(2)
+    const marker = this.scene.add
+      .text(worldX, worldY, def.symbol, {
+        fontSize: type === "bugs" ? "8px" : "12px",
+        color: def.symbolColor,
+        stroke: "#000000",
+        strokeThickness: 1,
+      })
+      .setOrigin(0.5)
+      .setDepth(2);
 
-    const statusLabel = this.scene.add.text(worldX, worldY + 14, '', {
-      fontSize: '7px',
-      color: '#aaaaaa',
-      stroke: '#000000',
-      strokeThickness: 1,
-    }).setOrigin(0.5, 0).setDepth(2)
+    const statusLabel = this.scene.add
+      .text(worldX, worldY + 14, "", {
+        fontSize: "7px",
+        color: "#aaaaaa",
+        stroke: "#000000",
+        strokeThickness: 1,
+      })
+      .setOrigin(0.5, 0)
+      .setDepth(2);
 
     this.sources.push({
-      type, x: worldX, y: worldY, marker, statusLabel,
+      type,
+      x: worldX,
+      y: worldY,
+      marker,
+      statusLabel,
       lastUsedAt: -Infinity,
-    })
+    });
   }
 
   /** Scatter bug sources on grass tiles. */
   addBugSpawns(map: Phaser.Tilemaps.Tilemap, count: number): void {
-    const mapW = map.widthInPixels
-    const mapH = map.heightInPixels
-    let placed = 0
-    let attempts = 0
+    const mapW = map.widthInPixels;
+    const mapH = map.heightInPixels;
+    let placed = 0;
+    let attempts = 0;
     while (placed < count && attempts < count * 10) {
-      attempts++
-      const x = Phaser.Math.Between(100, mapW - 100)
-      const y = Phaser.Math.Between(100, mapH - 100)
-      this.addSource('bugs', x, y)
-      placed++
+      attempts++;
+      const x = Phaser.Math.Between(100, mapW - 100);
+      const y = Phaser.Math.Between(100, mapH - 100);
+      this.addSource("bugs", x, y);
+      placed++;
     }
   }
 
   /** Try to interact with the nearest source in range. Returns true if used. */
-  tryInteract(
-    playerX: number,
-    playerY: number,
-    stats: StatsSystem,
-    currentPhase: TimeOfDay,
-    now: number,
-  ): boolean {
-    let nearest: Source | null = null
-    let nearestDist = Infinity
+  tryInteract(playerX: number, playerY: number, stats: StatsSystem, currentPhase: TimeOfDay, now: number): boolean {
+    let nearest: Source | null = null;
+    let nearestDist = Infinity;
 
     for (const src of this.sources) {
-      const dist = Phaser.Math.Distance.Between(playerX, playerY, src.x, src.y)
+      const dist = Phaser.Math.Distance.Between(playerX, playerY, src.x, src.y);
       if (dist < INTERACT_RANGE && dist < nearestDist) {
-        nearest = src
-        nearestDist = dist
+        nearest = src;
+        nearestDist = dist;
       }
     }
 
-    if (!nearest) return false
+    if (!nearest) return false;
 
-    const def = DEFS[nearest.type]
+    const def = DEFS[nearest.type];
 
-    if (def.activePhases && !def.activePhases.includes(currentPhase)) return false
+    if (def.activePhases && !def.activePhases.includes(currentPhase)) return false;
 
-    if (def.cooldownMs > 0 && (now - nearest.lastUsedAt) < def.cooldownMs) return false
+    if (def.cooldownMs > 0 && now - nearest.lastUsedAt < def.cooldownMs) return false;
 
-    stats.restore(def.stat, def.amount)
-    nearest.lastUsedAt = now
+    stats.restore(def.stat, def.amount);
+    nearest.lastUsedAt = now;
 
-    this.showFloatingText(
-      `+${def.amount}`,
-      nearest.x,
-      nearest.y - 16,
-      def.symbolColor,
-    )
+    this.showFloatingText(`+${def.amount}`, nearest.x, nearest.y - 16, def.symbolColor);
 
-    return true
+    return true;
   }
 
   /** Update markers to reflect availability. */
   update(currentPhase: TimeOfDay, now: number): void {
     for (const src of this.sources) {
-      const def = DEFS[src.type]
+      const def = DEFS[src.type];
 
-      const phaseOk = !def.activePhases || def.activePhases.includes(currentPhase)
-      const cooldownOk = def.cooldownMs <= 0 || (now - src.lastUsedAt) >= def.cooldownMs
+      const phaseOk = !def.activePhases || def.activePhases.includes(currentPhase);
+      const cooldownOk = def.cooldownMs <= 0 || now - src.lastUsedAt >= def.cooldownMs;
 
       if (!phaseOk) {
-        src.marker.setAlpha(0.3)
-        src.statusLabel.setText('inactive')
+        src.marker.setAlpha(0.3);
+        src.statusLabel.setText("inactive");
       } else if (!cooldownOk) {
-        src.marker.setAlpha(0.5)
-        const remaining = Math.ceil((def.cooldownMs - (now - src.lastUsedAt)) / 1000)
-        src.statusLabel.setText(`${remaining}s`)
+        src.marker.setAlpha(0.5);
+        const remaining = Math.ceil((def.cooldownMs - (now - src.lastUsedAt)) / 1000);
+        src.statusLabel.setText(`${remaining}s`);
       } else {
-        src.marker.setAlpha(1)
-        src.statusLabel.setText('')
+        src.marker.setAlpha(1);
+        src.statusLabel.setText("");
       }
     }
 
     // Clean up expired floating texts
-    this.floatingTexts = this.floatingTexts.filter(t => t.active)
+    this.floatingTexts = this.floatingTexts.filter((t) => t.active);
   }
 
   private showFloatingText(text: string, x: number, y: number, color: string): void {
-    const ft = this.scene.add.text(x, y, text, {
-      fontSize: '10px',
-      color,
-      stroke: '#000000',
-      strokeThickness: 2,
-      fontStyle: 'bold',
-    }).setOrigin(0.5).setDepth(100)
+    const ft = this.scene.add
+      .text(x, y, text, {
+        fontSize: "10px",
+        color,
+        stroke: "#000000",
+        strokeThickness: 2,
+        fontStyle: "bold",
+      })
+      .setOrigin(0.5)
+      .setDepth(100);
 
-    this.floatingTexts.push(ft)
+    this.floatingTexts.push(ft);
 
     this.scene.tweens.add({
       targets: ft,
       y: y - 30,
       alpha: 0,
       duration: 1200,
-      ease: 'Cubic.easeOut',
+      ease: "Cubic.easeOut",
       onComplete: () => ft.destroy(),
-    })
+    });
   }
 
   /** Return all source positions for save/serialisation. */
   getSourceStates(): Array<{ type: SourceType; x: number; y: number; lastUsedAt: number }> {
-    return this.sources.map(s => ({
-      type: s.type, x: s.x, y: s.y, lastUsedAt: s.lastUsedAt,
-    }))
+    return this.sources.map((s) => ({
+      type: s.type,
+      x: s.x,
+      y: s.y,
+      lastUsedAt: s.lastUsedAt,
+    }));
   }
 }
