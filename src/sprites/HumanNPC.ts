@@ -17,7 +17,8 @@ export interface HumanConfig {
 interface SpriteProfile {
   key: string;
   cols: number;
-  frameSize: number;
+  frameW: number;
+  frameH: number;
   bodyW: number;
   bodyH: number;
   anims: {
@@ -32,7 +33,8 @@ interface SpriteProfile {
 const GUARD_PROFILE: SpriteProfile = {
   key: "guard",
   cols: 8,
-  frameSize: 64,
+  frameW: 64,
+  frameH: 64,
   bodyW: 18,
   bodyH: 16,
   anims: {
@@ -47,7 +49,8 @@ const GUARD_PROFILE: SpriteProfile = {
 const DOGWALKER_PROFILE: SpriteProfile = {
   key: "dogwalker",
   cols: 7,
-  frameSize: 50,
+  frameW: 50,
+  frameH: 45,
   bodyW: 18,
   bodyH: 16,
   anims: {
@@ -99,8 +102,8 @@ export class HumanNPC extends Phaser.Physics.Arcade.Sprite {
     const body = this.body as Phaser.Physics.Arcade.Body;
     body.setSize(prof.bodyW, prof.bodyH);
     body.setOffset(
-      (prof.frameSize - prof.bodyW) / 2,
-      prof.frameSize - prof.bodyH,
+      (prof.frameW - prof.bodyW) / 2,
+      prof.frameH - prof.bodyH,
     );
 
     this.createAnimations(scene);
