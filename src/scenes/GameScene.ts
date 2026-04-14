@@ -53,8 +53,8 @@ export class GameScene extends Phaser.Scene {
     this.blacky = new NPCCat(this, {
       name: 'Blacky',
       spriteKey: 'blacky',
-      x: blackyPoint?.x ?? 832,
-      y: blackyPoint?.y ?? 416,
+      x: blackyPoint?.x ?? 1024,
+      y: blackyPoint?.y ?? 544,
     })
 
     // Dialogue system
