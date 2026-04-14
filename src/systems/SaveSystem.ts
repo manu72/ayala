@@ -1,5 +1,6 @@
 import type { CatStats } from './StatsSystem'
 import type { TimeOfDay } from './DayNightCycle'
+import type { SourceType } from './FoodSource'
 
 const STORAGE_KEY = 'ayala_save'
 
@@ -10,6 +11,7 @@ export interface SaveData {
   timeOfDay: TimeOfDay
   gameTimeMs: number
   variables: Record<string, unknown>
+  sourceStates?: Array<{ type: SourceType; x: number; y: number; lastUsedAt: number }>
 }
 
 const CURRENT_VERSION = 1
@@ -17,6 +19,14 @@ const CURRENT_VERSION = 1
 const TRACKED_KEYS = ['MET_BLACKY', 'TIGER_TALKS', 'JAYCO_TALKS', 'KNOWN_CATS'] as const
 
 const VALID_PHASES: ReadonlySet<string> = new Set(['dawn', 'day', 'evening', 'night'])
+const VALID_SOURCE_TYPES: ReadonlySet<string> = new Set([
+  'feeding_station',
+  'fountain',
+  'restaurant_scraps',
+  'water_bowl',
+  'bugs',
+  'safe_sleep',
+])
 
 function isValidSave(data: unknown): data is SaveData {
   if (typeof data !== 'object' || data === null) return false
@@ -30,6 +40,17 @@ function isValidSave(data: unknown): data is SaveData {
 
   const stats = d.stats as Record<string, unknown> | undefined
   if (!stats || typeof stats.hunger !== 'number' || typeof stats.thirst !== 'number' || typeof stats.energy !== 'number') return false
+
+  const sourceStates = d.sourceStates as unknown
+  if (sourceStates !== undefined) {
+    if (!Array.isArray(sourceStates)) return false
+    for (const entry of sourceStates) {
+      if (typeof entry !== 'object' || entry === null) return false
+      const s = entry as Record<string, unknown>
+      if (typeof s.type !== 'string' || !VALID_SOURCE_TYPES.has(s.type)) return false
+      if (typeof s.x !== 'number' || typeof s.y !== 'number' || typeof s.lastUsedAt !== 'number') return false
+    }
+  }
 
   return true
 }
@@ -46,6 +67,7 @@ export const SaveSystem = {
     timeOfDay: TimeOfDay,
     gameTimeMs: number,
     registry: Phaser.Data.DataManager,
+    sourceStates?: Array<{ type: SourceType; x: number; y: number; lastUsedAt: number }>,
   ): boolean {
     const variables: Record<string, unknown> = {}
     for (const key of TRACKED_KEYS) {
@@ -60,6 +82,7 @@ export const SaveSystem = {
       timeOfDay,
       gameTimeMs,
       variables,
+      sourceStates,
     }
 
     try {

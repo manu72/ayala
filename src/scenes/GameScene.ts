@@ -5,6 +5,7 @@ import { GuardNPC } from "../sprites/GuardNPC";
 import { DayNightCycle } from "../systems/DayNightCycle";
 import { StatsSystem } from "../systems/StatsSystem";
 import { FoodSourceManager } from "../systems/FoodSource";
+import type { SourceType } from "../systems/FoodSource";
 import { ThreatIndicator } from "../systems/ThreatIndicator";
 import { SaveSystem } from "../systems/SaveSystem";
 import type { HUDScene } from "./HUDScene";
@@ -97,6 +98,7 @@ export class GameScene extends Phaser.Scene {
       this.registry.remove(key);
     }
 
+    let savedSourceStates: Array<{ type: SourceType; x: number; y: number; lastUsedAt: number }> | undefined;
     if (data?.loadSave) {
       const save = SaveSystem.load();
       if (save) {
@@ -104,6 +106,7 @@ export class GameScene extends Phaser.Scene {
         spawnY = save.playerPosition.y;
         this.stats.fromJSON(save.stats);
         this.dayNight.restore(save.timeOfDay, save.gameTimeMs);
+        savedSourceStates = save.sourceStates;
         for (const [key, val] of Object.entries(save.variables)) {
           this.registry.set(key, val);
         }
@@ -133,7 +136,11 @@ export class GameScene extends Phaser.Scene {
     this.guardIndicator = new ThreatIndicator(this, this.guard, "Guard", "dangerous", true);
 
     this.foodSources = new FoodSourceManager(this);
-    this.placeFoodSources();
+    if (savedSourceStates && savedSourceStates.length > 0) {
+      this.foodSources.restoreFromStates(savedSourceStates);
+    } else {
+      this.placeFoodSources();
+    }
 
     if (this.input.keyboard) {
       this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
@@ -316,6 +323,8 @@ export class GameScene extends Phaser.Scene {
   resumeGame(): void {
     this.isPaused = false;
     this.physics.resume();
+    const hud = this.scene.get("HUDScene") as HUDScene | undefined;
+    hud?.hidePauseMenu?.();
   }
 
   quitToTitle(): void {
@@ -339,6 +348,7 @@ export class GameScene extends Phaser.Scene {
       this.dayNight.currentPhase,
       this.dayNight.totalGameTimeMs,
       this.registry,
+      this.foodSources.getSourceStates(),
     );
     if (ok) {
       const hud = this.scene.get("HUDScene") as HUDScene | undefined;
@@ -431,18 +441,17 @@ export class GameScene extends Phaser.Scene {
 
   private placeFoodSources(): void {
     const poi = (name: string) => this.map.findObject("spawns", (o) => o.name === name);
-    const sources: Array<[string, string]> = [
+    const sources: Array<[string, SourceType]> = [
       ["poi_feeding_station_1", "feeding_station"],
       ["poi_feeding_station_2", "feeding_station"],
       ["poi_fountain", "fountain"],
       ["poi_water_bowl_1", "water_bowl"],
       ["poi_water_bowl_2", "water_bowl"],
       ["poi_restaurant_scraps", "restaurant_scraps"],
-      ["poi_safe_sleep", "safe_sleep"],
     ];
     for (const [poiName, type] of sources) {
       const obj = poi(poiName);
-      if (obj) this.foodSources.addSource(type as any, obj.x ?? 0, obj.y ?? 0);
+      if (obj) this.foodSources.addSource(type, obj.x ?? 0, obj.y ?? 0);
     }
     this.foodSources.addBugSpawns(this.map, 15);
   }

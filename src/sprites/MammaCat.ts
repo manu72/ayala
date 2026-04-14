@@ -4,6 +4,7 @@ const BASE_SPEED = 120;
 const RUN_SPEED = 240;
 const CROUCH_SPEED = 48;
 const WAKE_DELAY_MS = 500;
+const CROUCH_TAP_THRESHOLD_MS = 180;
 
 const SPRITE_KEY = "mammacat";
 const COLS = 8;
@@ -27,6 +28,8 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
   playerState: PlayerState = "normal";
   private lastDirection: "down" | "left" | "right" | "up" = "down";
   private crouchLatched = false;
+  private crouchKeyDownTime = 0;
+  private crouchHoldActive = false;
 
   /** Timer for the brief wake-up delay. */
   private wakeTimer = 0;
@@ -62,6 +65,8 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
       this.cursors = scene.input.keyboard.createCursorKeys();
       this.shiftKey = scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT);
       this.crouchKey = scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.C);
+      this.crouchKey.on("down", this.handleCrouchKeyDown, this);
+      this.crouchKey.on("up", this.handleCrouchKeyUp, this);
       this.wasd = {
         up: scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.W),
         down: scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S),
@@ -85,6 +90,8 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
   enterRest(): void {
     this.playerState = "resting";
     this.crouchLatched = false;
+    this.crouchKeyDownTime = 0;
+    this.crouchHoldActive = false;
     this.setVelocity(0);
     this.anims.play(`${SPRITE_KEY}-rest`, true);
     this.setAlpha(0.8);
@@ -130,13 +137,16 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
     const shift = this.shiftKey?.isDown ?? false;
     const crouch = this.crouchKey?.isDown ?? false;
 
-    // Support both hold-to-crouch and tap-to-toggle crouch for easier control ergonomics.
-    if (this.crouchKey && Phaser.Input.Keyboard.JustDown(this.crouchKey)) {
-      this.crouchLatched = !this.crouchLatched;
+    // Tap C toggles crouch latch. Holding C past threshold acts as temporary crouch.
+    if (crouch && this.crouchKeyDownTime > 0) {
+      const heldMs = this.scene.time.now - this.crouchKeyDownTime;
+      this.crouchHoldActive = heldMs >= CROUCH_TAP_THRESHOLD_MS;
+    } else {
+      this.crouchHoldActive = false;
     }
 
     // Crouch/hide uses the dedicated C key.
-    const wantsCrouch = crouch || this.crouchLatched;
+    const wantsCrouch = this.crouchLatched || this.crouchHoldActive;
     // Run: Shift + any direction (but not crouching)
     const wantsRun = shift && !wantsCrouch && canRun;
 
@@ -222,6 +232,20 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
     );
   }
 
+  private handleCrouchKeyDown(): void {
+    this.crouchKeyDownTime = this.scene.time.now;
+    this.crouchHoldActive = false;
+  }
+
+  private handleCrouchKeyUp(): void {
+    const heldMs = this.crouchKeyDownTime > 0 ? this.scene.time.now - this.crouchKeyDownTime : 0;
+    if (heldMs < CROUCH_TAP_THRESHOLD_MS) {
+      this.crouchLatched = !this.crouchLatched;
+    }
+    this.crouchKeyDownTime = 0;
+    this.crouchHoldActive = false;
+  }
+
   private createAnimations(scene: Phaser.Scene): void {
     if (scene.anims.exists(`${SPRITE_KEY}-sit-down`)) return;
 
@@ -279,6 +303,10 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
   }
 
   destroy(fromScene?: boolean): void {
+    if (this.crouchKey) {
+      this.crouchKey.off("down", this.handleCrouchKeyDown, this);
+      this.crouchKey.off("up", this.handleCrouchKeyUp, this);
+    }
     this.nameLabel.destroy();
     super.destroy(fromScene);
   }

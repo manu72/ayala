@@ -134,6 +134,8 @@ export class FoodSourceManager {
 
     for (const src of this.sources) {
       const def = DEFS[src.type];
+      // Safe sleep should only restore energy through hold-to-rest (Z), not Space interact.
+      if (src.type === "safe_sleep") continue;
       if (def.activePhases && !def.activePhases.includes(currentPhase)) continue;
       if (def.cooldownMs > 0 && now - src.lastUsedAt < def.cooldownMs) continue;
 
@@ -147,10 +149,10 @@ export class FoodSourceManager {
     if (!nearest) return false;
 
     const def = DEFS[nearest.type];
-    stats.restore(def.stat, def.amount);
+    const actual = stats.restore(def.stat, def.amount);
     nearest.lastUsedAt = now;
 
-    this.showFloatingText(`+${def.amount}`, nearest.x, nearest.y - 16, def.symbolColor);
+    this.showFloatingText(`+${Math.round(actual)}`, nearest.x, nearest.y - 16, def.symbolColor);
 
     return true;
   }
@@ -212,5 +214,22 @@ export class FoodSourceManager {
       y: s.y,
       lastUsedAt: s.lastUsedAt,
     }));
+  }
+
+  /** Rebuild sources from saved state (positions + cooldown timestamps). */
+  restoreFromStates(states: Array<{ type: SourceType; x: number; y: number; lastUsedAt: number }>): void {
+    for (const s of this.sources) {
+      s.marker.destroy();
+      s.statusLabel.destroy();
+    }
+    this.sources = [];
+
+    for (const state of states) {
+      this.addSource(state.type, state.x, state.y);
+      const src = this.sources[this.sources.length - 1];
+      if (src) {
+        src.lastUsedAt = Number.isFinite(state.lastUsedAt) ? state.lastUsedAt : -DEFS[state.type].cooldownMs;
+      }
+    }
   }
 }

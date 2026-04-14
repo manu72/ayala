@@ -191,7 +191,7 @@ export class NPCCat extends Phaser.Physics.Arcade.Sprite {
   private transitionFromIdle(): void {
     const weights = BEHAVIOUR_WEIGHTS[this.currentPhase];
     const next = this.weightedPick(weights);
-    this.setAlpha(1);
+    // this.setAlpha(1);
     this.enterState(next as CatState);
   }
 

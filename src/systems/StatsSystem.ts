@@ -122,9 +122,12 @@ export class StatsSystem {
     }
   }
 
-  /** Apply a stat change (food, water, rest). Clamps 0-100. */
-  restore(stat: keyof CatStats, amount: number): void {
-    this[stat] = Math.min(100, Math.max(0, this[stat] + amount));
+  /** Apply a stat change (food, water, rest). Clamps 0-100 and returns actual delta applied. */
+  restore(stat: keyof CatStats, amount: number): number {
+    const before = this[stat];
+    const after = Math.min(100, Math.max(0, before + amount));
+    this[stat] = after;
+    return after - before;
   }
 
   /** Reset collapse state after teleporting to safe spot. */
