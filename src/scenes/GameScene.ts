@@ -51,6 +51,7 @@ export class GameScene extends Phaser.Scene {
   private escapeKey!: Phaser.Input.Keyboard.Key;
   private journalKey!: Phaser.Input.Keyboard.Key;
   private journalToggleLocked = false;
+  journalOpenedFromPause = false;
   private objectsLayer: Phaser.Tilemaps.TilemapLayer | null = null;
   private overheadLayer!: Phaser.Tilemaps.TilemapLayer | null;
   private map!: Phaser.Tilemaps.Tilemap;
@@ -247,7 +248,13 @@ export class GameScene extends Phaser.Scene {
       this.journalToggleLocked = true;
       if (this.scene.isActive("JournalScene")) {
         this.scene.stop("JournalScene");
-        this.resumeGame();
+        if (this.journalOpenedFromPause) {
+          this.journalOpenedFromPause = false;
+          const hud = this.scene.get("HUDScene") as HUDScene | undefined;
+          hud?.showPauseMenu?.();
+        } else {
+          this.resumeGame();
+        }
       } else if (!this.isPaused) {
         this.openJournal();
       }
@@ -461,6 +468,8 @@ export class GameScene extends Phaser.Scene {
   // ──────────── Chapters ────────────
 
   private checkChapterProgression(): void {
+    if (this.dialogue.isActive) return;
+
     const namedKnown = new Set(
       [...this.knownCats].filter((name) => !name.startsWith("Colony Cat")),
     );

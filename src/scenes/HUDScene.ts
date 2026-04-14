@@ -248,11 +248,11 @@ export class HUDScene extends Phaser.Scene {
     const journalBtn = this.createMenuButton(0, 6, "Colony Journal", () => {
       this.pauseContainer.setVisible(false);
       const gameScene = this.scene.get("GameScene") as GameScene;
-      gameScene.resumeGame();
       if (!this.scene.isActive("JournalScene")) {
         gameScene.isPaused = true;
+        gameScene.journalOpenedFromPause = true;
         gameScene.physics.pause();
-        this.scene.launch("JournalScene");
+        this.scene.launch("JournalScene", { fromPauseMenu: true });
       }
     });
 

@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import type { GameScene } from "./GameScene";
+import type { HUDScene } from "./HUDScene";
 
 const FONT_FAMILY = "Arial, Helvetica, sans-serif";
 const BG_COLOR = 0x111118;
@@ -34,9 +35,14 @@ export class JournalScene extends Phaser.Scene {
   private scrollY = 0;
   private contentHeight = 0;
   private visibleHeight = 0;
+  private openedFromPauseMenu = false;
 
   constructor() {
     super({ key: "JournalScene" });
+  }
+
+  init(data?: { fromPauseMenu?: boolean }): void {
+    this.openedFromPauseMenu = data?.fromPauseMenu === true;
   }
 
   create(): void {
@@ -170,7 +176,15 @@ export class JournalScene extends Phaser.Scene {
   private closeJournal(): void {
     this.scene.stop("JournalScene");
     const gameScene = this.scene.get("GameScene") as GameScene;
-    gameScene?.resumeGame();
+    if (!gameScene) return;
+
+    if (this.openedFromPauseMenu) {
+      gameScene.journalOpenedFromPause = false;
+      const hud = this.scene.get("HUDScene") as HUDScene | undefined;
+      hud?.showPauseMenu?.();
+    } else {
+      gameScene.resumeGame();
+    }
   }
 
   private gatherEntries(): JournalEntry[] {
