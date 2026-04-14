@@ -5,6 +5,7 @@ import { DayNightCycle } from '../systems/DayNightCycle'
 import { DialogueSystem } from '../systems/DialogueSystem'
 import { StatsSystem } from '../systems/StatsSystem'
 import { StatsHUD } from '../systems/StatsHUD'
+import { FoodSourceManager } from '../systems/FoodSource'
 
 const INTERACTION_DISTANCE = 50
 const TILE_SIZE = 32
@@ -17,7 +18,9 @@ export class GameScene extends Phaser.Scene {
   private blacky!: NPCCat
   private dialogue!: DialogueSystem
   private hud!: StatsHUD
+  private foodSources!: FoodSourceManager
   private actionKey!: Phaser.Input.Keyboard.Key
+  private spaceKey!: Phaser.Input.Keyboard.Key
   private overheadLayer!: Phaser.Tilemaps.TilemapLayer | null
   private map!: Phaser.Tilemaps.Tilemap
 
@@ -67,8 +70,13 @@ export class GameScene extends Phaser.Scene {
     this.dayNight = new DayNightCycle(this)
     this.hud = new StatsHUD(this)
 
+    // Food & water sources
+    this.foodSources = new FoodSourceManager(this)
+    this.placeFoodSources()
+
     if (this.input.keyboard) {
       this.actionKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER)
+      this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE)
     }
 
     // Camera
@@ -79,7 +87,7 @@ export class GameScene extends Phaser.Scene {
     this.cameras.main.setDeadzone(50, 50)
   }
 
-  update(_time: number, delta: number): void {
+  update(time: number, delta: number): void {
     const deltaSec = delta / 1000
 
     this.dayNight.update(delta)
@@ -97,7 +105,7 @@ export class GameScene extends Phaser.Scene {
       this.player.update(this.stats.canRun)
     }
 
-    // Shade/shelter detection (overhead layer has tree canopy tiles)
+    // Shade/shelter detection
     const inShade = this.isUnderCanopy(this.player.x, this.player.y)
     const inShelter = this.isNearShelter(this.player.x, this.player.y)
 
@@ -111,13 +119,44 @@ export class GameScene extends Phaser.Scene {
     )
 
     this.hud.update(this.stats)
+    this.foodSources.update(this.dayNight.currentPhase, time)
 
-    if (this.actionKey?.isDown && !this.dialogue.isActive) {
-      this.tryInteract()
+    // Action key: try food source first, then NPC interaction
+    const actionDown = this.actionKey?.isDown || this.spaceKey?.isDown
+    if (actionDown && !this.dialogue.isActive) {
+      const usedSource = this.foodSources.tryInteract(
+        this.player.x, this.player.y,
+        this.stats, this.dayNight.currentPhase, time,
+      )
+      if (!usedSource) {
+        this.tryInteract()
+      }
     }
   }
 
-  /** Check if a world position is under a tree canopy (overhead layer has a non-empty tile). */
+  private placeFoodSources(): void {
+    const poi = (name: string) => this.map.findObject('spawns', o => o.name === name)
+
+    const feedingStation1 = poi('poi_feeding_station_1')
+    const feedingStation2 = poi('poi_feeding_station_2')
+    const fountain = poi('poi_fountain')
+    const waterBowl1 = poi('poi_water_bowl_1')
+    const waterBowl2 = poi('poi_water_bowl_2')
+    const restaurantScraps = poi('poi_restaurant_scraps')
+    const safeSleep = poi('poi_safe_sleep')
+
+    if (feedingStation1) this.foodSources.addSource('feeding_station', feedingStation1.x ?? 0, feedingStation1.y ?? 0)
+    if (feedingStation2) this.foodSources.addSource('feeding_station', feedingStation2.x ?? 0, feedingStation2.y ?? 0)
+    if (fountain) this.foodSources.addSource('fountain', fountain.x ?? 0, fountain.y ?? 0)
+    if (waterBowl1) this.foodSources.addSource('water_bowl', waterBowl1.x ?? 0, waterBowl1.y ?? 0)
+    if (waterBowl2) this.foodSources.addSource('water_bowl', waterBowl2.x ?? 0, waterBowl2.y ?? 0)
+    if (restaurantScraps) this.foodSources.addSource('restaurant_scraps', restaurantScraps.x ?? 0, restaurantScraps.y ?? 0)
+    if (safeSleep) this.foodSources.addSource('safe_sleep', safeSleep.x ?? 0, safeSleep.y ?? 0)
+
+    // Scatter a handful of bug pickups across the gardens
+    this.foodSources.addBugSpawns(this.map, 15)
+  }
+
   private isUnderCanopy(worldX: number, worldY: number): boolean {
     if (!this.overheadLayer) return false
     const tileX = Math.floor(worldX / TILE_SIZE)
@@ -126,11 +165,11 @@ export class GameScene extends Phaser.Scene {
     return tile !== null
   }
 
-  /** Check if near a sheltered rest spot (specific map POIs). */
   private isNearShelter(worldX: number, worldY: number): boolean {
     const shelters = [
       this.map.findObject('spawns', o => o.name === 'poi_pyramid_steps'),
       this.map.findObject('spawns', o => o.name === 'poi_starbucks'),
+      this.map.findObject('spawns', o => o.name === 'poi_safe_sleep'),
     ]
     return shelters.some(s => {
       if (!s) return false
