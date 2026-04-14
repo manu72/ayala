@@ -33,14 +33,14 @@ Run speed: ~2x walk speed (240 px/s).
 
 | Action | Keys |
 |--------|------|
-| Crouch / hide | C |
+| Crouch / hide | C (tap to toggle, or hold) |
 
 When crouching:
 - Mamma Cat's sprite changes to a low/crouched pose (ears flat, body low)
 - Movement speed is reduced to ~40% of walk speed
 - Mamma Cat is harder for threats to detect (reduced detection radius from snatchers, guards, dogs)
 - Only effective near cover (bushes, boulders, under stairs, tree trunks). If crouching in the open, detection radius is only slightly reduced.
-- Release C to stand back up
+- Tap C again (or release C if holding) to stand back up
 
 ### Interact
 

@@ -2,7 +2,7 @@
 
 **A 2D browser-based adventure game about a homeless cat finding love in the heart of Manila.**
 
-*For Camille -- and every cat who needs a forever home.*
+_For Camille -- and every cat who needs a forever home._
 
 ---
 
@@ -18,14 +18,14 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 
 ### Development Roadmap
 
-| Phase | Focus | Status |
-|-------|-------|--------|
-| 1. Foundation | Phaser 3 setup, ATG map, Mamma Cat movement, Blacky NPC, day/night cycle | Complete |
-| 1.5 Visual Polish | Camera zoom, textured tiles, animated sprites, map expansion, dense trees | Complete |
-| 2. Core Mechanics | Hunger/thirst/energy stats, food/water sources, NPC cats, threat indicators | Not started |
-| 3. Social & Story | Named NPC cats, body language animations, trust system, Chapters 1-3 | Not started |
-| 4. Camille & Endgame | Camille encounters, Chapters 4-6, snatchers, epilogue, save/load | Not started |
-| 5. Polish & Release | Playtesting, audio, PWA/offline, deployment | Not started |
+| Phase                | Focus                                                                       | Status      |
+| -------------------- | --------------------------------------------------------------------------- | ----------- |
+| 1. Foundation        | Phaser 3 setup, ATG map, Mamma Cat movement, Blacky NPC, day/night cycle    | Complete    |
+| 1.5 Visual Polish    | Camera zoom, textured tiles, animated sprites, map expansion, dense trees   | Complete    |
+| 2. Core Mechanics    | Hunger/thirst/energy stats, food/water sources, NPC cats, threat indicators | Not started |
+| 3. Social & Story    | Named NPC cats, body language animations, trust system, Chapters 1-3        | Not started |
+| 4. Camille & Endgame | Camille encounters, Chapters 4-6, snatchers, epilogue, save/load            | Not started |
+| 5. Polish & Release  | Playtesting, audio, PWA/offline, deployment                                 | Not started |
 
 ### What exists now
 
@@ -42,17 +42,17 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 
 ### Controls
 
-| Input | Action |
-|-------|--------|
-| Arrow keys / WASD | Move Mamma Cat |
-| Shift + direction | Run (2x speed, drains energy faster) |
-| C | Crouch / hide (slow, harder for threats to detect) |
-| Space (tap) | Interact -- context-sensitive: talk to nearby cat, eat food, drink water |
-| Space | Advance dialogue text |
-| Z (hold 2 seconds while stationary) | Rest / sleep -- restores energy over time |
-| Any movement key, Space, or Z | Wake up from rest |
-| Hold Tab | Look around -- camera zooms out to survey the area |
-| Escape | Pause menu (Save Game, Resume, Quit to Title) |
+| Input                               | Action                                                                   |
+| ----------------------------------- | ------------------------------------------------------------------------ |
+| Arrow keys / WASD                   | Move Mamma Cat                                                           |
+| Shift + direction                   | Run (2x speed, drains energy faster)                                     |
+| C (tap to toggle, or hold)          | Crouch / hide (slow, harder for threats to detect) [no animation yet]    |
+| Space (tap)                         | Interact -- context-sensitive: talk to nearby cat, eat food, drink water |
+| Space                               | Advance dialogue text                                                    |
+| Z (hold 2 seconds while stationary) | Rest / sleep -- restores energy over time                                |
+| Any movement key, Space, or Z       | Wake up from rest                                                        |
+| Hold Tab                            | Look around -- camera zooms out to survey the area                       |
+| Escape                              | Pause menu (Save Game, Resume, Quit to Title)                            |
 
 ### Tips
 
@@ -66,12 +66,12 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 
 ## Tech Stack
 
-| Technology | Version | Role |
-|------------|---------|------|
-| [Phaser 3](https://phaser.io) | 3.90.0 | WebGL/Canvas 2D game engine, Arcade physics |
-| [Vite](https://vitejs.dev) | 8.x | Build tooling, dev server, hot-reload |
-| [TypeScript](https://www.typescriptlang.org) | 6.x | Language (strict mode) |
-| [pngjs](https://github.com/lukeapage/pngjs) | 7.x | Dev-only procedural tileset and map generation |
+| Technology                                   | Version | Role                                           |
+| -------------------------------------------- | ------- | ---------------------------------------------- |
+| [Phaser 3](https://phaser.io)                | 3.90.0  | WebGL/Canvas 2D game engine, Arcade physics    |
+| [Vite](https://vitejs.dev)                   | 8.x     | Build tooling, dev server, hot-reload          |
+| [TypeScript](https://www.typescriptlang.org) | 6.x     | Language (strict mode)                         |
+| [pngjs](https://github.com/lukeapage/pngjs)  | 7.x     | Dev-only procedural tileset and map generation |
 
 Maps are generated programmatically via Node.js scripts (not via the Tiled GUI), exported as Tiled-compatible JSON consumed by Phaser's tilemap loader.
 
@@ -214,4 +214,4 @@ TBD
 
 ---
 
-*There are millions of cats like Mamma Cat. What can you do?*
+_There are millions of cats like Mamma Cat. What can you do?_

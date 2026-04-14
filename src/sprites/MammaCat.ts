@@ -26,6 +26,7 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
   isRunning = false;
   playerState: PlayerState = "normal";
   private lastDirection: "down" | "left" | "right" | "up" = "down";
+  private crouchLatched = false;
 
   /** Timer for the brief wake-up delay. */
   private wakeTimer = 0;
@@ -83,6 +84,7 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
   /** Enter the resting/sleep state. Called by GameScene after hold-to-rest completes. */
   enterRest(): void {
     this.playerState = "resting";
+    this.crouchLatched = false;
     this.setVelocity(0);
     this.anims.play(`${SPRITE_KEY}-rest`, true);
     this.setAlpha(0.8);
@@ -128,8 +130,13 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
     const shift = this.shiftKey?.isDown ?? false;
     const crouch = this.crouchKey?.isDown ?? false;
 
+    // Support both hold-to-crouch and tap-to-toggle crouch for easier control ergonomics.
+    if (this.crouchKey && Phaser.Input.Keyboard.JustDown(this.crouchKey)) {
+      this.crouchLatched = !this.crouchLatched;
+    }
+
     // Crouch/hide uses the dedicated C key.
-    const wantsCrouch = crouch;
+    const wantsCrouch = crouch || this.crouchLatched;
     // Run: Shift + any direction (but not crouching)
     const wantsRun = shift && !wantsCrouch && canRun;
 
@@ -183,7 +190,10 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
         const walkAnim = `${SPRITE_KEY}-walk`;
         this.anims.play(walkAnim, true);
         if (this.anims.currentAnim) {
-          this.anims.currentAnim.frameRate = wantsCrouch ? 4 : 8;
+          const frameRate = wantsCrouch ? 4 : 8;
+          this.anims.msPerFrame = 1000 / frameRate;
+        } else {
+          this.anims.play(`${SPRITE_KEY}-sit-${this.lastDirection}`, true);
         }
       }
     } else {

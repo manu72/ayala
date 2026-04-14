@@ -390,7 +390,7 @@ The game world is divided into interconnected zones that correspond to real area
 
 ### 7.1 Visual Style
 
-- Pixel art, top-down perspective
+- High quality pixel art, top-down perspective
 - Warm tropical palette: lush greens, warm greys for stone, deep browns for tree trunks, pops of color from flowers and art installations
 - Distinct visual identity for day vs. night (warm golden light vs. cool blue/purple with warm lamp pools)
 - Midday should feel oppressively bright with harsh shadows
