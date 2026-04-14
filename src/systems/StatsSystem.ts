@@ -141,11 +141,13 @@ export class StatsSystem {
     return { hunger: this.hunger, thirst: this.thirst, energy: this.energy };
   }
 
-  /** Restore from save. */
+  /** Restore from save. Clamps to valid range to guard against corrupt data. */
   fromJSON(data: CatStats): void {
-    this.hunger = data.hunger;
-    this.thirst = data.thirst;
-    this.energy = data.energy;
+    const clamp = (v: number, fallback = 100) =>
+      Number.isFinite(v) ? Math.min(100, Math.max(0, v)) : fallback;
+    this.hunger = clamp(data.hunger);
+    this.thirst = clamp(data.thirst);
+    this.energy = clamp(data.energy);
     this._collapsed = false;
     this.collapseTimer = 0;
   }
