@@ -7,12 +7,12 @@ import { StatsSystem } from "../systems/StatsSystem";
 import { FoodSourceManager } from "../systems/FoodSource";
 import { ThreatIndicator } from "../systems/ThreatIndicator";
 import { SaveSystem } from "../systems/SaveSystem";
-import type { HUDScene } from './HUDScene'
+import type { HUDScene } from "./HUDScene";
+import { REST_HOLD_MS } from "../config/constants";
 
 const INTERACTION_DISTANCE = 50;
 const LEARN_NAME_DISTANCE = 100;
 const TILE_SIZE = 32;
-import { REST_HOLD_MS } from "../config/constants";
 const DEFAULT_ZOOM = 2.5;
 const PEEK_ZOOM = 0.8;
 const ZOOM_DURATION = 500;
@@ -50,9 +50,9 @@ export class GameScene extends Phaser.Scene {
 
   /** Dialogue lives in HUDScene (1x zoom) so it's always visible. */
   private get dialogue(): { isActive: boolean; show: (lines: string[], onComplete?: () => void) => void } {
-    const hud = this.scene.get('HUDScene') as HUDScene | undefined
-    if (hud?.dialogue) return hud.dialogue
-    return { isActive: false, show: () => {} }
+    const hud = this.scene.get("HUDScene") as HUDScene | undefined;
+    if (hud?.dialogue) return hud.dialogue;
+    return { isActive: false, show: () => {} };
   }
 
   constructor() {
@@ -65,6 +65,8 @@ export class GameScene extends Phaser.Scene {
     this.restHoldActive = false;
     this.isPeeking = false;
     this.isPaused = false;
+    this.collapseRecovering = false;
+    this.collapseRecoveryTimer = 0;
 
     this.map = this.make.tilemap({ key: "atg" });
     const tileset = this.map.addTilesetImage("park-tiles", "park-tiles");
@@ -91,7 +93,7 @@ export class GameScene extends Phaser.Scene {
     this.dayNight = new DayNightCycle(this);
 
     // Clear story state from any prior session before restoring
-    for (const key of ['MET_BLACKY', 'TIGER_TALKS', 'JAYCO_TALKS', 'KNOWN_CATS']) {
+    for (const key of ["MET_BLACKY", "TIGER_TALKS", "JAYCO_TALKS", "KNOWN_CATS"]) {
       this.registry.remove(key);
     }
 
