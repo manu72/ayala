@@ -195,8 +195,10 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    // Interaction
-    const actionDown = this.actionKey?.isDown || this.spaceKey?.isDown
+    // Interaction — use JustDown to prevent same-frame re-trigger after dialogue closes
+    const actionDown =
+      (this.actionKey && Phaser.Input.Keyboard.JustDown(this.actionKey)) ||
+      (this.spaceKey && Phaser.Input.Keyboard.JustDown(this.spaceKey))
     if (actionDown && !this.dialogue.isActive) {
       const usedSource = this.foodSources.tryInteract(
         this.player.x, this.player.y,
