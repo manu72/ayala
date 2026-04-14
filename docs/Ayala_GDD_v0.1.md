@@ -316,18 +316,21 @@ The colony is not static. Throughout the game, cats arrive and leave, and the po
 
 The game world is divided into interconnected zones that correspond to real areas of ATG. In RPG JS terms, these could be individual maps stitched together via the World system, or a single large map with distinct regions.
 
-**Zone 1: Makati Ave Edge (Starting Zone)**
+**Zone 1: Makati Ave Edge (Starting Zone) Eastern Map Boundary**
 
 - Busy sidewalk, cars, pedestrian crossings
-- The Sto. Tomas corner where Mamma Cat is dumped
-- The entrance to the Ayala Triangle Walkways
-- The stepped/terraced facade of The Shops building (exterior, upper level)
-- High threat from traffic, noise, disorientation
+- Makati Ave is a busy multi-lane CBD roadway running largely North-South from the northern triangle apex intersection with Paseo de Roxas, south to the intersection with Ayala Avenue.
+- Makati Ave has 3 lanes each way (driving on the right in Manila) with a green median strip and refuge in the middle
+- The Sto. Tomas intersection where Mamma Cat is dumped on the sidewalk
+- Mamma cat is dumped from a car at the North-eastern entrance to the Ayala Triangle Walkways
+- This entrance is close to the stepped/terraced facade of The Shops building (exterior, upper level)
+- High threat from road traffic, pedestrians, noise, disorientation
 
-**Zone 2: Southeast Walkways & Blackbird Area**
+**Zone 2: Southeast Traversal Walkways & Blackbird Area**
 
 - Tree-lined paths leading into the gardens from Makati Ave
-- The historic Nielson Tower / Blackbird restaurant
+- The main path leads directly across in a straight line to Paseo de Roxas on the far western side
+- The historic Nielson Tower / Blackbird restaurant is back on Makati Ave on the South-Eastern border
 - Moderate tree cover, decorative plantings
 - Some colony cats, transitional territory
 
@@ -340,23 +343,28 @@ The game world is divided into interconnected zones that correspond to real area
 - Open lawn areas (dog zone)
 - Largest concentration of colony cats
 - Multiple sub-areas with different cat "cliques"
+- Walking from Makati Ave to Paseo de Roxas, East to West, mamma cat first passes the broad steps on her right (N) going up to the tower, then the concrete boxed gardens on her right (N) at the top of the descending steps to The Shops with Starbucks and a small underground shopping mall and access (to the North) to the northern underpass of Paseo de Roxas
+- on her left (S) are the central gardens
+- continuing westward mamma cat passes on her right (N) the large covered space where many cats in the colony live. This is a central feeding point with cover and shade and food and water.
+- Continuing westward she passes the large playground to her right (N) and the small open library to her left (S) where a small number of colony cats make their home
 
-**Zone 4: The Fountain & Exchange Plaza**
+**Zone 4: The Fountain & Exchange Plaza Southern Border close to Ayala Ave**
 
 - Tower One & Exchange Plaza with dramatic concrete canopy
 - The fountain (water source for cats)
 - Large stone-paved plaza (exposed, open)
-- Starbucks at Tower One mezzanine
 - Office worker lunch crowds (food opportunity, midday only)
 
 **Zone 5: Paseo de Roxas Edge & Underpass**
 
-- The northern boundary of the gardens along Paseo de Roxas
-- The underpass with escalator (Camille's entry point)
+- The north-western boundary of the gardens along Paseo de Roxas
+- Paseo de Roxas is a busy multi-lane CBD roadway with a green median strip and refuge in the middle
+- North-western underpass to the western side of Paseo de Roxas
+- The South-western underpass with escalator (Camille's entry point)
 - Blacky's territory (top of the escalator)
 - Street-level views of traffic and buildings across Paseo de Roxas
 
-**Zone 6: The Shops / Pyramid Steps (Mamma Cat's Home Territory)**
+**Zone 6: The Shops / Northern Pyramid Steps (Mamma Cat's Home Territory)**
 
 - The pyramid-shaped stepped structure
 - Stairs on either side leading down to underground level

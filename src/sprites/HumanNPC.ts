@@ -57,6 +57,8 @@ const DOGWALKER_PROFILE: SpriteProfile = {
   frameH: 45,
   bodyW: 18,
   bodyH: 16,
+  // `dogwalker.png` provides only side-facing walk rows (0 and 2),
+  // so vertical movement intentionally reuses those frames.
   anims: {
     walkRight: { row: 0, count: 7 },
     walkDown: { row: 0, count: 7 },
