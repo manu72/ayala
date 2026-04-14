@@ -14,19 +14,7 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 
 ## Project Status
 
-> **Phase 1.5 -- Visual Polish.** Refining the prototype into something that looks and feels like a real game.
-
-### What exists
-
-- Playable Phaser 3 game with 100x80 tile map of Ayala Triangle Gardens
-- Mamma Cat player character with animated walk/idle cycles
-- Blacky NPC with dialogue system at the Paseo de Roxas underpass
-- Day/night cycle with smooth phase transitions
-- Textured tileset with grass, stone paths, roads, buildings, water, and environmental objects
-- Camera zoom (2.5x) making Mamma Cat feel small in a large world
-- [Game Design Document v0.1](docs/Ayala_GDD_v0.1.md) -- comprehensive design covering story, mechanics, map zones, characters, art direction, and technical architecture
-- [Phase 1 Build Brief](docs/Phase1_Brief_Phaser3.md) -- foundation implementation plan
-- [Phase 1.5 Visual Polish Brief](docs/Phase1_5_Visual_Polish_Brief.md) -- visual refinement plan
+**Version 0.1.1** -- Phase 1 (Foundation) and Phase 1.5 (Visual Polish) are complete. The game is a playable prototype with movement, NPC interaction, a day/night cycle, and a textured tile map.
 
 ### Development Roadmap
 
@@ -39,14 +27,37 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 | 4. Camille & Endgame | Camille encounters, Chapters 4-6, snatchers, epilogue, save/load | Not started |
 | 5. Polish & Release | Playtesting, audio, PWA/offline, deployment | Not started |
 
+### What exists now
+
+- 100x80 tile map of Ayala Triangle Gardens with 7 distinct zones, roads, and landmarks
+- Mamma Cat player character with 4-directional walk and idle animations
+- Blacky NPC with dialogue (first-encounter and repeat interactions)
+- Day/night cycle (dawn, day, evening, night) with smooth colour transitions
+- Textured tileset with grass, stone paths, roads, buildings, water, trees, and environmental objects
+- Camera zoom (2.5x) making Mamma Cat feel small in a large world
+- Tree canopies on the overhead layer that render above the player
+- Production build to static files
+
+## How to Play
+
+| Input | Action |
+|-------|--------|
+| Arrow keys | Move Mamma Cat |
+| Enter | Interact with nearby NPC |
+| Space | Advance dialogue text |
+
+Walk around the Ayala Triangle Gardens. Approach Blacky (near the Paseo de Roxas underpass) and press Enter to talk. The day/night cycle advances automatically -- watch the phase label in the top-left corner.
+
 ## Tech Stack
 
-| Technology | Role |
-|------------|------|
-| [Phaser 3](https://phaser.io) | Game framework (WebGL/Canvas 2D game engine) |
-| [Vite](https://vitejs.dev) | Build tooling and hot-reload |
-| [TypeScript](https://www.typescriptlang.org) | Language |
-| [Tiled Map Editor](https://www.mapeditor.org) | Map creation (JSON export consumed by Phaser) |
+| Technology | Version | Role |
+|------------|---------|------|
+| [Phaser 3](https://phaser.io) | 3.90.0 | WebGL/Canvas 2D game engine, Arcade physics |
+| [Vite](https://vitejs.dev) | 8.x | Build tooling, dev server, hot-reload |
+| [TypeScript](https://www.typescriptlang.org) | 6.x | Language (strict mode) |
+| [pngjs](https://github.com/lukeapage/pngjs) | 7.x | Dev-only procedural tileset and map generation |
+
+Maps are generated programmatically via Node.js scripts (not via the Tiled GUI), exported as Tiled-compatible JSON consumed by Phaser's tilemap loader.
 
 ## Getting Started
 
@@ -64,7 +75,7 @@ npm install
 npm run dev
 ```
 
-Navigate to [localhost:5173](http://localhost:5173). You should see the game running.
+Vite will start a dev server (default port 5173, or the next available port). Open the URL shown in the terminal.
 
 ### Production Build
 
@@ -72,7 +83,7 @@ Navigate to [localhost:5173](http://localhost:5173). You should see the game run
 npm run build
 ```
 
-Output goes to `dist/` -- static files deployable to any host.
+Output goes to `dist/` -- static files deployable to any host (Netlify, Vercel, S3, etc.).
 
 ### Preview Production Build
 
@@ -80,28 +91,79 @@ Output goes to `dist/` -- static files deployable to any host.
 npm run preview
 ```
 
-## Architecture
+Serves the `dist/` folder locally to verify the production build before deploying.
+
+## Project Structure
 
 ```
-src/
-  main.ts                     # Entry point -- creates Phaser.Game
-  config/
-    GameConfig.ts             # Phaser game configuration
-  scenes/
-    BootScene.ts              # Asset loading
-    GameScene.ts              # Main gameplay scene
-  sprites/
-    MammaCat.ts               # Player character class
-    NPCCat.ts                 # NPC cat class (Blacky, etc.)
-  systems/
-    DayNightCycle.ts          # Day/night tint overlay
-    DialogueSystem.ts         # Text dialogue overlay
-public/
-  assets/
-    sprites/                  # Cat spritesheets
-    tilemaps/                 # Tiled JSON maps
-    tilesets/                 # Tileset images
+ayala/
+├── docs/                               # Design documents and briefs
+│   ├── Ayala_GDD_v0.1.md              #   Game Design Document (vision, story, mechanics, map)
+│   ├── Phase1_Brief_Phaser3.md        #   Phase 1 implementation plan
+│   └── Phase1_5_Visual_Polish_Brief.md #   Phase 1.5 visual polish plan
+│
+├── public/assets/                      # Static game assets (served as-is)
+│   ├── sprites/                       #   Cat spritesheets (32x32 frames)
+│   │   ├── fluffy.png                 #     Template spritesheet (256x320, 8x10 grid)
+│   │   ├── mammacat.png              #     Player character
+│   │   └── blacky.png                #     NPC character
+│   ├── tilemaps/
+│   │   └── atg.json                   #   100x80 Tiled JSON map (generated)
+│   └── tilesets/
+│       └── park-tiles.png             #   40-tile textured tileset (generated)
+│
+├── scripts/                            # Dev-time asset generators (Node.js)
+│   ├── generate-tileset.mjs           #   Generates park-tiles.png + tile-indices.json
+│   ├── generate-map.mjs              #   Generates atg.json from tile indices
+│   └── tile-indices.json              #   Named tile ID map (generated output)
+│
+├── src/                                # Game source (TypeScript)
+│   ├── main.ts                        #   Entry point — creates Phaser.Game
+│   ├── config/
+│   │   └── GameConfig.ts              #   Resolution, physics, scenes, scaling
+│   ├── scenes/
+│   │   ├── BootScene.ts               #   Asset preloading
+│   │   └── GameScene.ts               #   Tilemap, spawns, camera, input, game loop
+│   ├── sprites/
+│   │   ├── MammaCat.ts                #   Player character (movement, animations)
+│   │   └── NPCCat.ts                 #   NPC cat (idle animation, name label)
+│   └── systems/
+│       ├── DayNightCycle.ts           #   Time-of-day overlay with phase transitions
+│       └── DialogueSystem.ts          #   Bottom-screen text dialogue box
+│
+├── index.html                          # Vite entry page
+├── package.json                        # npm manifest
+├── tsconfig.json                       # TypeScript config (strict)
+├── vite.config.ts                      # Vite config (relative base, dist output)
+└── VERSION                             # Semver (0.1.1)
 ```
+
+## Asset Generation
+
+The tileset and map are generated procedurally, not drawn in a GUI. To regenerate after editing the scripts:
+
+```bash
+node scripts/generate-tileset.mjs   # Regenerates park-tiles.png and tile-indices.json
+node scripts/generate-map.mjs       # Regenerates atg.json (reads tile-indices.json)
+```
+
+Both scripts use `pngjs` (dev dependency) and write to `public/assets/`. The generated files are committed to git so the game runs without needing to regenerate them.
+
+Cat spritesheets (`mammacat.png`, `blacky.png`) are currently copies of `fluffy.png`, a hand-drawn template spritesheet. They will be replaced with unique art per cat in a future phase.
+
+## Architecture
+
+The game uses Phaser 3's scene system:
+
+1. **BootScene** preloads all assets (tileset image, tilemap JSON, cat spritesheets)
+2. **GameScene** is the main gameplay loop:
+   - Creates a 3-layer tilemap (ground, objects with collision, overhead canopy)
+   - Spawns player and NPC from named map objects
+   - Runs day/night cycle (4 phases, 60s each, smoothstep transitions)
+   - Handles keyboard input and NPC proximity-based interaction
+   - Camera follows player at 2.5x zoom with dead zone
+
+State is tracked via Phaser's registry (`MET_BLACKY` flag). No persistence or save/load exists yet.
 
 ## Game Design
 
@@ -111,9 +173,19 @@ Read the full document: [docs/Ayala_GDD_v0.1.md](docs/Ayala_GDD_v0.1.md)
 
 ## Target Platform
 
-- **Primary:** Browser-based (Chrome), playable offline via PWA
+- **Primary:** Browser-based (Chrome), playable offline via PWA (planned Phase 5)
 - **Ideal form factor:** iPad landscape
 - **Secondary:** iPhone landscape, desktop with keyboard
+
+## Known Limitations
+
+- No audio (planned Phase 5)
+- No save/load or persistence
+- No test suite
+- Both cat sprites use the same template spritesheet (fluffy.png) -- unique art per cat is a future task
+- Day/night phase duration (60s) is a testing placeholder
+- No CI/CD pipeline
+- No linter or formatter configured
 
 ## Developers
 
