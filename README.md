@@ -1,16 +1,16 @@
-# Ayala
+# Ayala Triangle
 
-**A 2D browser-based adventure game about a homeless cat finding love in the heart of Manila.**
+**A 2D browser-based adventure game about a homeless cat in Manila.**
 
-_For Camille -- and every cat who needs a forever home._
+_For Cam and Mamma Cat and every abandoned pet looking for their forever home._
 
 ---
 
 ## About
 
-Ayala is a cozy-but-real top-down adventure game set in the [Ayala Triangle Gardens](https://en.wikipedia.org/wiki/Ayala_Triangle_Gardens), a 2-hectare urban park in the Makati Central Business District, Metro Manila, Philippines. You play as **Mamma Cat**, a black-and-white former pet dumped in the gardens by her owners. Survive the colony of 40-50 homeless cats, find food and water, establish territory, build relationships, and ultimately find your human -- Camille -- who will adopt you and take you home.
+Ayala is a cozy-but-real top-down adventure game set in the [Ayala Triangle Gardens](https://en.wikipedia.org/wiki/Ayala_Triangle_Gardens), a 2-hectare urban park in the Makati Central Business District, Metro Manila, Philippines. You play as **Mamma Cat**, a black-and-white former pet dumped in the gardens by her owners. Survive the colony of 40-50 homeless cats, find food and water, establish territory, build relationships, and ultimately find your human who will adopt you and take you home.
 
-The game is inspired by the real cat colony at Ayala Triangle Gardens and the volunteers who care for them. Every cat in the colony is innocent. None are villains. By the time you finish playing, you should feel moved to think about what you can do for stray animals in the real world.
+The game is inspired by the real cat colony at Ayala Triangle Gardens and the volunteers who care for them. Every cat in the colony is innocent. None are villains. But there are shadowy creatures who come out at night...
 
 ## Project Status
 
@@ -18,14 +18,14 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 
 ### Development Roadmap
 
-| Phase              | Focus                                                                       | Status      |
-| ------------------ | --------------------------------------------------------------------------- | ----------- |
-| 1. Foundation      | Phaser 3 setup, ATG map, Mamma Cat movement, Blacky NPC, day/night cycle    | Complete    |
-| 1.5 Visual Polish  | Camera zoom, textured tiles, animated sprites, map expansion, dense trees   | Complete    |
-| 2. Core Mechanics  | Hunger/thirst/energy stats, food/water sources, guard NPC, save/load, HUD   | Complete    |
-| 3. Social & Story  | Named NPC cats, trust system, emotes, chapters 1-3, humans, dogs, journal   | Complete    |
-| 4. Camille & Endgame | Camille encounters, Chapters 4-6, snatchers, epilogue                     | Not started |
-| 5. Polish & Release  | Playtesting, audio, PWA/offline, deployment                               | Not started |
+| Phase               | Focus                                                                     | Status      |
+| ------------------- | ------------------------------------------------------------------------- | ----------- |
+| 1. Foundation       | Phaser 3 setup, ATG map, Mamma Cat movement, Blacky NPC, day/night cycle  | Complete    |
+| 1.5 Visual Polish   | Camera zoom, textured tiles, animated sprites, map expansion, dense trees | Complete    |
+| 2. Core Mechanics   | Hunger/thirst/energy stats, food/water sources, guard NPC, save/load, HUD | Complete    |
+| 3. Social & Story   | Named NPC cats, trust system, emotes, chapters 1-3, humans, dogs, journal | Complete    |
+| 4. Cam & Endgame    | Cam encounters, Chapters 4-6, snatchers, epilogue                         | Not started |
+| 5. Polish & Release | Playtesting, audio, PWA/offline, deployment                               | Not started |
 
 ### What exists now
 
