@@ -15,6 +15,8 @@ const BARK_COOLDOWN_MS = 8_000;
 export class DogNPC extends Phaser.GameObjects.Rectangle {
   private owner: HumanNPC;
   private lastBarkTime = -Infinity;
+  private isLunging = false;
+  private lungeTween: Phaser.Tweens.Tween | null = null;
 
   constructor(scene: Phaser.Scene, owner: HumanNPC) {
     const startX = owner.x;
@@ -35,6 +37,11 @@ export class DogNPC extends Phaser.GameObjects.Rectangle {
     scene: Phaser.Scene,
   ): void {
     if (!this.owner.visible) {
+      if (this.lungeTween) {
+        this.lungeTween.stop();
+        this.lungeTween = null;
+      }
+      this.isLunging = false;
       this.setVisible(false);
       return;
     }
@@ -42,7 +49,9 @@ export class DogNPC extends Phaser.GameObjects.Rectangle {
 
     // Follow owner with gentle weaving
     const offsetX = Math.sin(time * 0.002) * 16;
-    this.setPosition(this.owner.x + offsetX, this.owner.y + 24);
+    if (!this.isLunging) {
+      this.setPosition(this.owner.x + offsetX, this.owner.y + 24);
+    }
 
     // Check for Mamma Cat proximity
     const distToPlayer = Phaser.Math.Distance.Between(this.x, this.y, player.x, player.y);
@@ -59,6 +68,11 @@ export class DogNPC extends Phaser.GameObjects.Rectangle {
     scene: Phaser.Scene,
   ): void {
     this.lastBarkTime = time;
+    if (this.lungeTween) {
+      this.lungeTween.stop();
+      this.lungeTween = null;
+    }
+    this.isLunging = true;
 
     // Show bark text
     const text = scene.add
@@ -84,20 +98,19 @@ export class DogNPC extends Phaser.GameObjects.Rectangle {
     // Show alert emote on player
     emotes.show(scene, player, "alert");
 
-    // Lunge animation toward player then snap back
-    const origX = this.x;
-    const origY = this.y;
+    // Lunge animation toward player while leash-follow is paused
     const lungeX = this.x + (player.x - this.x) * 0.2;
     const lungeY = this.y + (player.y - this.y) * 0.2;
 
-    scene.tweens.add({
+    this.lungeTween = scene.tweens.add({
       targets: this,
       x: lungeX,
       y: lungeY,
       duration: 200,
       yoyo: true,
-      onYoyo: () => {
-        this.setPosition(origX, origY);
+      onComplete: () => {
+        this.isLunging = false;
+        this.lungeTween = null;
       },
     });
 
