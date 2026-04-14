@@ -3,12 +3,11 @@ import { MammaCat } from "../sprites/MammaCat";
 import { NPCCat } from "../sprites/NPCCat";
 import { GuardNPC } from "../sprites/GuardNPC";
 import { DayNightCycle } from "../systems/DayNightCycle";
-import { DialogueSystem } from "../systems/DialogueSystem";
 import { StatsSystem } from "../systems/StatsSystem";
 import { FoodSourceManager } from "../systems/FoodSource";
 import { ThreatIndicator } from "../systems/ThreatIndicator";
 import { SaveSystem } from "../systems/SaveSystem";
-import type { HUDScene } from "./HUDScene";
+import type { HUDScene } from './HUDScene'
 
 const INTERACTION_DISTANCE = 50;
 const LEARN_NAME_DISTANCE = 100;
@@ -37,7 +36,6 @@ export class GameScene extends Phaser.Scene {
   private npcs: NPCEntry[] = [];
   private guard!: GuardNPC;
   private guardIndicator!: ThreatIndicator;
-  private dialogue!: DialogueSystem;
   private foodSources!: FoodSourceManager;
   private spaceKey!: Phaser.Input.Keyboard.Key;
   private tabKey!: Phaser.Input.Keyboard.Key;
@@ -47,6 +45,13 @@ export class GameScene extends Phaser.Scene {
   private knownCats: Set<string> = new Set();
   private collapseRecoveryTimer = 0;
   private collapseRecovering = false;
+
+  /** Dialogue lives in HUDScene (1x zoom) so it's always visible. */
+  private get dialogue(): { isActive: boolean; show: (lines: string[], onComplete?: () => void) => void } {
+    const hud = this.scene.get('HUDScene') as HUDScene | undefined
+    if (hud?.dialogue) return hud.dialogue
+    return { isActive: false, show: () => {} }
+  }
 
   constructor() {
     super({ key: "GameScene" });
@@ -113,8 +118,6 @@ export class GameScene extends Phaser.Scene {
     this.guard = new GuardNPC(this, guardPoint?.x ?? 2336, guardPoint?.y ?? 1728);
     this.guard.setTarget(this.player);
     this.guardIndicator = new ThreatIndicator(this, this.guard, "Guard", "dangerous", true);
-
-    this.dialogue = new DialogueSystem(this);
 
     this.foodSources = new FoodSourceManager(this);
     this.placeFoodSources();

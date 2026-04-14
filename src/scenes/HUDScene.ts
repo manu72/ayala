@@ -1,5 +1,6 @@
 import Phaser from 'phaser'
 import type { GameScene } from './GameScene'
+import { DialogueSystem } from '../systems/DialogueSystem'
 
 const PANEL_X = 8
 const PANEL_Y = 8
@@ -28,6 +29,8 @@ const BARS: BarDef[] = [
 ]
 
 export class HUDScene extends Phaser.Scene {
+  dialogue!: DialogueSystem
+
   private fills: Phaser.GameObjects.Rectangle[] = []
   private barLabels: Phaser.GameObjects.Text[] = []
   private clockLabel!: Phaser.GameObjects.Text
@@ -129,6 +132,9 @@ export class HUDScene extends Phaser.Scene {
       stroke: '#000000',
       strokeThickness: 3,
     }).setOrigin(0.5).setVisible(false)
+
+    // ──── Dialogue ────
+    this.dialogue = new DialogueSystem(this)
 
     // ──── Pause menu ────
     this.pauseContainer = this.createPauseMenu(width, height)
