@@ -83,8 +83,20 @@ export class DayNightCycle {
   restore(phase: TimeOfDay, gameTimeMs: number): void {
     this.phase = phase;
     this.gameTimeMs = gameTimeMs;
-    this.phaseTimer = 0;
     this.transitioning = false;
+
+    // Compute intra-phase progress from gameTimeMs
+    const PHASE_ORDER: TimeOfDay[] = ['dawn', 'day', 'evening', 'night'];
+    const cycleOffset = gameTimeMs % FULL_CYCLE_MS;
+    let accumulated = 0;
+    for (const p of PHASE_ORDER) {
+      const dur = PHASES[p].durationMs;
+      if (p === phase) {
+        this.phaseTimer = Math.max(0, cycleOffset - accumulated);
+        break;
+      }
+      accumulated += dur;
+    }
 
     const cfg = PHASES[this.phase];
     this.overlay.setFillStyle(cfg.color, cfg.alpha);
@@ -115,7 +127,7 @@ export class DayNightCycle {
     }
 
     this.phaseTimer += delta;
-    if (this.phaseTimer >= PHASES[this.phase].durationMs) {
+    while (this.phaseTimer >= PHASES[this.phase].durationMs) {
       this.phaseTimer -= PHASES[this.phase].durationMs;
       this.cyclePhase();
     }

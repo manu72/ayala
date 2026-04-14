@@ -102,31 +102,40 @@ export class FoodSourceManager {
       y: worldY,
       marker,
       statusLabel,
-      lastUsedAt: -Infinity,
+      lastUsedAt: 0,
     });
   }
 
-  /** Scatter bug sources on grass tiles. */
+  /** Scatter bug sources on non-colliding tiles. */
   addBugSpawns(map: Phaser.Tilemaps.Tilemap, count: number): void {
     const mapW = map.widthInPixels;
     const mapH = map.heightInPixels;
+    const objectsLayer = map.getLayer('objects')?.tilemapLayer ?? null;
     let placed = 0;
     let attempts = 0;
     while (placed < count && attempts < count * 10) {
       attempts++;
       const x = Phaser.Math.Between(100, mapW - 100);
       const y = Phaser.Math.Between(100, mapH - 100);
+      if (objectsLayer) {
+        const tile = objectsLayer.getTileAtWorldXY(x, y);
+        if (tile?.collides) continue;
+      }
       this.addSource("bugs", x, y);
       placed++;
     }
   }
 
-  /** Try to interact with the nearest source in range. Returns true if used. */
+  /** Try to interact with the nearest available source in range. Returns true if used. */
   tryInteract(playerX: number, playerY: number, stats: StatsSystem, currentPhase: TimeOfDay, now: number): boolean {
     let nearest: Source | null = null;
     let nearestDist = Infinity;
 
     for (const src of this.sources) {
+      const def = DEFS[src.type];
+      if (def.activePhases && !def.activePhases.includes(currentPhase)) continue;
+      if (def.cooldownMs > 0 && now - src.lastUsedAt < def.cooldownMs) continue;
+
       const dist = Phaser.Math.Distance.Between(playerX, playerY, src.x, src.y);
       if (dist < INTERACT_RANGE && dist < nearestDist) {
         nearest = src;
@@ -137,11 +146,6 @@ export class FoodSourceManager {
     if (!nearest) return false;
 
     const def = DEFS[nearest.type];
-
-    if (def.activePhases && !def.activePhases.includes(currentPhase)) return false;
-
-    if (def.cooldownMs > 0 && now - nearest.lastUsedAt < def.cooldownMs) return false;
-
     stats.restore(def.stat, def.amount);
     nearest.lastUsedAt = now;
 

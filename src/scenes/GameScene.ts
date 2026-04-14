@@ -40,6 +40,7 @@ export class GameScene extends Phaser.Scene {
   private spaceKey!: Phaser.Input.Keyboard.Key;
   private tabKey!: Phaser.Input.Keyboard.Key;
   private escapeKey!: Phaser.Input.Keyboard.Key;
+  private objectsLayer: Phaser.Tilemaps.TilemapLayer | null = null;
   private overheadLayer!: Phaser.Tilemaps.TilemapLayer | null;
   private map!: Phaser.Tilemaps.Tilemap;
   private knownCats: Set<string> = new Set();
@@ -70,9 +71,10 @@ export class GameScene extends Phaser.Scene {
 
     this.map.createLayer("ground", tileset, 0, 0);
 
-    const objectsLayer = this.map.createLayer("objects", tileset, 0, 0);
-    if (objectsLayer && "setCollisionByProperty" in objectsLayer) {
-      (objectsLayer as Phaser.Tilemaps.TilemapLayer).setCollisionByProperty({ collides: true });
+    const rawObjectsLayer = this.map.createLayer("objects", tileset, 0, 0);
+    if (rawObjectsLayer && "setCollisionByProperty" in rawObjectsLayer) {
+      this.objectsLayer = rawObjectsLayer as Phaser.Tilemaps.TilemapLayer;
+      this.objectsLayer.setCollisionByProperty({ collides: true });
     }
 
     this.overheadLayer = this.map.createLayer("overhead", tileset, 0, 0) as Phaser.Tilemaps.TilemapLayer | null;
@@ -102,8 +104,8 @@ export class GameScene extends Phaser.Scene {
 
     this.player = new MammaCat(this, spawnX, spawnY);
 
-    if (objectsLayer) {
-      this.physics.add.collider(this.player, objectsLayer);
+    if (this.objectsLayer) {
+      this.physics.add.collider(this.player, this.objectsLayer);
     }
 
     const savedKnown = this.registry.get("KNOWN_CATS") as string[] | undefined;
@@ -117,6 +119,9 @@ export class GameScene extends Phaser.Scene {
     const guardPoint = this.map.findObject("spawns", (o) => o.name === "spawn_guard");
     this.guard = new GuardNPC(this, guardPoint?.x ?? 2336, guardPoint?.y ?? 1728);
     this.guard.setTarget(this.player);
+    if (this.objectsLayer) {
+      this.physics.add.collider(this.guard, this.objectsLayer);
+    }
     this.guardIndicator = new ThreatIndicator(this, this.guard, "Guard", "dangerous", true);
 
     this.foodSources = new FoodSourceManager(this);
@@ -237,22 +242,24 @@ export class GameScene extends Phaser.Scene {
     }
 
     // ──── Normal movement ────
-    if (!this.dialogue.isActive) {
-      this.player.update(this.stats.canRun, delta);
-    }
-
     const inShade = this.isUnderCanopy(this.player.x, this.player.y);
     const inShelter = this.isNearShelter(this.player.x, this.player.y);
 
-    this.stats.update(
-      deltaSec,
-      this.player.isMoving,
-      this.player.isRunning,
-      this.dayNight.isHeatActive,
-      inShade,
-      inShelter,
-      false,
-    );
+    if (this.dialogue.isActive) {
+      this.player.setVelocity(0);
+      this.stats.update(deltaSec, false, false, this.dayNight.isHeatActive, inShade, inShelter, false);
+    } else {
+      this.player.update(this.stats.canRun, delta);
+      this.stats.update(
+        deltaSec,
+        this.player.isMoving,
+        this.player.isRunning,
+        this.dayNight.isHeatActive,
+        inShade,
+        inShelter,
+        false,
+      );
+    }
 
     this.foodSources.update(this.dayNight.currentPhase, time);
     this.guard.update(delta);
@@ -311,7 +318,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private performSave(): void {
-    SaveSystem.save(
+    const ok = SaveSystem.save(
       this.player.x,
       this.player.y,
       this.stats.toJSON(),
@@ -319,8 +326,10 @@ export class GameScene extends Phaser.Scene {
       this.dayNight.totalGameTimeMs,
       this.registry,
     );
-    const hud = this.scene.get("HUDScene") as HUDScene | undefined;
-    hud?.showSaveNotice?.();
+    if (ok) {
+      const hud = this.scene.get("HUDScene") as HUDScene | undefined;
+      hud?.showSaveNotice?.();
+    }
   }
 
   private recoverFromCollapse(): void {
@@ -395,6 +404,9 @@ export class GameScene extends Phaser.Scene {
       homeZone: { cx: x, cy: y, radius: homeRadius },
       disposition,
     });
+    if (this.objectsLayer) {
+      this.physics.add.collider(cat, this.objectsLayer);
+    }
     const known = this.knownCats.has(name);
     const indicator = new ThreatIndicator(this, cat, name, disposition, known);
     this.npcs.push({ cat, indicator });

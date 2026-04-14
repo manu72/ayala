@@ -152,6 +152,7 @@ export class NPCCat extends Phaser.Physics.Arcade.Sprite {
       case "idle":
         this.stateTimer = Phaser.Math.Between(PAUSE_MIN_MS, PAUSE_MAX_MS);
         this.setVelocity(0);
+        this.setAlpha(1);
         this.anims.play(`${this.config.spriteKey}-idle`, true);
         break;
 
