@@ -254,9 +254,10 @@ export class NPCCat extends Phaser.Physics.Arcade.Sprite {
     this.anims.play(animKey, true);
   }
 
-  private createAnimations(scene: Phaser.Scene, key: string): void {
-    if (scene.anims.exists(`${key}-sit-down`)) return;
+  private createAnimations(scene: Phaser.Scene, prefix: string): void {
+    if (scene.anims.exists(`${prefix}-sit-down`)) return;
 
+    const tex = this.texture.key;
     const row = (r: number, count = 4) => {
       const start = r * COLS;
       return { start, end: start + count - 1 };
@@ -264,47 +265,47 @@ export class NPCCat extends Phaser.Physics.Arcade.Sprite {
 
     // Rows 0-3: directional sitting (stationary/idle)
     scene.anims.create({
-      key: `${key}-sit-down`,
-      frames: scene.anims.generateFrameNumbers(key, row(0)),
+      key: `${prefix}-sit-down`,
+      frames: scene.anims.generateFrameNumbers(tex, row(0)),
       frameRate: 3,
       repeat: -1,
     });
     scene.anims.create({
-      key: `${key}-sit-left`,
-      frames: scene.anims.generateFrameNumbers(key, row(1)),
+      key: `${prefix}-sit-left`,
+      frames: scene.anims.generateFrameNumbers(tex, row(1)),
       frameRate: 3,
       repeat: -1,
     });
     scene.anims.create({
-      key: `${key}-sit-right`,
-      frames: scene.anims.generateFrameNumbers(key, row(2)),
+      key: `${prefix}-sit-right`,
+      frames: scene.anims.generateFrameNumbers(tex, row(2)),
       frameRate: 3,
       repeat: -1,
     });
     scene.anims.create({
-      key: `${key}-sit-up`,
-      frames: scene.anims.generateFrameNumbers(key, row(3)),
+      key: `${prefix}-sit-up`,
+      frames: scene.anims.generateFrameNumbers(tex, row(3)),
       frameRate: 3,
       repeat: -1,
     });
     // Row 5 (index 4): walking
     scene.anims.create({
-      key: `${key}-walk`,
-      frames: scene.anims.generateFrameNumbers(key, row(4, 8)),
+      key: `${prefix}-walk`,
+      frames: scene.anims.generateFrameNumbers(tex, row(4, 8)),
       frameRate: 6,
       repeat: -1,
     });
     // Row 6 (index 5): running / fleeing
     scene.anims.create({
-      key: `${key}-run`,
-      frames: scene.anims.generateFrameNumbers(key, row(5, 8)),
+      key: `${prefix}-run`,
+      frames: scene.anims.generateFrameNumbers(tex, row(5, 8)),
       frameRate: 12,
       repeat: -1,
     });
     // Row 7 (index 6): resting / sleeping
     scene.anims.create({
-      key: `${key}-rest`,
-      frames: scene.anims.generateFrameNumbers(key, row(6, 4)),
+      key: `${prefix}-rest`,
+      frames: scene.anims.generateFrameNumbers(tex, row(6, 4)),
       frameRate: 2,
       repeat: -1,
     });
