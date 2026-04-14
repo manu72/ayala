@@ -12,6 +12,8 @@ export interface HumanConfig {
   lingerSec?: number;
   /** Waypoint index where feeder should linger (defaults to 1). */
   lingerWaypointIndex?: number;
+  /** If true, deactivate after completing one full path traversal. */
+  exitAfterLinger?: boolean;
 }
 
 interface SpriteProfile {
@@ -176,7 +178,7 @@ export class HumanNPC extends Phaser.Physics.Arcade.Sprite {
     }
 
     const dist = Phaser.Math.Distance.Between(this.x, this.y, target.x, target.y);
-    if (dist < 8) {
+    if (dist < 20) {
       if (
         this.humanType === "feeder" &&
         this.config.lingerSec &&
@@ -201,7 +203,16 @@ export class HumanNPC extends Phaser.Physics.Arcade.Sprite {
   }
 
   private advanceWaypoint(): void {
-    this.currentWaypoint = (this.currentWaypoint + 1) % this.waypointPath.length;
+    const next = this.currentWaypoint + 1;
+    if (next >= this.waypointPath.length) {
+      if (this.config.exitAfterLinger) {
+        this.deactivate();
+        return;
+      }
+      this.currentWaypoint = 0;
+    } else {
+      this.currentWaypoint = next;
+    }
   }
 
   private activate(): void {

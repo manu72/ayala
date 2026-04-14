@@ -806,32 +806,8 @@ export class GameScene extends Phaser.Scene {
           { x: 1200, y: 1400 },
         ],
       },
-      // Feeder 1: visits feeding station 1 at dawn/evening
-      {
-        type: "feeder",
-        speed: 40,
-        activePhases: ["dawn", "evening"],
-        lingerSec: 45,
-        lingerWaypointIndex: 1,
-        path: [
-          { x: 300, y: 800 },
-          { x: 600, y: 700 },
-          { x: 300, y: 800 },
-        ],
-      },
-      // Feeder 2: visits feeding station 2
-      {
-        type: "feeder",
-        speed: 40,
-        activePhases: ["dawn", "evening"],
-        lingerSec: 40,
-        lingerWaypointIndex: 1,
-        path: [
-          { x: 2200, y: 500 },
-          { x: 2000, y: 600 },
-          { x: 2200, y: 500 },
-        ],
-      },
+      // Feeders: walk to actual map feeding stations, linger, then leave
+      ...this.buildFeederConfigs(),
       // Dog walker 1
       {
         type: "dogwalker",
@@ -876,6 +852,47 @@ export class GameScene extends Phaser.Scene {
         walkerDogIdx++;
       }
     }
+  }
+
+  /**
+   * Build feeder configs with paths anchored to actual map POI positions.
+   * Each feeder walks from an approach point to the feeding station,
+   * lingers there, then walks back out (one trip, no looping).
+   */
+  private buildFeederConfigs(): HumanConfig[] {
+    const stationDefs: Array<{
+      poi: string;
+      approachOffset: { dx: number; dy: number };
+    }> = [
+      { poi: "poi_feeding_station_1", approachOffset: { dx: -200, dy: 200 } },
+      { poi: "poi_feeding_station_2", approachOffset: { dx: 200, dy: -200 } },
+    ];
+
+    const configs: HumanConfig[] = [];
+    for (const def of stationDefs) {
+      const obj = this.map.findObject("spawns", (o) => o.name === def.poi);
+      if (!obj) continue;
+
+      const stationX = obj.x ?? 0;
+      const stationY = obj.y ?? 0;
+      const entryX = stationX + def.approachOffset.dx;
+      const entryY = stationY + def.approachOffset.dy;
+
+      configs.push({
+        type: "feeder",
+        speed: 40,
+        activePhases: ["dawn", "evening"],
+        lingerSec: 45,
+        lingerWaypointIndex: 1,
+        exitAfterLinger: true,
+        path: [
+          { x: entryX, y: entryY },
+          { x: stationX, y: stationY },
+          { x: entryX, y: entryY },
+        ],
+      });
+    }
+    return configs;
   }
 
   private updateHumans(delta: number): void {
