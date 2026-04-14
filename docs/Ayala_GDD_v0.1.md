@@ -316,18 +316,21 @@ The colony is not static. Throughout the game, cats arrive and leave, and the po
 
 The game world is divided into interconnected zones that correspond to real areas of ATG. In RPG JS terms, these could be individual maps stitched together via the World system, or a single large map with distinct regions.
 
-**Zone 1: Makati Ave Edge (Starting Zone)**
+**Zone 1: Makati Ave Edge (Starting Zone) Eastern Map Boundary**
 
 - Busy sidewalk, cars, pedestrian crossings
-- The Sto. Tomas corner where Mamma Cat is dumped
-- The entrance to the Ayala Triangle Walkways
-- The stepped/terraced facade of The Shops building (exterior, upper level)
-- High threat from traffic, noise, disorientation
+- Makati Ave is a busy multi-lane CBD roadway running largely North-South from the northern triangle apex intersection with Paseo de Roxas, south to the intersection with Ayala Avenue.
+- Makati Ave has 3 lanes each way (driving on the right in Manila) with a green median strip and refuge in the middle
+- The Sto. Tomas intersection where Mamma Cat is dumped on the sidewalk
+- Mamma cat is dumped from a car at the North-eastern entrance to the Ayala Triangle Walkways
+- This entrance is close to the stepped/terraced facade of The Shops building (exterior, upper level)
+- High threat from road traffic, pedestrians, noise, disorientation
 
-**Zone 2: Southeast Walkways & Blackbird Area**
+**Zone 2: Southeast Traversal Walkways & Blackbird Area**
 
 - Tree-lined paths leading into the gardens from Makati Ave
-- The historic Nielson Tower / Blackbird restaurant
+- The main path leads directly across in a straight line to Paseo de Roxas on the far western side
+- The historic Nielson Tower / Blackbird restaurant is back on Makati Ave on the South-Eastern border
 - Moderate tree cover, decorative plantings
 - Some colony cats, transitional territory
 
@@ -340,23 +343,28 @@ The game world is divided into interconnected zones that correspond to real area
 - Open lawn areas (dog zone)
 - Largest concentration of colony cats
 - Multiple sub-areas with different cat "cliques"
+- Walking from Makati Ave to Paseo de Roxas, East to West, mamma cat first passes the broad steps on her right (N) going up to the tower, then the concrete boxed gardens on her right (N) at the top of the descending steps to The Shops with Starbucks and a small underground shopping mall and access (to the North) to the northern underpass of Paseo de Roxas
+- on her left (S) are the central gardens
+- continuing westward mamma cat passes on her right (N) the large covered space where many cats in the colony live. This is a central feeding point with cover and shade and food and water.
+- Continuing westward she passes the large playground to her right (N) and the small open library to her left (S) where a small number of colony cats make their home
 
-**Zone 4: The Fountain & Exchange Plaza**
+**Zone 4: The Fountain & Exchange Plaza Southern Border close to Ayala Ave**
 
 - Tower One & Exchange Plaza with dramatic concrete canopy
 - The fountain (water source for cats)
 - Large stone-paved plaza (exposed, open)
-- Starbucks at Tower One mezzanine
 - Office worker lunch crowds (food opportunity, midday only)
 
 **Zone 5: Paseo de Roxas Edge & Underpass**
 
-- The northern boundary of the gardens along Paseo de Roxas
-- The underpass with escalator (Camille's entry point)
+- The north-western boundary of the gardens along Paseo de Roxas
+- Paseo de Roxas is a busy multi-lane CBD roadway with a green median strip and refuge in the middle
+- North-western underpass to the western side of Paseo de Roxas
+- The South-western underpass with escalator (Camille's entry point)
 - Blacky's territory (top of the escalator)
 - Street-level views of traffic and buildings across Paseo de Roxas
 
-**Zone 6: The Shops / Pyramid Steps (Mamma Cat's Home Territory)**
+**Zone 6: The Shops / Northern Pyramid Steps (Mamma Cat's Home Territory)**
 
 - The pyramid-shaped stepped structure
 - Stairs on either side leading down to underground level
@@ -390,11 +398,28 @@ The game world is divided into interconnected zones that correspond to real area
 
 ### 7.1 Visual Style
 
-- High quality pixel art, top-down perspective
+- Pixel art, top-down perspective
 - Warm tropical palette: lush greens, warm greys for stone, deep browns for tree trunks, pops of color from flowers and art installations
 - Distinct visual identity for day vs. night (warm golden light vs. cool blue/purple with warm lamp pools)
 - Midday should feel oppressively bright with harsh shadows
 - Character sprites need enough detail to distinguish cat colors/patterns (Mamma Cat's black and white spots must be recognizable)
+
+**IMPORTANT — UI & Text Quality Principle:**
+
+Pixel art is used for character sprites and environment tiles because it is practical: small file sizes, fast loading, abundant free assets, and quick to iterate. It is NOT a deliberate retro aesthetic choice. We are not building an 80s arcade game.
+
+Everything outside of sprites and tiles should be MODERN and CLEAN:
+
+- **Text:** Use crisp, anti-aliased fonts at readable sizes. No pixelated/bitmap fonts. Dialogue text, narration, labels, journal entries, menus — all should render cleanly at native resolution.
+- **Dialogue boxes:** Clean, semi-transparent panels with smooth edges. Not chunky pixel borders.
+- **HUD elements:** Stat bars, indicators, and labels should be smooth vector-style graphics, not pixel art.
+- **Menus and journal:** Modern, readable UI. The colony journal should look like a journal, not a DOS terminal. Clean typography, proper spacing, readable at any zoom level.
+- **Name labels:** Crisp text with clean outlines above characters.
+- **Narration text:** Elegant, readable font. This is Mamma Cat's inner voice — it should feel intimate, not retro.
+
+The visual identity of Ayala is: **pixel art characters and tiles in a modern, polished UI wrapper.** Think Stardew Valley — pixel sprites, but clean and contemporary interface elements. The pixel art is a practical medium, not an identity statement. The story and emotional tone should never be undermined by artificially degraded UI quality.
+
+This principle applies to all phases from Phase 4 onwards and should be retrofitted to earlier phases during the Phase 5 polish pass.
 
 ### 7.2 Cat Sprites Needed
 

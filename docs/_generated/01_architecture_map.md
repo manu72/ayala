@@ -1,60 +1,49 @@
 # Architecture Map
 
-## Runtime Architecture
+> Generated: 2026-04-14 | Version: 0.1.3
+
+## Runtime Flow
 
 ```
-Browser (Chrome / Safari)
-  └── Phaser 3.90.0 (WebGL with Canvas fallback)
-        ├── BootScene — preloads all assets
-        └── GameScene — main gameplay loop
-              ├── Tilemap (3 layers: ground, objects, overhead)
-              ├── MammaCat (player sprite, keyboard input, Arcade physics)
-              ├── NPCCat (Blacky — static body, idle animation)
-              ├── DialogueSystem (camera-fixed text overlay)
-              └── DayNightCycle (camera-fixed tinted overlay)
+index.html
+  └── src/main.ts → new Phaser.Game(gameConfig)
+        └── BootScene (preload assets)
+              └── StartScene (title menu: New / Continue)
+                    └── GameScene (main world)
+                          ├── launch HUDScene (overlay: stats, dialogue, narration, pause)
+                          └── launch JournalScene (overlay: colony journal, on demand)
 ```
 
-## Build Pipeline
+## Scene Responsibilities
 
-```
-TypeScript source (src/) ──tsc──> type-check ──vite build──> dist/
-                                                               ├── index.html
-                                                               └── assets/
-                                                                     └── index-*.js (bundled)
-```
+| Scene | Key Systems | Lifecycle |
+| --- | --- | --- |
+| BootScene | Asset loading | Runs once at startup |
+| StartScene | Save detection, menu | Shown before gameplay |
+| GameScene | Tilemap, player, NPCs, guard, humans, dogs, food, trust, emotes, chapters, camera, input, save/load | Persistent during gameplay |
+| HUDScene | Stats bars, clock, rest progress, pause menu, dialogue, narration | Overlay, launched by GameScene |
+| JournalScene | Cat entries, trust hearts, scroll | Overlay, launched on demand (J key or pause menu) |
 
-Static assets in `public/` are copied verbatim to `dist/` by Vite.
+## Inter-Scene Communication
 
-## Asset Pipeline
+- **Direct references:** `scene.get("GameScene")` / `scene.get("HUDScene")` with typed casts
+- **Registry:** `Phaser.Data.DataManager` for story flags and shared state
+- **Events:** `DayNightCycle` extends `EventEmitter`, emits `newDay`
 
-```
-scripts/generate-tileset.mjs ──pngjs──> public/assets/tilesets/park-tiles.png
-scripts/generate-map.mjs     ──JSON──>  public/assets/tilemaps/atg.json
-scripts/generate-sprites.mjs ──pngjs──> (STALE — output replaced by fluffy.png copies)
-```
+## Physics
 
-Tileset and map are procedurally generated at dev time, not at build time.
-Asset generators are run manually; their output is committed to git.
+- Arcade only, top-down (gravity 0,0)
+- World bounds from tilemap dimensions
+- Colliders: player vs objects layer, player vs guard, player vs food sources
 
-## Tech Stack
+## Scaling
 
-| Layer        | Technology          | Version  | Notes                          |
-|-------------|---------------------|----------|--------------------------------|
-| Framework    | Phaser 3            | ^3.90.0  | WebGL/Canvas 2D game engine    |
-| Language     | TypeScript          | ^6.0.2   | Strict mode, ES2020 target     |
-| Build        | Vite                | ^8.0.8   | Dev server + production bundler |
-| Asset gen    | pngjs               | ^7.0.0   | Dev-only, procedural tile/sprite gen |
-| Physics      | Phaser Arcade       | built-in | Zero-gravity top-down collisions |
-| Maps         | Tiled JSON format   | —        | Generated programmatically, not via Tiled GUI |
+- Fixed logical size: 816 x 624
+- `Scale.FIT` + `Scale.CENTER_BOTH`
+- `pixelArt: true`
 
-## State Management
+## Persistence
 
-- **Player variables:** `Phaser.Game.registry` (`MET_BLACKY` boolean)
-- **No external state store, no save/load, no persistence**
-
-## Deployment Target
-
-- Static files in `dist/` deployable to any CDN/static host
-- No server-side runtime
-- No PWA/service worker yet (planned Phase 5)
-- `base: './'` in Vite config enables relative paths for subdirectory deployment
+- `localStorage` key: `ayala_save`
+- Validated on load (structure, types, ranges)
+- Auto-save at rest spots and story beats; manual via pause menu

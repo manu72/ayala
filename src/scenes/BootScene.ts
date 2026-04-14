@@ -10,7 +10,7 @@ export class BootScene extends Phaser.Scene {
     this.load.tilemapTiledJSON("atg", "assets/tilemaps/atg.json");
 
     // Cat spritesheets: 8 cols x 10 rows of 32x32 frames
-    const cats = ["mammacat", "blacky", "tiger", "jayco"];
+    const cats = ["mammacat", "blacky", "tiger", "jayco", "fluffy"];
     for (const key of cats) {
       this.load.spritesheet(key, `assets/sprites/${key}.png`, {
         frameWidth: 32,
@@ -22,6 +22,27 @@ export class BootScene extends Phaser.Scene {
     this.load.spritesheet("guard", "assets/sprites/guard.png", {
       frameWidth: 64,
       frameHeight: 64,
+    });
+
+    // Dog spritesheets: 4 cols x 9 rows of 32x32 frames
+    const dogs = ["SmallDog", "WhiteDog", "BrownDog"];
+    for (const key of dogs) {
+      this.load.spritesheet(key, `assets/sprites/${key}.png`, {
+        frameWidth: 32,
+        frameHeight: 32,
+      });
+    }
+
+    // Jogger spritesheet: 8 cols x 6 rows of 150x85 frames
+    this.load.spritesheet("jogger", "assets/sprites/girl.png", {
+      frameWidth: 150,
+      frameHeight: 85,
+    });
+
+    // Dog walker human spritesheet: 7 cols x 3 rows of 50x45 frames
+    this.load.spritesheet("dogwalker", "assets/sprites/dogwalker.png", {
+      frameWidth: 50,
+      frameHeight: 45,
     });
   }
 

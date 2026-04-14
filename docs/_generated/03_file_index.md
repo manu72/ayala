@@ -1,103 +1,58 @@
 # File Index
 
-## Root Files
+> Generated: 2026-04-14 | Version: 0.1.3
 
-| File | Lines | Status | Purpose |
-|------|-------|--------|---------|
-| `index.html` | 31 | Active | Vite entry page. Full-viewport `#game-container` div, dark background, loads `src/main.ts` as ES module. |
-| `package.json` | 19 | Active | npm manifest. Private package `ayala@0.1.0`. Scripts: dev, build (tsc + vite), preview. Deps: phaser ^3.90.0. DevDeps: pngjs, typescript, vite. |
-| `package-lock.json` | 916 | Active | Locked dependency tree. |
-| `tsconfig.json` | 22 | Active | Strict TypeScript config. ES2020, bundler resolution, noEmit. Includes only `src/`. |
-| `vite.config.ts` | 9 | Active | Relative base path (`./`), output to `dist/` with `assets/` subdirectory. |
-| `VERSION` | 1 | Active | `0.1.1` — disagrees with package.json `0.1.0`. |
-| `README.md` | 130 | Active | Project overview, status, stack, setup, architecture tree. See gap analysis for issues. |
-| `.gitignore` | 5 | Active | Excludes dist, node_modules, CLAUDE.md, .claude/, .DS_Store. |
+## Source Files (`src/`)
 
-## docs/
+| File | Purpose | Status | Key Exports |
+| --- | --- | --- | --- |
+| `main.ts` | Creates Phaser.Game with gameConfig | Active | Side-effect only |
+| `config/GameConfig.ts` | Phaser config: 816x624, Arcade physics, FIT scaling, scene list | Active | `gameConfig` |
+| `config/constants.ts` | Shared timing constant | Active | `REST_HOLD_MS` |
+| `scenes/BootScene.ts` | Preloads tileset, tilemap, all sprite sheets | Active | `BootScene` |
+| `scenes/StartScene.ts` | Title screen with Continue/New Game, save detection | Active | `StartScene` |
+| `scenes/GameScene.ts` | Main game: tilemap, player, NPCs, guard, humans, dogs, food, trust, emotes, chapters, camera, input, save/load | Active | `GameScene` |
+| `scenes/HUDScene.ts` | Overlay: stat bars, clock, rest progress ring, pause menu, dialogue, narration | Active | `HUDScene` |
+| `scenes/JournalScene.ts` | Colony journal overlay with cat entries, trust hearts, scroll | Active | `JournalScene` |
+| `sprites/MammaCat.ts` | Player character: WASD/arrow movement, run, crouch, rest, physics body | Active | `MammaCat`, `PlayerState` |
+| `sprites/NPCCat.ts` | Config-driven NPC cat: state machine, disposition, time-of-day behavior, configurable animPrefix/scale/walkSpeed/hyperactive | Active | `NPCCat`, `NPCCatConfig`, `CatState`, `Disposition` |
+| `sprites/GuardNPC.ts` | Guard: patrol waypoints, chase player near food scraps | Active | `GuardNPC` |
+| `sprites/HumanNPC.ts` | Human NPCs: waypoint path following, phase-active (jogger/feeder/dogwalker) | Active | `HumanNPC`, `HumanConfig`, `HumanType` |
+| `sprites/DogNPC.ts` | Dog: follows dog-walker owner, barks/lunges at nearby player, startles NPC cats | Active | `DogNPC` |
+| `systems/DayNightCycle.ts` | 4-phase time cycle (dawn/day/evening/night), overlay tint, game clock, emits newDay | Active | `DayNightCycle`, `TimeOfDay` |
+| `systems/StatsSystem.ts` | Hunger/thirst/energy simulation with decay, environment modifiers, collapse | Active | `StatsSystem`, `CatStats` |
+| `systems/DialogueSystem.ts` | Bottom-screen text dialogue with Space to advance | Active | `DialogueSystem` |
+| `systems/FoodSource.ts` | Interactive food/water sources, ground markers, cooldowns | Active | `FoodSourceManager`, `SourceType` |
+| `systems/SaveSystem.ts` | localStorage save/load with validation, tracked registry keys | Active | `SaveSystem`, `SaveData` |
+| `systems/TrustSystem.ts` | Global + per-cat trust (0-100), proximity ticking, conversation rewards | Active | `TrustSystem`, `TrustData` |
+| `systems/EmoteSystem.ts` | Floating text emotes above sprites with cooldowns | Active | `EmoteSystem`, `EmoteType` |
+| `systems/ChapterSystem.ts` | Chapter defs with trust/met-cat/day conditions, narration queue | Active | `ChapterSystem`, `ChapterDef` |
+| `systems/ThreatIndicator.ts` | Floating name + disposition symbol above entities | Active | `ThreatIndicator` |
 
-| File | Lines | Status | Purpose |
-|------|-------|--------|---------|
-| `Ayala_GDD_v0.1.md` | 620 | Active | Full game design document: story (6 chapters), characters (8+ cats), mechanics (survival, trust, territory), map zones, art direction, technical architecture. |
-| `Phase1_Brief_Phaser3.md` | 598 | Active (reference) | Phase 1 technical brief: 7 tasks from scaffold to verified build. All tasks complete. |
-| `Phase1_5_Visual_Polish_Brief.md` | 299 | Active (reference) | Phase 1.5 brief: 6 tasks (camera, tileset, sprites, objects, map, verify). All tasks complete. |
+## Design Documents (`docs/`)
 
-## src/
+| File | Purpose | Status |
+| --- | --- | --- |
+| `Ayala_GDD_v0.1.md` | Full game design document | Active reference |
+| `Phase1_Brief_Phaser3.md` | Phase 1 implementation plan | Complete |
+| `Phase1_5_Visual_Polish_Brief.md` | Phase 1.5 implementation plan | Complete |
+| `Phase2_Core_Mechanics_Brief.md` | Phase 2 implementation plan | Complete |
+| `P2_Controls_Update_Spec.md` | Controls specification | Active reference |
+| `Phase3_Social_Story_Brief.md` | Phase 3 implementation plan | Complete |
 
-### src/main.ts (4 lines) — Active
+## Scripts (`scripts/`)
 
-Entry point. Creates `new Phaser.Game(gameConfig)`. No other logic.
+| File | Purpose | Status |
+| --- | --- | --- |
+| `generate-tileset.mjs` | Generates park-tiles.png (256x160) and tile-indices.json | Active |
+| `generate-map.mjs` | Generates atg.json (100x80 Tiled map) from tile-indices.json | Active |
+| `tile-indices.json` | Tile name-to-index mapping (generated output) | Generated |
 
-### src/config/GameConfig.ts (23 lines) — Active
+## Config Files
 
-Exports `gameConfig`. Key settings: 816x624 base resolution, pixelArt mode, Arcade physics (zero gravity), Scale.FIT with CENTER_BOTH, scenes: [BootScene, GameScene].
-
-### src/scenes/BootScene.ts (26 lines) — Active
-
-Preloads all assets: tileset image, tilemap JSON, two cat spritesheets (32x32 frames). Transitions to GameScene on completion.
-
-### src/scenes/GameScene.ts (116 lines) — Active
-
-Core gameplay scene. Responsibilities:
-- Creates tilemap from JSON with 3 layers (ground, objects with collision, overhead at depth 10)
-- Spawns MammaCat at named object point `spawn_mammacat`
-- Spawns Blacky NPC at named object point `spawn_blacky`
-- Sets up player-to-objects collision
-- Initialises DialogueSystem and DayNightCycle
-- Configures camera: bounds, 2.5x zoom, follow player, 50px dead zone
-- Update loop: day/night tick, player movement (frozen during dialogue), NPC interaction on Enter key
-- `tryInteract()`: distance check to Blacky, first-encounter dialogue with registry-based state tracking
-
-### src/sprites/MammaCat.ts (138 lines) — Active
-
-Player character extending `Phaser.Physics.Arcade.Sprite`. Features:
-- Cursor key input for 4-directional movement at 120px/s
-- 8-column spritesheet layout: rows 0-3 = walk (4 frames each), row 4 = idle (3 frames)
-- Normalised diagonal movement
-- Physics body: 18x18 hitbox with 7,12 offset
-- Floating name label ("Mamma Cat") at depth 5
-- Depth 3 for sprite rendering
-
-### src/sprites/NPCCat.ts (52 lines) — Active
-
-Stationary NPC cat extending `Phaser.Physics.Arcade.Sprite` with static body. Features:
-- Configurable via NPCCatConfig interface (name, spriteKey, x, y)
-- Idle animation from row 4 of 8-column spritesheet (frames 32-34)
-- Floating name label at depth 5
-- Animation deduplication (checks `anims.exists` before creating)
-
-### src/systems/DayNightCycle.ts (129 lines) — Active
-
-Camera-fixed full-screen rectangle overlay with tint cycling. Features:
-- 4 phases: dawn (warm yellow, 8% alpha), day (clear), evening (orange, 15% alpha), night (dark blue, 40% alpha)
-- 60-second phase duration (testing value; comment notes "tune later")
-- 2-second smoothstep transitions between phases
-- Manual RGB/alpha interpolation (not using Phaser tweens)
-- Phase label in top-left corner at depth 51
-
-### src/systems/DialogueSystem.ts (81 lines) — Active
-
-Camera-fixed dialogue box anchored to bottom of viewport. Features:
-- Semi-transparent black background with white border
-- Advances lines on Space key press
-- `[Space]` prompt indicator
-- Completion callback support
-- `isActive` getter used by GameScene to freeze player input during dialogue
-
-## scripts/
-
-| File | Lines | Status | Purpose |
-|------|-------|--------|---------|
-| `generate-tileset.mjs` | ~300 | Active | Generates `park-tiles.png` (256x160, 8x5 grid of 40 tiles). Per-pixel noise, paving grids, grass blades, water waves, transparent canopies. Outputs `tile-indices.json`. |
-| `generate-map.mjs` | ~265 | Active | Generates `atg.json` (100x80 Tiled JSON). Triangle geometry for ATG boundary, 7 zones, 3-4 tile roads with lane markings, winding paths, dense tree placement with overhead canopies, landmarks, spawn points. |
-| `generate-sprites.mjs` | 157 | **Stale** | Generates 4-col x 5-row placeholder sprites. Output files (`mammacat.png`, `blacky.png`) are now copies of `fluffy.png` (8-col x 10-row). Running this script would overwrite the correct sprites with broken ones. |
-| `tile-indices.json` | 41 | Active (generated) | Named tile ID map with 40 entries. Output of `generate-tileset.mjs`, consumed by `generate-map.mjs`. |
-
-## public/assets/
-
-| File | Size | Status | Notes |
-|------|------|--------|-------|
-| `sprites/fluffy.png` | 39KB | Active | Template spritesheet (256x320, 8 cols x 10 rows of 32x32 frames). Source of truth for cat animations. |
-| `sprites/mammacat.png` | 39KB | Active | Identical copy of fluffy.png. Used by MammaCat. |
-| `sprites/blacky.png` | 39KB | Active | Identical copy of fluffy.png. Used by NPCCat (Blacky). |
-| `tilemaps/atg.json` | ~80KB | Active (generated) | Minified Tiled JSON. 100x80 map, 3 tile layers + 1 object layer. |
-| `tilesets/park-tiles.png` | 83KB | Active (generated) | 256x160 tileset image (8x5 grid of 32x32 tiles). |
+| File | Purpose | Status |
+| --- | --- | --- |
+| `package.json` | npm manifest, scripts, dependencies | Active (version 0.1.1 -- drift) |
+| `tsconfig.json` | TypeScript strict config, ES2020, bundler resolution | Active |
+| `vite.config.ts` | Vite: relative base, dist output, assets dir | Active |
+| `index.html` | Vite entry: #game-container, loads src/main.ts | Active |
