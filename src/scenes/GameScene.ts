@@ -37,6 +37,8 @@ export class GameScene extends Phaser.Scene {
   private map!: Phaser.Tilemaps.Tilemap
   private knownCats: Set<string> = new Set()
   private saveNotice!: Phaser.GameObjects.Text
+  private collapseRecoveryTimer = 0
+  private collapseRecovering = false
 
   constructor() {
     super({ key: 'GameScene' })
@@ -151,6 +153,16 @@ export class GameScene extends Phaser.Scene {
     if (this.stats.collapsed) {
       this.player.setVelocity(0)
       this.hud.update(this.stats)
+
+      if (!this.collapseRecovering) {
+        this.collapseRecovering = true
+        this.collapseRecoveryTimer = 0
+      }
+      this.collapseRecoveryTimer += delta
+      // After 3 seconds, teleport to safe spot and recover
+      if (this.collapseRecoveryTimer >= 3000) {
+        this.recoverFromCollapse()
+      }
       return
     }
 
@@ -240,6 +252,22 @@ export class GameScene extends Phaser.Scene {
       duration: 600,
       ease: 'Linear',
     })
+  }
+
+  /** Teleport player to the safe sleep spot and restore minimum stats. */
+  private recoverFromCollapse(): void {
+    const safeSleep = this.map.findObject('spawns', o => o.name === 'poi_safe_sleep')
+    const safeX = safeSleep?.x ?? this.map.widthInPixels / 2
+    const safeY = safeSleep?.y ?? this.map.heightInPixels / 2
+
+    this.player.setPosition(safeX, safeY)
+    this.stats.resetCollapse()
+    this.collapseRecovering = false
+    this.collapseRecoveryTimer = 0
+
+    // Brief screen flash to signal the transition
+    this.cameras.main.flash(500, 0, 0, 0)
+    this.autoSave()
   }
 
   /** Re-apply disposition changes from saved registry variables. */
