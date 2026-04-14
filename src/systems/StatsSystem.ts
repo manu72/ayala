@@ -1,0 +1,137 @@
+export interface CatStats {
+  hunger: number
+  thirst: number
+  energy: number
+}
+
+/** Per-second base decay rates (subtracted each real-time second). */
+const DECAY = {
+  hunger: 0.15,
+  thirst: 0.25,
+  energyRest: 0.10,
+  energyMoving: 0.30,
+  energyRunning: 0.50,
+} as const
+
+const HEAT_MULTIPLIER = 1.5
+const SHADE_ENERGY_REGEN = 0.5
+const SHELTER_ENERGY_REGEN = 1.0
+
+const SPEED_PENALTY_HUNGER_30 = 0.80
+const SPEED_PENALTY_HUNGER_10 = 0.50
+const SPEED_PENALTY_THIRST_20 = 0.80
+const SPEED_PENALTY_ENERGY_20 = 0.70
+
+/** Duration (ms) a stat must be at 0 before collapse triggers. */
+const COLLAPSE_THRESHOLD_MS = 15_000
+
+export class StatsSystem {
+  hunger = 100
+  thirst = 100
+  energy = 100
+
+  private collapseTimer = 0
+  private _collapsed = false
+
+  get collapsed(): boolean { return this._collapsed }
+
+  /** Stat-based speed multiplier (cumulative, minimum 0.25). */
+  get speedMultiplier(): number {
+    let m = 1.0
+    if (this.hunger < 10) m *= SPEED_PENALTY_HUNGER_10
+    else if (this.hunger < 30) m *= SPEED_PENALTY_HUNGER_30
+    if (this.thirst < 20) m *= SPEED_PENALTY_THIRST_20
+    if (this.energy < 20) m *= SPEED_PENALTY_ENERGY_20
+    return Math.max(0.25, m)
+  }
+
+  /** True when any stat is low enough to darken screen edges. */
+  get screenDarken(): boolean {
+    return this.hunger < 10 || this.thirst < 10
+  }
+
+  /** True when energy is too low to run. */
+  get canRun(): boolean {
+    return this.energy >= 20
+  }
+
+  /**
+   * Tick the decay system.
+   * @param deltaSec - frame delta in seconds
+   * @param isMoving - player is walking
+   * @param isRunning - player is sprinting
+   * @param isHeatActive - midday heat phase
+   * @param inShade - under tree canopy
+   * @param inShelter - in a sheltered rest spot
+   */
+  update(
+    deltaSec: number,
+    isMoving: boolean,
+    isRunning: boolean,
+    isHeatActive: boolean,
+    inShade: boolean,
+    inShelter: boolean,
+  ): void {
+    if (this._collapsed) return
+
+    const heatMod = (isHeatActive && !inShade) ? HEAT_MULTIPLIER : 1.0
+
+    this.hunger = Math.max(0, this.hunger - DECAY.hunger * heatMod * deltaSec)
+    this.thirst = Math.max(0, this.thirst - DECAY.thirst * heatMod * deltaSec)
+
+    if (isRunning && this.canRun) {
+      this.energy = Math.max(0, this.energy - DECAY.energyRunning * heatMod * deltaSec)
+    } else if (isMoving) {
+      this.energy = Math.max(0, this.energy - DECAY.energyMoving * heatMod * deltaSec)
+    } else {
+      this.energy = Math.max(0, this.energy - DECAY.energyRest * heatMod * deltaSec)
+    }
+
+    // Shade/shelter regen (only while stationary)
+    if (!isMoving && !isRunning) {
+      if (inShelter) {
+        this.energy = Math.min(100, this.energy + SHELTER_ENERGY_REGEN * deltaSec)
+      } else if (inShade) {
+        this.energy = Math.min(100, this.energy + SHADE_ENERGY_REGEN * deltaSec)
+      }
+    }
+
+    // Collapse check
+    if (this.hunger <= 0 || this.thirst <= 0 || this.energy <= 0) {
+      this.collapseTimer += deltaSec * 1000
+      if (this.collapseTimer >= COLLAPSE_THRESHOLD_MS) {
+        this._collapsed = true
+      }
+    } else {
+      this.collapseTimer = 0
+    }
+  }
+
+  /** Apply a stat change (food, water, rest). Clamps 0-100. */
+  restore(stat: keyof CatStats, amount: number): void {
+    this[stat] = Math.min(100, Math.max(0, this[stat] + amount))
+  }
+
+  /** Reset collapse state after teleporting to safe spot. */
+  resetCollapse(): void {
+    this._collapsed = false
+    this.collapseTimer = 0
+    this.energy = Math.max(30, this.energy)
+    this.hunger = Math.max(15, this.hunger)
+    this.thirst = Math.max(15, this.thirst)
+  }
+
+  /** Serialise for save. */
+  toJSON(): CatStats {
+    return { hunger: this.hunger, thirst: this.thirst, energy: this.energy }
+  }
+
+  /** Restore from save. */
+  fromJSON(data: CatStats): void {
+    this.hunger = data.hunger
+    this.thirst = data.thirst
+    this.energy = data.energy
+    this._collapsed = false
+    this.collapseTimer = 0
+  }
+}

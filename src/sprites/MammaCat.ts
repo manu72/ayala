@@ -1,24 +1,28 @@
 import Phaser from 'phaser'
 
-const SPEED = 120
+const BASE_SPEED = 120
+const RUN_SPEED = 200
 
-/**
- * Spritesheet layout (8 cols x 10 rows, 32x32 frames):
- *   Row 0 (frames 0-7):  walk down / facing camera
- *   Row 1 (frames 8-15): walk left
- *   Row 2 (frames 16-23): walk right
- *   Row 3 (frames 24-31): walk up / facing away
- *   Row 4+ : additional poses (idle, sit, sleep, etc.)
- *
- * We use first 4 frames of rows 0-3 for walk cycles
- * and row 4 frames for idle.
- */
 const SPRITE_KEY = 'mammacat'
 const COLS = 8
 
 export class MammaCat extends Phaser.Physics.Arcade.Sprite {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys
+  private runKey!: Phaser.Input.Keyboard.Key
   private nameLabel: Phaser.GameObjects.Text
+
+  /** Externally set by GameScene each frame based on stats. */
+  speedMultiplier = 1.0
+
+  /** True if the player is pressing the run key and canRun is true. */
+  isRunning = false
+
+  /** True if the player is moving (walking or running). */
+  get isMoving(): boolean {
+    if (!this.cursors) return false
+    return this.cursors.left.isDown || this.cursors.right.isDown
+      || this.cursors.up.isDown || this.cursors.down.isDown
+  }
 
   constructor(scene: Phaser.Scene, x: number, y: number) {
     super(scene, x, y, SPRITE_KEY)
@@ -37,6 +41,7 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
 
     if (scene.input.keyboard) {
       this.cursors = scene.input.keyboard.createCursorKeys()
+      this.runKey = scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT)
     }
 
     this.nameLabel = scene.add.text(x, y - 20, 'Mamma Cat', {
@@ -55,76 +60,48 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
       return { start, end: start + count - 1 }
     }
 
-    scene.anims.create({
-      key: `${SPRITE_KEY}-walk-down`,
-      frames: scene.anims.generateFrameNumbers(SPRITE_KEY, row(0)),
-      frameRate: 8,
-      repeat: -1,
-    })
-    scene.anims.create({
-      key: `${SPRITE_KEY}-walk-left`,
-      frames: scene.anims.generateFrameNumbers(SPRITE_KEY, row(1)),
-      frameRate: 8,
-      repeat: -1,
-    })
-    scene.anims.create({
-      key: `${SPRITE_KEY}-walk-right`,
-      frames: scene.anims.generateFrameNumbers(SPRITE_KEY, row(2)),
-      frameRate: 8,
-      repeat: -1,
-    })
-    scene.anims.create({
-      key: `${SPRITE_KEY}-walk-up`,
-      frames: scene.anims.generateFrameNumbers(SPRITE_KEY, row(3)),
-      frameRate: 8,
-      repeat: -1,
-    })
-    scene.anims.create({
-      key: `${SPRITE_KEY}-idle`,
-      frames: scene.anims.generateFrameNumbers(SPRITE_KEY, row(4, 3)),
-      frameRate: 4,
-      repeat: -1,
-    })
+    scene.anims.create({ key: `${SPRITE_KEY}-walk-down`, frames: scene.anims.generateFrameNumbers(SPRITE_KEY, row(0)), frameRate: 8, repeat: -1 })
+    scene.anims.create({ key: `${SPRITE_KEY}-walk-left`, frames: scene.anims.generateFrameNumbers(SPRITE_KEY, row(1)), frameRate: 8, repeat: -1 })
+    scene.anims.create({ key: `${SPRITE_KEY}-walk-right`, frames: scene.anims.generateFrameNumbers(SPRITE_KEY, row(2)), frameRate: 8, repeat: -1 })
+    scene.anims.create({ key: `${SPRITE_KEY}-walk-up`, frames: scene.anims.generateFrameNumbers(SPRITE_KEY, row(3)), frameRate: 8, repeat: -1 })
+    scene.anims.create({ key: `${SPRITE_KEY}-idle`, frames: scene.anims.generateFrameNumbers(SPRITE_KEY, row(4, 3)), frameRate: 4, repeat: -1 })
   }
 
-  update(): void {
+  update(canRun = true): void {
     if (!this.cursors) return
 
     this.setVelocity(0)
+    this.isRunning = false
 
     let movingX = false
     let movingY = false
 
-    if (this.cursors.left.isDown) {
-      this.setVelocityX(-SPEED)
-      movingX = true
-    } else if (this.cursors.right.isDown) {
-      this.setVelocityX(SPEED)
-      movingX = true
-    }
+    const wantsRun = this.runKey?.isDown && canRun
+    const speed = (wantsRun ? RUN_SPEED : BASE_SPEED) * this.speedMultiplier
 
-    if (this.cursors.up.isDown) {
-      this.setVelocityY(-SPEED)
-      movingY = true
-    } else if (this.cursors.down.isDown) {
-      this.setVelocityY(SPEED)
-      movingY = true
-    }
+    if (this.cursors.left.isDown) { this.setVelocityX(-speed); movingX = true }
+    else if (this.cursors.right.isDown) { this.setVelocityX(speed); movingX = true }
+
+    if (this.cursors.up.isDown) { this.setVelocityY(-speed); movingY = true }
+    else if (this.cursors.down.isDown) { this.setVelocityY(speed); movingY = true }
 
     if (movingX && movingY) {
       const body = this.body as Phaser.Physics.Arcade.Body
-      body.velocity.normalize().scale(SPEED)
+      body.velocity.normalize().scale(speed)
     }
 
+    this.isRunning = wantsRun && (movingX || movingY)
+
+    const frameRate = this.isRunning ? 12 : 8
+
     if (movingX || movingY) {
-      if (this.cursors.left.isDown) {
-        this.anims.play(`${SPRITE_KEY}-walk-left`, true)
-      } else if (this.cursors.right.isDown) {
-        this.anims.play(`${SPRITE_KEY}-walk-right`, true)
-      } else if (this.cursors.up.isDown) {
-        this.anims.play(`${SPRITE_KEY}-walk-up`, true)
-      } else if (this.cursors.down.isDown) {
-        this.anims.play(`${SPRITE_KEY}-walk-down`, true)
+      if (this.cursors.left.isDown) this.anims.play(`${SPRITE_KEY}-walk-left`, true)
+      else if (this.cursors.right.isDown) this.anims.play(`${SPRITE_KEY}-walk-right`, true)
+      else if (this.cursors.up.isDown) this.anims.play(`${SPRITE_KEY}-walk-up`, true)
+      else if (this.cursors.down.isDown) this.anims.play(`${SPRITE_KEY}-walk-down`, true)
+
+      if (this.anims.currentAnim) {
+        this.anims.currentAnim.frameRate = frameRate
       }
     } else {
       this.anims.play(`${SPRITE_KEY}-idle`, true)
