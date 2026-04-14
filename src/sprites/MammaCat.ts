@@ -2,21 +2,36 @@ import Phaser from 'phaser'
 
 const SPEED = 120
 
+/**
+ * Spritesheet layout (8 cols x 10 rows, 32x32 frames):
+ *   Row 0 (frames 0-7):  walk down / facing camera
+ *   Row 1 (frames 8-15): walk left
+ *   Row 2 (frames 16-23): walk right
+ *   Row 3 (frames 24-31): walk up / facing away
+ *   Row 4+ : additional poses (idle, sit, sleep, etc.)
+ *
+ * We use first 4 frames of rows 0-3 for walk cycles
+ * and row 4 frames for idle.
+ */
+const SPRITE_KEY = 'mammacat'
+const COLS = 8
+
 export class MammaCat extends Phaser.Physics.Arcade.Sprite {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys
   private nameLabel: Phaser.GameObjects.Text
 
   constructor(scene: Phaser.Scene, x: number, y: number) {
-    super(scene, x, y, 'mammacat')
+    super(scene, x, y, SPRITE_KEY)
 
     scene.add.existing(this)
     scene.physics.add.existing(this)
 
     this.setCollideWorldBounds(true)
+    this.setDepth(3)
 
     const body = this.body as Phaser.Physics.Arcade.Body
-    body.setSize(20, 20)
-    body.setOffset(6, 10)
+    body.setSize(18, 18)
+    body.setOffset(7, 12)
 
     this.createAnimations(scene)
 
@@ -33,39 +48,41 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
   }
 
   private createAnimations(scene: Phaser.Scene): void {
-    // Row 0: walk down (frames 0-3)
+    if (scene.anims.exists(`${SPRITE_KEY}-walk-down`)) return
+
+    const row = (r: number, count = 4) => {
+      const start = r * COLS
+      return { start, end: start + count - 1 }
+    }
+
     scene.anims.create({
-      key: 'mammacat-walk-down',
-      frames: scene.anims.generateFrameNumbers('mammacat', { start: 0, end: 3 }),
+      key: `${SPRITE_KEY}-walk-down`,
+      frames: scene.anims.generateFrameNumbers(SPRITE_KEY, row(0)),
       frameRate: 8,
       repeat: -1,
     })
-    // Row 1: walk left (frames 4-7)
     scene.anims.create({
-      key: 'mammacat-walk-left',
-      frames: scene.anims.generateFrameNumbers('mammacat', { start: 4, end: 7 }),
+      key: `${SPRITE_KEY}-walk-left`,
+      frames: scene.anims.generateFrameNumbers(SPRITE_KEY, row(1)),
       frameRate: 8,
       repeat: -1,
     })
-    // Row 2: walk right (frames 8-11)
     scene.anims.create({
-      key: 'mammacat-walk-right',
-      frames: scene.anims.generateFrameNumbers('mammacat', { start: 8, end: 11 }),
+      key: `${SPRITE_KEY}-walk-right`,
+      frames: scene.anims.generateFrameNumbers(SPRITE_KEY, row(2)),
       frameRate: 8,
       repeat: -1,
     })
-    // Row 3: walk up (frames 12-15)
     scene.anims.create({
-      key: 'mammacat-walk-up',
-      frames: scene.anims.generateFrameNumbers('mammacat', { start: 12, end: 15 }),
+      key: `${SPRITE_KEY}-walk-up`,
+      frames: scene.anims.generateFrameNumbers(SPRITE_KEY, row(3)),
       frameRate: 8,
       repeat: -1,
     })
-    // Row 4: idle (frames 16-19)
     scene.anims.create({
-      key: 'mammacat-idle',
-      frames: scene.anims.generateFrameNumbers('mammacat', { start: 16, end: 17 }),
-      frameRate: 2,
+      key: `${SPRITE_KEY}-idle`,
+      frames: scene.anims.generateFrameNumbers(SPRITE_KEY, row(4, 3)),
+      frameRate: 4,
       repeat: -1,
     })
   }
@@ -94,25 +111,23 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
       movingY = true
     }
 
-    // Normalize diagonal movement
     if (movingX && movingY) {
       const body = this.body as Phaser.Physics.Arcade.Body
       body.velocity.normalize().scale(SPEED)
     }
 
-    // Pick animation based on dominant direction
     if (movingX || movingY) {
       if (this.cursors.left.isDown) {
-        this.anims.play('mammacat-walk-left', true)
+        this.anims.play(`${SPRITE_KEY}-walk-left`, true)
       } else if (this.cursors.right.isDown) {
-        this.anims.play('mammacat-walk-right', true)
+        this.anims.play(`${SPRITE_KEY}-walk-right`, true)
       } else if (this.cursors.up.isDown) {
-        this.anims.play('mammacat-walk-up', true)
+        this.anims.play(`${SPRITE_KEY}-walk-up`, true)
       } else if (this.cursors.down.isDown) {
-        this.anims.play('mammacat-walk-down', true)
+        this.anims.play(`${SPRITE_KEY}-walk-down`, true)
       }
     } else {
-      this.anims.play('mammacat-idle', true)
+      this.anims.play(`${SPRITE_KEY}-idle`, true)
     }
 
     this.nameLabel.setPosition(this.x, this.y - 20)

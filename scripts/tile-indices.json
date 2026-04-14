@@ -30,5 +30,13 @@
   "SHRUB": 28,
   "ART": 29,
   "LAMPPOST": 30,
-  "EMPTY": 31
+  "EMPTY": 31,
+  "GRASS_FLOWER": 32,
+  "GRASS_TO_PATH": 33,
+  "PATH_TO_PLAZA": 34,
+  "ROAD_EDGE": 35,
+  "ROAD_SOLID_LINE": 36,
+  "GLASS_FACADE": 37,
+  "ROOF": 38,
+  "WATER_EDGE": 39
 }

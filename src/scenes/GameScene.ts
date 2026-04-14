@@ -53,8 +53,8 @@ export class GameScene extends Phaser.Scene {
     this.blacky = new NPCCat(this, {
       name: 'Blacky',
       spriteKey: 'blacky',
-      x: blackyPoint?.x ?? 832,
-      y: blackyPoint?.y ?? 416,
+      x: blackyPoint?.x ?? 1024,
+      y: blackyPoint?.y ?? 544,
     })
 
     // Dialogue system
@@ -71,7 +71,9 @@ export class GameScene extends Phaser.Scene {
     // Camera
     this.cameras.main.setBounds(0, 0, map.widthInPixels, map.heightInPixels)
     this.physics.world.setBounds(0, 0, map.widthInPixels, map.heightInPixels)
+    this.cameras.main.setZoom(2.5)
     this.cameras.main.startFollow(this.player, true, 0.08, 0.08)
+    this.cameras.main.setDeadzone(50, 50)
   }
 
   update(_time: number, delta: number): void {
