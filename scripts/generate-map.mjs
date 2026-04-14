@@ -459,7 +459,7 @@ const tiledMap = {
 const outDir = join(__dirname, '..', 'public', 'assets', 'tilemaps')
 mkdirSync(outDir, { recursive: true })
 const outPath = join(outDir, 'atg.json')
-writeFileSync(outPath, JSON.stringify(tiledMap))
+writeFileSync(outPath, JSON.stringify(tiledMap, null, 2))
 console.log(`Created ${outPath}`)
 console.log(`Map: ${MAP_W}x${MAP_H} tiles (${MAP_W * TILE_SIZE}x${MAP_H * TILE_SIZE} px)`)
 console.log(`Spawn points: ${objectPoints.map(p => p.name).join(', ')}`)
