@@ -18,14 +18,14 @@
 
 ## Development Phase Status
 
-| Phase              | Status       | Notes                                                     |
-| ------------------ | ------------ | --------------------------------------------------------- |
-| 1. Foundation      | Complete     | Tilemap, player, NPC, day/night                           |
-| 1.5 Visual Polish  | Complete     | Camera zoom, textured tiles, animations, overhead layer   |
-| 2. Core Mechanics  | Complete     | Stats, food/water, guard, save/load, rest, crouch, HUD    |
-| 3. Social & Story  | Complete     | Trust, emotes, chapters 1-3, named cats, humans, dogs, journal |
-| 4. Camille & Endgame | Not started | Chapters 4-6, snatchers, epilogue                        |
-| 5. Polish & Release | Not started | Audio, PWA, playtesting, deployment                      |
+| Phase                | Status      | Notes                                                          |
+| -------------------- | ----------- | -------------------------------------------------------------- |
+| 1. Foundation        | Complete    | Tilemap, player, NPC, day/night                                |
+| 1.5 Visual Polish    | Complete    | Camera zoom, textured tiles, animations, overhead layer        |
+| 2. Core Mechanics    | Complete    | Stats, food/water, guard, save/load, rest, crouch, HUD         |
+| 3. Social & Story    | Complete    | Trust, emotes, chapters 1-3, named cats, humans, dogs, journal |
+| 4. Camille & Endgame | Not started | Chapters 4-6, snatchers, epilogue                              |
+| 5. Polish & Release  | Not started | Audio, PWA, playtesting, deployment                            |
 
 ---
 
@@ -33,7 +33,7 @@
 
 ### Scene Graph
 
-```
+```text
 BootScene -> StartScene -> GameScene + HUDScene (overlay) + JournalScene (overlay)
 ```
 
@@ -45,27 +45,27 @@ BootScene -> StartScene -> GameScene + HUDScene (overlay) + JournalScene (overla
 
 ### Sprite Types
 
-| File | Purpose |
-| --- | --- |
-| `MammaCat.ts` | Player (WASD, run, crouch tap/hold, rest) |
-| `NPCCat.ts` | Generic NPC cat with state machine, config-driven (animPrefix, scale, walkSpeed, hyperactive) |
-| `GuardNPC.ts` | Guard that patrols and chases player from food scraps |
-| `HumanNPC.ts` | Waypoint-following humans (jogger/feeder/dogwalker), phase-active |
-| `DogNPC.ts` | Follows dog-walker owner, barks/lunges at player |
+| File          | Purpose                                                                                       |
+| ------------- | --------------------------------------------------------------------------------------------- |
+| `MammaCat.ts` | Player (WASD, run, crouch tap/hold, rest)                                                     |
+| `NPCCat.ts`   | Generic NPC cat with state machine, config-driven (animPrefix, scale, walkSpeed, hyperactive) |
+| `GuardNPC.ts` | Guard that patrols and chases player from food scraps                                         |
+| `HumanNPC.ts` | Waypoint-following humans (jogger/feeder/dogwalker), phase-active                             |
+| `DogNPC.ts`   | Follows dog-walker owner, barks/lunges at player                                              |
 
 ### Systems
 
-| File | Purpose |
-| --- | --- |
-| `TrustSystem.ts` | Global + per-cat trust scores (0-100), proximity ticking, conversation rewards |
-| `EmoteSystem.ts` | Floating text emotes above entities (heart, alert, curious, sleep, hostile, danger) |
-| `ChapterSystem.ts` | Chapter progression with trust/met-cat/day thresholds |
-| `DayNightCycle.ts` | 4-phase cycle (dawn/day/evening/night), emits `newDay` event |
-| `StatsSystem.ts` | Hunger/thirst/energy with environment modifiers |
-| `FoodSource.ts` | Interactive food/water sources with cooldowns and persistence |
-| `SaveSystem.ts` | localStorage save/load with validation |
-| `ThreatIndicator.ts` | Floating name + disposition symbol above NPCs |
-| `DialogueSystem.ts` | Bottom-screen dialogue box |
+| File                 | Purpose                                                                             |
+| -------------------- | ----------------------------------------------------------------------------------- |
+| `TrustSystem.ts`     | Global + per-cat trust scores (0-100), proximity ticking, conversation rewards      |
+| `EmoteSystem.ts`     | Floating text emotes above entities (heart, alert, curious, sleep, hostile, danger) |
+| `ChapterSystem.ts`   | Chapter progression with trust/met-cat/day thresholds                               |
+| `DayNightCycle.ts`   | 4-phase cycle (dawn/day/evening/night), emits `newDay` event                        |
+| `StatsSystem.ts`     | Hunger/thirst/energy with environment modifiers                                     |
+| `FoodSource.ts`      | Interactive food/water sources with cooldowns and persistence                       |
+| `SaveSystem.ts`      | localStorage save/load with validation                                              |
+| `ThreatIndicator.ts` | Floating name + disposition symbol above NPCs                                       |
+| `DialogueSystem.ts`  | Bottom-screen dialogue box                                                          |
 
 ### Key Config
 
@@ -87,12 +87,12 @@ guard.png (also used tinted for joggers/feeders/dogwalkers)
 
 ### Animation Row Mapping (Grid Sheets)
 
-| Row | Index | Animation |
-| --- | --- | --- |
-| 0-3 | 0-3 | sit-down/left/right/up (stationary) |
-| 5 | 4 | walk (all directions) |
-| 6 | 5 | run / flee |
-| 7 | 6 | rest / sleep |
+| Row | Index | Animation                           |
+| --- | ----- | ----------------------------------- |
+| 0-3 | 0-3   | sit-down/left/right/up (stationary) |
+| 5   | 4     | walk (all directions)               |
+| 6   | 5     | run / flee                          |
+| 7   | 6     | rest / sleep                        |
 
 ---
 
@@ -107,16 +107,16 @@ guard.png (also used tinted for joggers/feeders/dogwalkers)
 
 ## Named NPC Cats
 
-| Name | Sprite | Zone | Disposition | Special |
-| --- | --- | --- | --- | --- |
-| Blacky | blacky | 5 (underpass) | neutral | Orientation dialogue |
-| Tiger | tiger | 3 (central) | territorial -> friendly | Multi-stage warmup |
-| Jayco | jayco | 6 (shops) | friendly | Food/guard tips |
-| Jayco Jr | jayco (0.7 scale) | 6 (near Jayco) | friendly | Hyperactive kitten |
-| Fluffy | fluffy | 3 (central) | neutral | Aloof, trust-gated dialogue |
-| Pedigree | fluffy | 2 (Nielson) | neutral | Former pet, night warnings |
-| Ginger | ginger-idle (0.5 scale) | 4 (fountain) | wary | Territorial pair |
-| Ginger B | ginger-idle (0.5 scale) | 4 (fountain) | wary | Silent twin |
+| Name     | Sprite                  | Zone           | Disposition             | Special                     |
+| -------- | ----------------------- | -------------- | ----------------------- | --------------------------- |
+| Blacky   | blacky                  | 5 (underpass)  | neutral                 | Orientation dialogue        |
+| Tiger    | tiger                   | 3 (central)    | territorial -> friendly | Multi-stage warmup          |
+| Jayco    | jayco                   | 6 (shops)      | friendly                | Food/guard tips             |
+| Jayco Jr | jayco (0.7 scale)       | 6 (near Jayco) | friendly                | Hyperactive kitten          |
+| Fluffy   | fluffy                  | 3 (central)    | neutral                 | Aloof, trust-gated dialogue |
+| Pedigree | fluffy                  | 2 (Nielson)    | neutral                 | Former pet, night warnings  |
+| Ginger   | ginger-idle (0.5 scale) | 4 (fountain)   | wary                    | Territorial pair            |
+| Ginger B | ginger-idle (0.5 scale) | 4 (fountain)   | wary                    | Silent twin                 |
 
 12 background colony cats with unique IDs (`Colony Cat 1`..`12`), random sprites/dispositions.
 

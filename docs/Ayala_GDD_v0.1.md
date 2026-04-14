@@ -390,11 +390,28 @@ The game world is divided into interconnected zones that correspond to real area
 
 ### 7.1 Visual Style
 
-- High quality pixel art, top-down perspective
+- Pixel art, top-down perspective
 - Warm tropical palette: lush greens, warm greys for stone, deep browns for tree trunks, pops of color from flowers and art installations
 - Distinct visual identity for day vs. night (warm golden light vs. cool blue/purple with warm lamp pools)
 - Midday should feel oppressively bright with harsh shadows
 - Character sprites need enough detail to distinguish cat colors/patterns (Mamma Cat's black and white spots must be recognizable)
+
+**IMPORTANT — UI & Text Quality Principle:**
+
+Pixel art is used for character sprites and environment tiles because it is practical: small file sizes, fast loading, abundant free assets, and quick to iterate. It is NOT a deliberate retro aesthetic choice. We are not building an 80s arcade game.
+
+Everything outside of sprites and tiles should be MODERN and CLEAN:
+
+- **Text:** Use crisp, anti-aliased fonts at readable sizes. No pixelated/bitmap fonts. Dialogue text, narration, labels, journal entries, menus — all should render cleanly at native resolution.
+- **Dialogue boxes:** Clean, semi-transparent panels with smooth edges. Not chunky pixel borders.
+- **HUD elements:** Stat bars, indicators, and labels should be smooth vector-style graphics, not pixel art.
+- **Menus and journal:** Modern, readable UI. The colony journal should look like a journal, not a DOS terminal. Clean typography, proper spacing, readable at any zoom level.
+- **Name labels:** Crisp text with clean outlines above characters.
+- **Narration text:** Elegant, readable font. This is Mamma Cat's inner voice — it should feel intimate, not retro.
+
+The visual identity of Ayala is: **pixel art characters and tiles in a modern, polished UI wrapper.** Think Stardew Valley — pixel sprites, but clean and contemporary interface elements. The pixel art is a practical medium, not an identity statement. The story and emotional tone should never be undermined by artificially degraded UI quality.
+
+This principle applies to all phases from Phase 4 onwards and should be retrofitted to earlier phases during the Phase 5 polish pass.
 
 ### 7.2 Cat Sprites Needed
 
