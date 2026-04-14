@@ -1,39 +1,24 @@
 # README Gap Analysis
 
-**Classification: Partially stale**
+> Generated: 2026-04-14 | Version: 0.1.3
 
-The README was updated after Phase 1.5 but has several inaccuracies and omissions.
+## Classification: **Materially inaccurate**
 
-## Detailed Findings
+The README describes the project as it existed at v0.1.1 (Phase 1.5 complete). Two full development phases (Phase 2: Core Mechanics, Phase 3: Social & Story) have been completed since then, adding ~18 source files, multiple game systems, and significant gameplay features.
 
-| Area | Status | Issue |
-|------|--------|-------|
-| **Project description** | Accurate | Good summary of the game concept and emotional intent. |
-| **Project status** | Partially stale | Says "Phase 1.5 -- Visual Polish. Refining the prototype..." — should say Phase 1.5 is **complete**, not in progress. The "What exists" list is accurate. |
-| **Roadmap table** | Accurate | Phase 1 and 1.5 marked Complete, rest Not started. Correct. |
-| **Tech stack table** | Inaccurate | Lists "Tiled Map Editor" as a technology for map creation, but maps are generated programmatically via Node.js scripts, not via the Tiled GUI. Misleading. |
-| **Prerequisites** | Incomplete | Says "Node.js >= 18" but doesn't mention that asset generation scripts (`generate-tileset.mjs`, `generate-map.mjs`) must be run separately if assets need regeneration. |
-| **Install and Run** | Mostly accurate | Port hardcoded as 5173 but Vite may use a different port if 5173 is occupied. Minor. |
-| **Production Build** | Accurate | Correct. |
-| **Architecture tree** | Partially stale | Missing `scripts/` folder entirely. Missing `fluffy.png` from sprites listing. Missing `_generated/` from docs. The `src/` tree is accurate. |
-| **Game Design section** | Accurate | Good summary with link to GDD. |
-| **Target Platform** | Accurate (aspirational) | PWA/offline not yet implemented but correctly flagged as a future phase. |
-| **Developers** | Accurate | Lists Manu and Claude. |
-| **License** | Accurate | "TBD" — honest. |
-| **Testing** | **Missing entirely** | No mention of test strategy (none exists, but should be noted as a known gap). |
-| **Configuration/env** | **Missing** | No mention of environment variables or configuration beyond scripts. Not critical for current state but should note there are none. |
-| **Asset generation** | **Missing entirely** | The `scripts/` folder and its generators are not documented. A contributor wouldn't know how to regenerate tiles or the map. |
-| **Controls/gameplay** | **Missing** | No mention of how to actually play the game (arrow keys to move, Enter to interact, Space to advance dialogue). |
-| **Version** | **Inconsistent** | VERSION file says 0.1.1, package.json says 0.1.0. README doesn't mention version. |
-| **Known limitations** | **Missing** | No mention of: no audio, no save/load, no tests, stale `generate-sprites.mjs`, identical sprites for both cats, 60s phase duration is a testing placeholder. |
-| **Branch info** | **Missing** | Active development is on `sit` branch, not mentioned. |
+## Gap Details
 
-## Priority Fixes
-
-1. **Add controls/gameplay section** — critical for anyone trying the game
-2. **Add asset generation documentation** — critical for contributors
-3. **Update architecture tree** to include `scripts/`, `fluffy.png`, `docs/_generated/`
-4. **Fix tech stack** — replace "Tiled Map Editor" with "pngjs (procedural asset generation)"
-5. **Add known limitations** section
-6. **Update project status** to reflect Phase 1.5 is complete
-7. **Add version info** and resolve VERSION/package.json mismatch
+| Area | Current README | Actual State | Action |
+| --- | --- | --- | --- |
+| **Version** | "Version 0.1.1" in 3 places | 0.1.3 | Update |
+| **Phase table** | Phase 2-5 "Not started" | Phase 2 and 3 are Complete | Update |
+| **"What exists now" list** | Lists only Phase 1/1.5 features | Missing: stats, food/water, guard, save/load, rest, crouch, HUD, named NPCs, trust, emotes, chapters, humans, dogs, journal | Rewrite section |
+| **Controls table** | Missing J (journal); descriptions slightly stale | Full controls include J, updated crouch/rest mechanics | Update |
+| **Tips section** | Mostly accurate but missing new features | Missing: journal, trust/social, chapter progression | Update |
+| **Project Structure** | 8 source files listed | 22 source files exist; missing scenes (StartScene, HUDScene, JournalScene), sprites (GuardNPC, HumanNPC, DogNPC), systems (StatsSystem, FoodSource, SaveSystem, TrustSystem, EmoteSystem, ChapterSystem, ThreatIndicator), config (constants.ts) | Rewrite section |
+| **Architecture** | 2 scenes described | 5 scenes; missing save/load, trust, chapters, entire systems layer | Rewrite section |
+| **Known Limitations** | "No save/load", "No linter or formatter" | Save/load exists; TypeScript strict mode configured | Update |
+| **Asset Generation** | Accurate | Still accurate | Keep |
+| **Tech Stack table** | Accurate versions | Versions match package.json | Keep |
+| **Setup instructions** | Accurate | Still work | Keep |
+| **Sprites section** | "Both cat sprites use fluffy.png" | 5 grid sheets + 3 ginger strips + guard + Black-* strips | Update |
