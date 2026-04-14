@@ -1120,7 +1120,9 @@ export class GameScene extends Phaser.Scene {
             },
           );
         } else {
-          this.dialogue.show(["*The cat stares at you, unblinking.*"]);
+          this.dialogue.show(["*The cat stares at you, unblinking.*"], () => {
+            this.trust.returnConversation("Ginger B");
+          });
         }
         break;
       }

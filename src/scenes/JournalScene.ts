@@ -242,7 +242,8 @@ export class JournalScene extends Phaser.Scene {
   }
 
   private buildHeartString(trust: number): string {
-    const full = Math.floor(trust / 20);
+    const clamped = Math.max(0, Math.min(100, Number.isFinite(trust) ? trust : 0));
+    const full = Math.min(5, Math.floor(clamped / 20));
     const empty = 5 - full;
     return HEART_FULL.repeat(full) + HEART_EMPTY.repeat(empty);
   }

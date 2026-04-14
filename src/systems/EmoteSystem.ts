@@ -3,6 +3,8 @@
  * Uses text characters (not emojis) per project conventions.
  */
 
+import Phaser from "phaser";
+
 export type EmoteType = "heart" | "alert" | "curious" | "sleep" | "hostile" | "danger";
 
 const EMOTE_GLYPHS: Record<EmoteType, string> = {
@@ -27,7 +29,7 @@ const EMOTE_COLORS: Record<EmoteType, string> = {
 const COOLDOWN_MS = 3_000;
 
 export class EmoteSystem {
-  private cooldowns = new Map<Phaser.GameObjects.Sprite, number>();
+  private cooldowns = new WeakMap<Phaser.GameObjects.Sprite, number>();
 
   show(
     scene: Phaser.Scene,

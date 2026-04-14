@@ -74,7 +74,9 @@ export class ChapterSystem {
   }
 
   restore(chapter: number): void {
-    this.current = chapter;
+    const maxChapter = CHAPTERS.length;
+    const val = Number.isFinite(chapter) ? Math.floor(chapter) : 1;
+    this.current = Math.max(1, Math.min(maxChapter, val));
   }
 
   /**
