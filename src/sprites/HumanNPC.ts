@@ -21,6 +21,8 @@ interface SpriteProfile {
   frameH: number;
   bodyW: number;
   bodyH: number;
+  /** Display scale (defaults to 1). */
+  scale?: number;
   anims: {
     walkDown: { row: number; count: number };
     walkLeft: { row: number; count: number };
@@ -62,8 +64,32 @@ const DOGWALKER_PROFILE: SpriteProfile = {
   },
 };
 
+const JOGGER_PROFILE: SpriteProfile = {
+  key: "jogger",
+  cols: 8,
+  frameW: 150,
+  frameH: 85,
+  bodyW: 18,
+  bodyH: 16,
+  scale: 0.5,
+  anims: {
+    walkDown: { row: 0, count: 8 },
+    walkRight: { row: 1, count: 8 },
+    walkLeft: { row: 2, count: 8 },
+    walkUp: { row: 3, count: 8 },
+    idle: { row: 0, count: 1 },
+  },
+};
+
 function profileForType(type: HumanType): SpriteProfile {
-  return type === "dogwalker" ? DOGWALKER_PROFILE : GUARD_PROFILE;
+  switch (type) {
+    case "jogger":
+      return JOGGER_PROFILE;
+    case "dogwalker":
+      return DOGWALKER_PROFILE;
+    default:
+      return GUARD_PROFILE;
+  }
 }
 
 /**
@@ -99,6 +125,10 @@ export class HumanNPC extends Phaser.Physics.Arcade.Sprite {
     this.setDepth(3);
     this.setCollideWorldBounds(true);
 
+    if (prof.scale && prof.scale !== 1) {
+      this.setScale(prof.scale);
+    }
+
     const body = this.body as Phaser.Physics.Arcade.Body;
     body.setSize(prof.bodyW, prof.bodyH);
     body.setOffset(
@@ -110,9 +140,7 @@ export class HumanNPC extends Phaser.Physics.Arcade.Sprite {
     this.setVisible(false);
     this.setActive(false);
 
-    if (config.type === "jogger") {
-      this.setTint(0x88aaff);
-    } else if (config.type === "feeder") {
+    if (config.type === "feeder") {
       this.setTint(0x88ff88);
     }
   }

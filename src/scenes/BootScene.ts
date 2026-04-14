@@ -33,6 +33,12 @@ export class BootScene extends Phaser.Scene {
       });
     }
 
+    // Jogger spritesheet: 8 cols x 6 rows of 150x85 frames
+    this.load.spritesheet("jogger", "assets/sprites/girl.png", {
+      frameWidth: 150,
+      frameHeight: 85,
+    });
+
     // Dog walker human spritesheet: 7 cols x 3 rows of 50x45 frames
     this.load.spritesheet("dogwalker", "assets/sprites/dogwalker.png", {
       frameWidth: 50,
