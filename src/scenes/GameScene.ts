@@ -276,6 +276,9 @@ export class GameScene extends Phaser.Scene {
   // ──────────── Resting ────────────
 
   private updateResting(deltaSec: number): void {
+    // Guard pushback can still run while resting; force zero velocity each frame.
+    this.player.setVelocity(0);
+
     const inShade = this.isUnderCanopy(this.player.x, this.player.y);
     const inShelter = this.isNearShelter(this.player.x, this.player.y);
 

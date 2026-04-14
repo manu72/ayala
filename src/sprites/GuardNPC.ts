@@ -24,7 +24,6 @@ export class GuardNPC extends Phaser.Physics.Arcade.Sprite {
   private patrolDir = new Phaser.Math.Vector2(1, 0);
   private patrolTimer = 0;
   private target: MammaCat | null = null;
-  private nameLabel: Phaser.GameObjects.Text;
 
   constructor(scene: Phaser.Scene, x: number, y: number) {
     super(scene, x, y, SPRITE_KEY);
@@ -42,16 +41,6 @@ export class GuardNPC extends Phaser.Physics.Arcade.Sprite {
 
     this.createAnimations(scene);
     this.anims.play(`${SPRITE_KEY}-idle`, true);
-
-    this.nameLabel = scene.add
-      .text(x, y - 24, "Guard", {
-        fontSize: "8px",
-        color: "#DD2222",
-        stroke: "#000000",
-        strokeThickness: 2,
-      })
-      .setOrigin(0.5, 1)
-      .setDepth(6);
   }
 
   setTarget(player: MammaCat): void {
@@ -100,8 +89,6 @@ export class GuardNPC extends Phaser.Physics.Arcade.Sprite {
         }
         break;
     }
-
-    this.nameLabel.setPosition(this.x, this.y - 24);
   }
 
   private patrol(delta: number): void {
@@ -193,7 +180,6 @@ export class GuardNPC extends Phaser.Physics.Arcade.Sprite {
   }
 
   destroy(fromScene?: boolean): void {
-    this.nameLabel.destroy();
     super.destroy(fromScene);
   }
 }
