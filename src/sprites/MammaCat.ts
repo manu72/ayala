@@ -24,6 +24,7 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
   speedMultiplier = 1.0;
   isRunning = false;
   playerState: PlayerState = "normal";
+  private lastDirection: "down" | "left" | "right" | "up" = "down";
 
   /** Timer for the brief wake-up delay. */
   private wakeTimer = 0;
@@ -81,7 +82,7 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
   enterRest(): void {
     this.playerState = "resting";
     this.setVelocity(0);
-    this.anims.play(`${SPRITE_KEY}-idle`, true);
+    this.anims.play(`${SPRITE_KEY}-rest`, true);
     this.setAlpha(0.8);
   }
 
@@ -91,7 +92,7 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
     this.playerState = "waking";
     this.wakeTimer = WAKE_DELAY_MS;
     this.setAlpha(1);
-    this.anims.play(`${SPRITE_KEY}-idle`, true);
+    this.anims.play(`${SPRITE_KEY}-sit-${this.lastDirection}`, true);
   }
 
   update(canRun = true, delta = 0): void {
@@ -167,19 +168,23 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
 
     this.isRunning = wantsRun && (movingX || movingY);
 
-    const frameRate = this.isRunning ? 12 : wantsCrouch ? 4 : 8;
-
     if (movingX || movingY) {
-      if (left) this.anims.play(`${SPRITE_KEY}-walk-left`, true);
-      else if (right) this.anims.play(`${SPRITE_KEY}-walk-right`, true);
-      else if (up) this.anims.play(`${SPRITE_KEY}-walk-up`, true);
-      else if (down) this.anims.play(`${SPRITE_KEY}-walk-down`, true);
+      if (left) this.lastDirection = "left";
+      else if (right) this.lastDirection = "right";
+      else if (up) this.lastDirection = "up";
+      else if (down) this.lastDirection = "down";
 
-      if (this.anims.currentAnim) {
-        this.anims.currentAnim.frameRate = frameRate;
+      if (this.isRunning) {
+        this.anims.play(`${SPRITE_KEY}-run`, true);
+      } else {
+        const walkAnim = `${SPRITE_KEY}-walk`;
+        this.anims.play(walkAnim, true);
+        if (this.anims.currentAnim) {
+          this.anims.currentAnim.frameRate = wantsCrouch ? 4 : 8;
+        }
       }
     } else {
-      this.anims.play(`${SPRITE_KEY}-idle`, true);
+      this.anims.play(`${SPRITE_KEY}-sit-${this.lastDirection}`, true);
     }
 
     this.nameLabel.setPosition(this.x, this.y - 20);
@@ -201,41 +206,57 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
   }
 
   private createAnimations(scene: Phaser.Scene): void {
-    if (scene.anims.exists(`${SPRITE_KEY}-walk-down`)) return;
+    if (scene.anims.exists(`${SPRITE_KEY}-sit-down`)) return;
 
     const row = (r: number, count = 4) => {
       const start = r * COLS;
       return { start, end: start + count - 1 };
     };
 
+    // Rows 0-3: directional sitting (stationary/idle)
     scene.anims.create({
-      key: `${SPRITE_KEY}-walk-down`,
+      key: `${SPRITE_KEY}-sit-down`,
       frames: scene.anims.generateFrameNumbers(SPRITE_KEY, row(0)),
-      frameRate: 8,
-      repeat: -1,
-    });
-    scene.anims.create({
-      key: `${SPRITE_KEY}-walk-left`,
-      frames: scene.anims.generateFrameNumbers(SPRITE_KEY, row(1)),
-      frameRate: 8,
-      repeat: -1,
-    });
-    scene.anims.create({
-      key: `${SPRITE_KEY}-walk-right`,
-      frames: scene.anims.generateFrameNumbers(SPRITE_KEY, row(2)),
-      frameRate: 8,
-      repeat: -1,
-    });
-    scene.anims.create({
-      key: `${SPRITE_KEY}-walk-up`,
-      frames: scene.anims.generateFrameNumbers(SPRITE_KEY, row(3)),
-      frameRate: 8,
-      repeat: -1,
-    });
-    scene.anims.create({
-      key: `${SPRITE_KEY}-idle`,
-      frames: scene.anims.generateFrameNumbers(SPRITE_KEY, row(4, 3)),
       frameRate: 4,
+      repeat: -1,
+    });
+    scene.anims.create({
+      key: `${SPRITE_KEY}-sit-left`,
+      frames: scene.anims.generateFrameNumbers(SPRITE_KEY, row(1)),
+      frameRate: 4,
+      repeat: -1,
+    });
+    scene.anims.create({
+      key: `${SPRITE_KEY}-sit-right`,
+      frames: scene.anims.generateFrameNumbers(SPRITE_KEY, row(2)),
+      frameRate: 4,
+      repeat: -1,
+    });
+    scene.anims.create({
+      key: `${SPRITE_KEY}-sit-up`,
+      frames: scene.anims.generateFrameNumbers(SPRITE_KEY, row(3)),
+      frameRate: 4,
+      repeat: -1,
+    });
+    // Row 5 (index 4): walking
+    scene.anims.create({
+      key: `${SPRITE_KEY}-walk`,
+      frames: scene.anims.generateFrameNumbers(SPRITE_KEY, row(4, 8)),
+      frameRate: 8,
+      repeat: -1,
+    });
+    // Row 6 (index 5): running
+    scene.anims.create({
+      key: `${SPRITE_KEY}-run`,
+      frames: scene.anims.generateFrameNumbers(SPRITE_KEY, row(5, 8)),
+      frameRate: 12,
+      repeat: -1,
+    });
+    // Row 7 (index 6): resting
+    scene.anims.create({
+      key: `${SPRITE_KEY}-rest`,
+      frames: scene.anims.generateFrameNumbers(SPRITE_KEY, row(6, 4)),
+      frameRate: 2,
       repeat: -1,
     });
   }

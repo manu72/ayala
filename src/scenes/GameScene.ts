@@ -90,6 +90,11 @@ export class GameScene extends Phaser.Scene {
     this.stats = new StatsSystem();
     this.dayNight = new DayNightCycle(this);
 
+    // Clear story state from any prior session before restoring
+    for (const key of ['MET_BLACKY', 'TIGER_TALKS', 'JAYCO_TALKS', 'KNOWN_CATS']) {
+      this.registry.remove(key);
+    }
+
     if (data?.loadSave) {
       const save = SaveSystem.load();
       if (save) {
@@ -229,6 +234,8 @@ export class GameScene extends Phaser.Scene {
       this.restHoldTimer += delta;
       this.restHoldActive = true;
       if (this.restHoldTimer >= REST_HOLD_MS) {
+        // Consume stale JustDown flag so updateResting doesn't immediately wake
+        Phaser.Input.Keyboard.JustDown(this.restKey);
         this.player.enterRest();
         this.restHoldTimer = 0;
         this.restHoldActive = false;
