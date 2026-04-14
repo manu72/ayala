@@ -36,7 +36,7 @@ The project structure should be:
 ayala/
   docs/
     Ayala_GDD_v0.1.md          (DO NOT modify or delete)
-    Phase1_Claude_Code_Brief.md (this file)
+    Phase1_Brief_Phaser3.md (this file)
   src/
     main.ts                     (entry point — creates Phaser game)
     scenes/
@@ -70,15 +70,15 @@ ayala/
 In `vite.config.ts`:
 
 ```typescript
-import { defineConfig } from 'vite'
+import { defineConfig } from "vite";
 
 export default defineConfig({
-  base: './',  // relative paths for static deployment
+  base: "./", // relative paths for static deployment
   build: {
-    outDir: 'dist',
-    assetsDir: 'assets'
-  }
-})
+    outDir: "dist",
+    assetsDir: "assets",
+  },
+});
 ```
 
 The `base: './'` is critical — it ensures all asset paths are relative so the built game works when opened from any directory or static host.
@@ -88,28 +88,28 @@ The `base: './'` is critical — it ensures all asset paths are relative so the 
 In `src/config/GameConfig.ts`:
 
 ```typescript
-import Phaser from 'phaser'
-import { BootScene } from '../scenes/BootScene'
-import { GameScene } from '../scenes/GameScene'
+import Phaser from "phaser";
+import { BootScene } from "../scenes/BootScene";
+import { GameScene } from "../scenes/GameScene";
 
 export const gameConfig: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
-  width: 816,    // 51 tiles * 16px, or adjust for 32px tiles
-  height: 624,   // 39 tiles * 16px, or adjust
+  width: 816, // 51 tiles * 16px, or adjust for 32px tiles
+  height: 624, // 39 tiles * 16px, or adjust
   pixelArt: true, // critical for crisp pixel art rendering
   physics: {
-    default: 'arcade',
+    default: "arcade",
     arcade: {
-      gravity: { x: 0, y: 0 },  // top-down, no gravity
-      debug: false
-    }
+      gravity: { x: 0, y: 0 }, // top-down, no gravity
+      debug: false,
+    },
   },
   scene: [BootScene, GameScene],
   scale: {
     mode: Phaser.Scale.FIT,
-    autoCenter: Phaser.Scale.CENTER_BOTH
-  }
-}
+    autoCenter: Phaser.Scale.CENTER_BOTH,
+  },
+};
 ```
 
 ### Package.json scripts
@@ -139,6 +139,7 @@ Search for and download free cat sprite assets. Priority sources:
 3. Any free cat sprite pack with walk cycle animations (4 directions)
 
 If network restrictions prevent downloading, CREATE PLACEHOLDER SPRITES:
+
 - A 32x128 PNG strip (4 frames of 32x32) for walk animation
 - Use distinct colors: white with black patches for Mamma Cat, solid dark for Blacky
 - Simple colored rectangles with a triangle ear are sufficient as placeholders
@@ -146,6 +147,7 @@ If network restrictions prevent downloading, CREATE PLACEHOLDER SPRITES:
 ### Spritesheet setup
 
 Each cat sprite needs at minimum:
+
 - **Walk down** (toward camera): 4 frames
 - **Walk up** (away from camera): 4 frames
 - **Walk left**: 4 frames
@@ -153,6 +155,7 @@ Each cat sprite needs at minimum:
 - **Idle**: 1-2 frames
 
 The spritesheet should be a grid. For example, a 128x160 PNG with 32x32 frames:
+
 - Row 0: walk down (4 frames)
 - Row 1: walk left (4 frames)
 - Row 2: walk right (4 frames)
@@ -162,10 +165,10 @@ The spritesheet should be a grid. For example, a 128x160 PNG with 32x32 frames:
 In the BootScene, load the spritesheet:
 
 ```typescript
-this.load.spritesheet('mammacat', 'assets/sprites/mammacat.png', {
+this.load.spritesheet("mammacat", "assets/sprites/mammacat.png", {
   frameWidth: 32,
-  frameHeight: 32
-})
+  frameHeight: 32,
+});
 ```
 
 ---
@@ -181,6 +184,7 @@ Since we may not have the Tiled Map Editor GUI available, create the map as a JS
 ### Geographic Layout
 
 The game world is a triangle bounded by three roads:
+
 - **Ayala Avenue** — runs along the SOUTHWEST edge (bottom-left to middle-left)
 - **Paseo de Roxas** — runs along the NORTH/NORTHEAST edge (top of the triangle)
 - **Makati Avenue** — runs along the EAST/SOUTHEAST edge (right side)
@@ -194,6 +198,7 @@ The roads are IMPASSABLE BOUNDARIES — cats cannot cross busy Manila roads.
 Think of the triangle with NORTH at the top of the screen:
 
 **NORTHEAST CORNER (top-right): Zone 6 — The Shops / Pyramid Steps**
+
 - Where Makati Ave meets Paseo de Roxas
 - Large stepped/pyramid structure leading down to underground mall
 - Mamma Cat's eventual home territory
@@ -201,17 +206,20 @@ Think of the triangle with NORTH at the top of the screen:
 - Below the steps: Starbucks with glass facade
 
 **EAST EDGE (right side): Zone 1 — Makati Ave Edge (Starting Zone)**
+
 - Busy sidewalk along Makati Avenue
 - Sto. Tomas corner (southeast) = Mamma Cat's starting position
 - Entry to the Ayala Triangle Walkways
 - The Shops building's terraced exterior wall
 
 **SOUTHEAST: Zone 2 — Blackbird / Nielson Tower Area**
+
 - Historic building surrounded by dense trees
 - Manam restaurant nearby (outdoor dining, white umbrellas)
 - Tree-lined walkways into central gardens
 
 **CENTER: Zone 3 — Central Gardens (largest zone)**
+
 - Dense rain tree canopy, winding stone walkways
 - Manicured lawns (open grassy areas — dog zone)
 - Ornamental shrub beds, decorative boulders
@@ -219,18 +227,21 @@ Think of the triangle with NORTH at the top of the screen:
 - HEART of the cat colony
 
 **SOUTHWEST (bottom-left): Zone 4 — Fountain & Exchange Plaza**
+
 - Tower One with sweeping concrete canopy over stone plaza
 - Fountain (water source for cats)
 - Starbucks at Tower One mezzanine
 - Large exposed plaza
 
 **NORTH EDGE (top): Zone 5 — Paseo de Roxas Edge & Underpass**
+
 - Northern boundary along Paseo de Roxas
 - Underpass with escalator (western portion of north edge)
 - Blacky sits at top of escalator — his territory
 - Camille's entry point
 
 **NORTHWEST (top-left): Zone 7 — Playground Area**
+
 - Children's playground with colorful rubberized ground
 - Giant geometric carabao and hornbill sculptures
 - Exercise equipment, surrounded by trees
@@ -242,6 +253,7 @@ Think of the triangle with NORTH at the top of the screen:
 **Map dimensions:** ~80 tiles wide x 60 tiles tall (2560x1920 pixels)
 
 **Create a tileset image** (`park-tiles.png`) — a grid of 32x32 tiles containing:
+
 - Grass (light green, dark green variants)
 - Stone walkway / path tiles
 - Dirt/earth
@@ -255,6 +267,7 @@ Think of the triangle with NORTH at the top of the screen:
 - Sand/mulch
 
 If creating a custom tileset image is too complex, use a SIMPLE 4-color tileset:
+
 - Green = grass/garden
 - Grey = stone paths and buildings
 - Dark grey = roads (boundary)
@@ -269,16 +282,17 @@ If creating a custom tileset image is too complex, use a SIMPLE 4-color tileset:
 **Collision:** Set collision on road tiles, building tiles, hedge tiles, and water tiles. In Phaser:
 
 ```typescript
-const map = this.make.tilemap({ key: 'atg' })
-const tileset = map.addTilesetImage('park-tiles', 'park-tiles')
-const ground = map.createLayer('ground', tileset)
-const objects = map.createLayer('objects', tileset)
-objects.setCollisionByProperty({ collides: true })
+const map = this.make.tilemap({ key: "atg" });
+const tileset = map.addTilesetImage("park-tiles", "park-tiles");
+const ground = map.createLayer("ground", tileset);
+const objects = map.createLayer("objects", tileset);
+objects.setCollisionByProperty({ collides: true });
 // OR set collision by specific tile indices:
-objects.setCollisionBetween(firstTileId, lastTileId)
+objects.setCollisionBetween(firstTileId, lastTileId);
 ```
 
 **Object layer:** Add a Tiled object layer (in the JSON) with named points:
+
 - `spawn_mammacat` — southeast, near Makati Ave edge
 - `spawn_blacky` — north, at underpass location
 - `poi_starbucks` — northeast, below pyramid steps
@@ -288,23 +302,25 @@ objects.setCollisionBetween(firstTileId, lastTileId)
 ### Loading the map in Phaser
 
 In BootScene:
+
 ```typescript
-this.load.tilemapTiledJSON('atg', 'assets/tilemaps/atg.json')
-this.load.image('park-tiles', 'assets/tilesets/park-tiles.png')
+this.load.tilemapTiledJSON("atg", "assets/tilemaps/atg.json");
+this.load.image("park-tiles", "assets/tilesets/park-tiles.png");
 ```
 
 In GameScene:
-```typescript
-const map = this.make.tilemap({ key: 'atg' })
-const tileset = map.addTilesetImage('park-tiles', 'park-tiles')
 
-const groundLayer = map.createLayer('ground', tileset, 0, 0)
-const objectsLayer = map.createLayer('objects', tileset, 0, 0)
-objectsLayer.setCollisionByProperty({ collides: true })
+```typescript
+const map = this.make.tilemap({ key: "atg" });
+const tileset = map.addTilesetImage("park-tiles", "park-tiles");
+
+const groundLayer = map.createLayer("ground", tileset, 0, 0);
+const objectsLayer = map.createLayer("objects", tileset, 0, 0);
+objectsLayer.setCollisionByProperty({ collides: true });
 
 // Camera follows player, map is world bounds
-this.cameras.main.setBounds(0, 0, map.widthInPixels, map.heightInPixels)
-this.physics.world.setBounds(0, 0, map.widthInPixels, map.heightInPixels)
+this.cameras.main.setBounds(0, 0, map.widthInPixels, map.heightInPixels);
+this.physics.world.setBounds(0, 0, map.widthInPixels, map.heightInPixels);
 ```
 
 ---
@@ -315,62 +331,65 @@ Create a player-controlled cat character.
 
 ```typescript
 // In GameScene.create():
-const spawnPoint = map.findObject('objects', obj => obj.name === 'spawn_mammacat')
+const spawnPoint = map.findObject("objects", (obj) => obj.name === "spawn_mammacat");
 
-this.player = this.physics.add.sprite(spawnPoint.x, spawnPoint.y, 'mammacat')
-this.player.setCollideWorldBounds(true)
-this.physics.add.collider(this.player, objectsLayer)
+this.player = this.physics.add.sprite(spawnPoint.x, spawnPoint.y, "mammacat");
+this.player.setCollideWorldBounds(true);
+this.physics.add.collider(this.player, objectsLayer);
 
 // Camera follows
-this.cameras.main.startFollow(this.player, true, 0.08, 0.08)
+this.cameras.main.startFollow(this.player, true, 0.08, 0.08);
 
 // Create animations
 this.anims.create({
-  key: 'mammacat-walk-down',
-  frames: this.anims.generateFrameNumbers('mammacat', { start: 0, end: 3 }),
+  key: "mammacat-walk-down",
+  frames: this.anims.generateFrameNumbers("mammacat", { start: 0, end: 3 }),
   frameRate: 8,
-  repeat: -1
-})
+  repeat: -1,
+});
 // ... similar for walk-up, walk-left, walk-right, idle
 
 // In update():
-const cursors = this.input.keyboard.createCursorKeys()
-const speed = 120  // cats are quick
+const cursors = this.input.keyboard.createCursorKeys();
+const speed = 120; // cats are quick
 
-this.player.setVelocity(0)
+this.player.setVelocity(0);
 
 if (cursors.left.isDown) {
-  this.player.setVelocityX(-speed)
-  this.player.anims.play('mammacat-walk-left', true)
+  this.player.setVelocityX(-speed);
+  this.player.anims.play("mammacat-walk-left", true);
 } else if (cursors.right.isDown) {
-  this.player.setVelocityX(speed)
-  this.player.anims.play('mammacat-walk-right', true)
+  this.player.setVelocityX(speed);
+  this.player.anims.play("mammacat-walk-right", true);
 }
 
 if (cursors.up.isDown) {
-  this.player.setVelocityY(-speed)
-  this.player.anims.play('mammacat-walk-up', true)
+  this.player.setVelocityY(-speed);
+  this.player.anims.play("mammacat-walk-up", true);
 } else if (cursors.down.isDown) {
-  this.player.setVelocityY(speed)
-  this.player.anims.play('mammacat-walk-down', true)
+  this.player.setVelocityY(speed);
+  this.player.anims.play("mammacat-walk-down", true);
 }
 
 if (this.player.body.velocity.length() === 0) {
-  this.player.anims.play('mammacat-idle', true)
+  this.player.anims.play("mammacat-idle", true);
 }
 ```
 
 Display "Mamma Cat" as a text label above the sprite:
+
 ```typescript
-this.playerLabel = this.add.text(0, 0, 'Mamma Cat', {
-  fontSize: '10px',
-  color: '#ffffff',
-  stroke: '#000000',
-  strokeThickness: 2
-}).setOrigin(0.5, 1)
+this.playerLabel = this.add
+  .text(0, 0, "Mamma Cat", {
+    fontSize: "10px",
+    color: "#ffffff",
+    stroke: "#000000",
+    strokeThickness: 2,
+  })
+  .setOrigin(0.5, 1);
 
 // In update(), position label above sprite:
-this.playerLabel.setPosition(this.player.x, this.player.y - 20)
+this.playerLabel.setPosition(this.player.x, this.player.y - 20);
 ```
 
 ---
@@ -381,16 +400,18 @@ Create a stationary NPC cat at the underpass location.
 
 ```typescript
 // In GameScene.create():
-const blackySpawn = map.findObject('objects', obj => obj.name === 'spawn_blacky')
-this.blacky = this.physics.add.staticSprite(blackySpawn.x, blackySpawn.y, 'blacky')
+const blackySpawn = map.findObject("objects", (obj) => obj.name === "spawn_blacky");
+this.blacky = this.physics.add.staticSprite(blackySpawn.x, blackySpawn.y, "blacky");
 
 // Add name label
-this.blackyLabel = this.add.text(blackySpawn.x, blackySpawn.y - 20, 'Blacky', {
-  fontSize: '10px',
-  color: '#ffffff',
-  stroke: '#000000',
-  strokeThickness: 2
-}).setOrigin(0.5, 1)
+this.blackyLabel = this.add
+  .text(blackySpawn.x, blackySpawn.y - 20, "Blacky", {
+    fontSize: "10px",
+    color: "#ffffff",
+    stroke: "#000000",
+    strokeThickness: 2,
+  })
+  .setOrigin(0.5, 1);
 ```
 
 ### Dialogue System
@@ -405,33 +426,33 @@ Create a simple dialogue overlay. When the player is near Blacky and presses Spa
 ```typescript
 // Simple dialogue manager
 class DialogueSystem {
-  private scene: Phaser.Scene
-  private container: Phaser.GameObjects.Container
-  private text: Phaser.GameObjects.Text
-  private background: Phaser.GameObjects.Rectangle
-  private lines: string[] = []
-  private currentLine: number = 0
-  private active: boolean = false
-  private onComplete: (() => void) | null = null
+  private scene: Phaser.Scene;
+  private container: Phaser.GameObjects.Container;
+  private text: Phaser.GameObjects.Text;
+  private background: Phaser.GameObjects.Rectangle;
+  private lines: string[] = [];
+  private currentLine: number = 0;
+  private active: boolean = false;
+  private onComplete: (() => void) | null = null;
 
   show(lines: string[], onComplete?: () => void) {
-    this.lines = lines
-    this.currentLine = 0
-    this.active = true
-    this.onComplete = onComplete || null
-    this.text.setText(this.lines[0])
-    this.container.setVisible(true)
+    this.lines = lines;
+    this.currentLine = 0;
+    this.active = true;
+    this.onComplete = onComplete || null;
+    this.text.setText(this.lines[0]);
+    this.container.setVisible(true);
   }
 
   advance() {
-    if (!this.active) return
-    this.currentLine++
+    if (!this.active) return;
+    this.currentLine++;
     if (this.currentLine >= this.lines.length) {
-      this.container.setVisible(false)
-      this.active = false
-      if (this.onComplete) this.onComplete()
+      this.container.setVisible(false);
+      this.active = false;
+      if (this.onComplete) this.onComplete();
     } else {
-      this.text.setText(this.lines[this.currentLine])
+      this.text.setText(this.lines[this.currentLine]);
     }
   }
 }
@@ -441,21 +462,22 @@ class DialogueSystem {
 
 ```typescript
 // In GameScene, when player presses action key near Blacky:
-const metBlacky = this.registry.get('MET_BLACKY') || false
+const metBlacky = this.registry.get("MET_BLACKY") || false;
 
 if (!metBlacky) {
-  this.dialogue.show([
-    'Mrrp. New here, are you?',
-    'This is Ayala Triangle. The gardens are home to all of us.',
-    'Find shade. Find food. Stay away from the roads.',
-    'And at night... stay hidden. Not all humans are kind.'
-  ], () => {
-    this.registry.set('MET_BLACKY', true)
-  })
+  this.dialogue.show(
+    [
+      "Mrrp. New here, are you?",
+      "This is Ayala Triangle. The gardens are home to all of us.",
+      "Find shade. Find food. Stay away from the roads.",
+      "And at night... stay hidden. Not all humans are kind.",
+    ],
+    () => {
+      this.registry.set("MET_BLACKY", true);
+    },
+  );
 } else {
-  this.dialogue.show([
-    'Still here? Good. You\'re tougher than you look.'
-  ])
+  this.dialogue.show(["Still here? Good. You're tougher than you look."]);
 }
 ```
 
@@ -467,44 +489,48 @@ Add a tinted overlay that cycles through day phases.
 
 ```typescript
 class DayNightCycle {
-  private overlay: Phaser.GameObjects.Rectangle
-  private phase: 'day' | 'evening' | 'night' = 'day'
-  private timer: number = 0
-  private phaseDuration: number = 60000  // 60 seconds per phase for testing
+  private overlay: Phaser.GameObjects.Rectangle;
+  private phase: "day" | "evening" | "night" = "day";
+  private timer: number = 0;
+  private phaseDuration: number = 60000; // 60 seconds per phase for testing
 
   constructor(scene: Phaser.Scene) {
     // Full-screen overlay, fixed to camera
-    this.overlay = scene.add.rectangle(
-      scene.cameras.main.width / 2,
-      scene.cameras.main.height / 2,
-      scene.cameras.main.width,
-      scene.cameras.main.height,
-      0x000000, 0  // starts transparent
-    ).setScrollFactor(0).setDepth(1000)
+    this.overlay = scene.add
+      .rectangle(
+        scene.cameras.main.width / 2,
+        scene.cameras.main.height / 2,
+        scene.cameras.main.width,
+        scene.cameras.main.height,
+        0x000000,
+        0, // starts transparent
+      )
+      .setScrollFactor(0)
+      .setDepth(1000);
   }
 
   update(delta: number) {
-    this.timer += delta
+    this.timer += delta;
     if (this.timer >= this.phaseDuration) {
-      this.timer = 0
-      this.cyclePhase()
+      this.timer = 0;
+      this.cyclePhase();
     }
   }
 
   private cyclePhase() {
     switch (this.phase) {
-      case 'day':
-        this.phase = 'evening'
-        this.overlay.setFillStyle(0xff8c00, 0.15)  // warm orange tint
-        break
-      case 'evening':
-        this.phase = 'night'
-        this.overlay.setFillStyle(0x000033, 0.4)   // dark blue tint
-        break
-      case 'night':
-        this.phase = 'day'
-        this.overlay.setFillStyle(0x000000, 0)      // clear
-        break
+      case "day":
+        this.phase = "evening";
+        this.overlay.setFillStyle(0xff8c00, 0.15); // warm orange tint
+        break;
+      case "evening":
+        this.phase = "night";
+        this.overlay.setFillStyle(0x000033, 0.4); // dark blue tint
+        break;
+      case "night":
+        this.phase = "day";
+        this.overlay.setFillStyle(0x000000, 0); // clear
+        break;
     }
   }
 }
@@ -517,12 +543,14 @@ Call `this.dayNight.update(delta)` in GameScene's `update()` method.
 ## TASK 7: BUILD AND VERIFY
 
 ### Development
+
 ```bash
 npm run dev
 # Opens at http://localhost:5173
 ```
 
 ### Production build
+
 ```bash
 npm run build
 ```
@@ -530,6 +558,7 @@ npm run build
 This produces a `dist/` folder with static files.
 
 ### Test the production build
+
 ```bash
 npm run preview
 # OR
