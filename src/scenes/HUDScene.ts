@@ -125,7 +125,7 @@ export class HUDScene extends Phaser.Scene {
     }).setOrigin(0.5).setVisible(false)
 
     // ──── Resting label ────
-    this.restingLabel = this.add.text(width / 2, height * 0.35, 'Resting... press any key to wake', {
+    this.restingLabel = this.add.text(width / 2, height * 0.35, 'Resting... move, Space or Z to wake', {
       fontFamily: FONT_FAMILY,
       fontSize: '16px',
       color: '#aaddff',
