@@ -30,7 +30,7 @@ const PHASE_LABELS: Record<TimeOfDay, string> = {
   night: 'Night',
 }
 
-export class DayNightCycle {
+export class DayNightCycle extends Phaser.Events.EventEmitter {
   private overlay: Phaser.GameObjects.Rectangle;
   private phase: TimeOfDay = "dawn";
   private phaseTimer = 0;
@@ -45,6 +45,7 @@ export class DayNightCycle {
   private gameTimeMs = 0;
 
   constructor(scene: Phaser.Scene) {
+    super();
     const cam = scene.cameras.main;
 
     this.overlay = scene.add.rectangle(
@@ -134,8 +135,13 @@ export class DayNightCycle {
   }
 
   private cyclePhase(): void {
+    const prev = this.phase;
     this.phase = PHASES[this.phase].next;
     this.startTransition();
+
+    if (this.phase === "dawn" && prev === "night") {
+      this.emit("newDay", this.dayCount);
+    }
   }
 
   private startTransition(): void {

@@ -1,6 +1,7 @@
 import type { CatStats } from './StatsSystem'
 import type { TimeOfDay } from './DayNightCycle'
 import type { SourceType } from './FoodSource'
+import type { TrustData } from './TrustSystem'
 
 const STORAGE_KEY = 'ayala_save'
 
@@ -12,11 +13,16 @@ export interface SaveData {
   gameTimeMs: number
   variables: Record<string, unknown>
   sourceStates?: Array<{ type: SourceType; x: number; y: number; lastUsedAt: number }>
+  trust?: TrustData
 }
 
 const CURRENT_VERSION = 1
 
-const TRACKED_KEYS = ['MET_BLACKY', 'TIGER_TALKS', 'JAYCO_TALKS', 'KNOWN_CATS'] as const
+const TRACKED_KEYS = [
+  'MET_BLACKY', 'TIGER_TALKS', 'JAYCO_TALKS', 'KNOWN_CATS',
+  'CHAPTER', 'CH1_RESTED', 'FLUFFY_TALKS', 'PEDIGREE_TALKS',
+  'MET_GINGER_A', 'MET_GINGER_B', 'JAYCO_JR_TALKS',
+] as const
 
 const VALID_PHASES: ReadonlySet<string> = new Set(['dawn', 'day', 'evening', 'night'])
 const VALID_SOURCE_TYPES: ReadonlySet<string> = new Set([
@@ -68,6 +74,7 @@ export const SaveSystem = {
     gameTimeMs: number,
     registry: Phaser.Data.DataManager,
     sourceStates?: Array<{ type: SourceType; x: number; y: number; lastUsedAt: number }>,
+    trust?: TrustData,
   ): boolean {
     const variables: Record<string, unknown> = {}
     for (const key of TRACKED_KEYS) {
@@ -83,6 +90,7 @@ export const SaveSystem = {
       gameTimeMs,
       variables,
       sourceStates,
+      trust,
     }
 
     try {

@@ -7,10 +7,11 @@ interface IndicatorConfig {
 }
 
 const INDICATORS: Record<Disposition | "dangerous", IndicatorConfig> = {
-  friendly: { symbol: "\u2665", color: "#44DD44" }, // heart ♥
-  neutral: { symbol: "\u2014", color: "#DDDD44" }, // em dash —
+  friendly: { symbol: "\u2665", color: "#44DD44" },
+  neutral: { symbol: "\u2014", color: "#DDDD44" },
+  wary: { symbol: "~", color: "#CC8800" },
   territorial: { symbol: "!", color: "#DD8800" },
-  dangerous: { symbol: "\u2620", color: "#DD2222" }, // skull ☠
+  dangerous: { symbol: "\u2620", color: "#DD2222" },
 };
 
 /**

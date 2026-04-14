@@ -44,6 +44,9 @@ export class HUDScene extends Phaser.Scene {
 
   private pauseContainer!: Phaser.GameObjects.Container;
 
+  private narrationText!: Phaser.GameObjects.Text;
+  private narrationTween: Phaser.Tweens.Tween | null = null;
+
   constructor() {
     super({ key: "HUDScene" });
   }
@@ -142,6 +145,22 @@ export class HUDScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setVisible(false);
 
+    // ──── Narration bar (top center, italic perception text) ────
+    this.narrationText = this.add
+      .text(width / 2, 40, "", {
+        fontFamily: FONT_FAMILY,
+        fontSize: "13px",
+        fontStyle: "italic",
+        color: "#ddeeff",
+        stroke: "#000000",
+        strokeThickness: 3,
+        align: "center",
+        wordWrap: { width: width - 60 },
+      })
+      .setOrigin(0.5)
+      .setAlpha(0)
+      .setDepth(90);
+
     // ──── Dialogue ────
     this.dialogue = new DialogueSystem(this);
 
@@ -221,24 +240,35 @@ export class HUDScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
 
-    const saveBtn = this.createMenuButton(0, -24, "Save Game", () => {
+    const saveBtn = this.createMenuButton(0, -34, "Save Game", () => {
       const gameScene = this.scene.get("GameScene") as GameScene;
       gameScene.autoSave();
     });
 
-    const resumeBtn = this.createMenuButton(0, 16, "Resume", () => {
+    const journalBtn = this.createMenuButton(0, 6, "Colony Journal", () => {
+      this.pauseContainer.setVisible(false);
+      const gameScene = this.scene.get("GameScene") as GameScene;
+      gameScene.resumeGame();
+      if (!this.scene.isActive("JournalScene")) {
+        gameScene.isPaused = true;
+        gameScene.physics.pause();
+        this.scene.launch("JournalScene");
+      }
+    });
+
+    const resumeBtn = this.createMenuButton(0, 46, "Resume", () => {
       const gameScene = this.scene.get("GameScene") as GameScene;
       gameScene.resumeGame();
       this.pauseContainer.setVisible(false);
     });
 
-    const quitBtn = this.createMenuButton(0, 56, "Quit to Title", () => {
+    const quitBtn = this.createMenuButton(0, 86, "Quit to Title", () => {
       const gameScene = this.scene.get("GameScene") as GameScene;
       this.pauseContainer.setVisible(false);
       gameScene.quitToTitle();
     });
 
-    return this.add.container(width / 2, height / 2, [overlay, title, saveBtn, resumeBtn, quitBtn]);
+    return this.add.container(width / 2, height / 2, [overlay, title, saveBtn, journalBtn, resumeBtn, quitBtn]);
   }
 
   private createMenuButton(x: number, y: number, label: string, callback: () => void): Phaser.GameObjects.Text {
@@ -263,6 +293,26 @@ export class HUDScene extends Phaser.Scene {
 
   hidePauseMenu(): void {
     this.pauseContainer.setVisible(false);
+  }
+
+  /** Show a brief narration line at the top of the screen (Mamma Cat's inner voice). */
+  showNarration(line: string): void {
+    if (this.narrationTween) {
+      this.narrationTween.destroy();
+      this.narrationTween = null;
+    }
+    this.narrationText.setText(line);
+    this.narrationText.setAlpha(1);
+    this.narrationTween = this.tweens.add({
+      targets: this.narrationText,
+      alpha: 0,
+      delay: 3000,
+      duration: 1000,
+      ease: "Linear",
+      onComplete: () => {
+        this.narrationTween = null;
+      },
+    });
   }
 
   showSaveNotice(): void {

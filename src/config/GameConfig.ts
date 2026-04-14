@@ -3,6 +3,7 @@ import { BootScene } from '../scenes/BootScene'
 import { StartScene } from '../scenes/StartScene'
 import { GameScene } from '../scenes/GameScene'
 import { HUDScene } from '../scenes/HUDScene'
+import { JournalScene } from '../scenes/JournalScene'
 
 export const gameConfig: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
@@ -17,7 +18,7 @@ export const gameConfig: Phaser.Types.Core.GameConfig = {
       debug: false,
     },
   },
-  scene: [BootScene, StartScene, GameScene, HUDScene],
+  scene: [BootScene, StartScene, GameScene, HUDScene, JournalScene],
   scale: {
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,

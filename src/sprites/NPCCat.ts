@@ -4,7 +4,7 @@ import type { TimeOfDay } from "../systems/DayNightCycle";
 const COLS = 8;
 
 export type CatState = "idle" | "walking" | "sleeping" | "alert" | "fleeing";
-export type Disposition = "friendly" | "neutral" | "territorial";
+export type Disposition = "friendly" | "neutral" | "territorial" | "wary";
 
 export interface NPCCatConfig {
   name: string;
@@ -13,6 +13,14 @@ export interface NPCCatConfig {
   y: number;
   homeZone?: { cx: number; cy: number; radius: number };
   disposition?: Disposition;
+  /** Override the animation prefix (defaults to spriteKey). */
+  animPrefix?: string;
+  /** Custom sprite scale (defaults to 1). */
+  scale?: number;
+  /** Walk speed override (px/s). */
+  walkSpeed?: number;
+  /** Whether to shorten pause durations (e.g. kittens). */
+  hyperactive?: boolean;
 }
 
 /**
@@ -61,6 +69,11 @@ export class NPCCat extends Phaser.Physics.Arcade.Sprite {
   private homeY: number;
   private homeRadius: number;
 
+  /** Animation key prefix (may differ from spriteKey for shared assets). */
+  private readonly animPrefix: string;
+  private readonly walkSpeed: number;
+  private readonly hyperactive: boolean;
+
   /** Reference to the current phase (set externally each frame). */
   private currentPhase: TimeOfDay = "day";
 
@@ -72,18 +85,25 @@ export class NPCCat extends Phaser.Physics.Arcade.Sprite {
     this.homeX = config.homeZone?.cx ?? config.x;
     this.homeY = config.homeZone?.cy ?? config.y;
     this.homeRadius = config.homeZone?.radius ?? 150;
+    this.animPrefix = config.animPrefix ?? config.spriteKey;
+    this.walkSpeed = config.walkSpeed ?? WALK_SPEED;
+    this.hyperactive = config.hyperactive ?? false;
 
     scene.add.existing(this);
     scene.physics.add.existing(this);
     this.setDepth(3);
     this.setCollideWorldBounds(true);
 
+    if (config.scale && config.scale !== 1) {
+      this.setScale(config.scale);
+    }
+
     const body = this.body as Phaser.Physics.Arcade.Body;
     body.setSize(18, 18);
     body.setOffset(7, 12);
 
-    this.createAnimations(scene, config.spriteKey);
-    this.anims.play(`${config.spriteKey}-sit-down`, true);
+    this.createAnimations(scene, this.animPrefix);
+    this.anims.play(`${this.animPrefix}-sit-down`, true);
 
     this.enterState("idle");
   }
@@ -116,7 +136,7 @@ export class NPCCat extends Phaser.Physics.Arcade.Sprite {
 
       case "walking": {
         const body = this.body as Phaser.Physics.Arcade.Body;
-        body.setVelocity(this.walkDir.x * WALK_SPEED, this.walkDir.y * WALK_SPEED);
+        body.setVelocity(this.walkDir.x * this.walkSpeed, this.walkDir.y * this.walkSpeed);
         this.playWalkAnim();
 
         // Drift back towards home zone if straying
@@ -155,12 +175,14 @@ export class NPCCat extends Phaser.Physics.Arcade.Sprite {
     this.state = next;
 
     switch (next) {
-      case "idle":
-        this.stateTimer = Phaser.Math.Between(PAUSE_MIN_MS, PAUSE_MAX_MS);
+      case "idle": {
+        const pauseMax = this.hyperactive ? PAUSE_MIN_MS + 500 : PAUSE_MAX_MS;
+        this.stateTimer = Phaser.Math.Between(PAUSE_MIN_MS, pauseMax);
         this.setVelocity(0);
         this.setAlpha(1);
-        this.anims.play(`${this.config.spriteKey}-sit-${this.lastDirection}`, true);
+        this.anims.play(`${this.animPrefix}-sit-${this.lastDirection}`, true);
         break;
+      }
 
       case "walking":
         this.stateTimer = Phaser.Math.Between(WALK_MIN_MS, WALK_MAX_MS);
@@ -170,7 +192,7 @@ export class NPCCat extends Phaser.Physics.Arcade.Sprite {
       case "sleeping":
         this.stateTimer = Phaser.Math.Between(SLEEP_MIN_MS, SLEEP_MAX_MS);
         this.setVelocity(0);
-        this.anims.play(`${this.config.spriteKey}-rest`, true);
+        this.anims.play(`${this.animPrefix}-rest`, true);
         this.setAlpha(0.7);
         break;
 
@@ -178,7 +200,7 @@ export class NPCCat extends Phaser.Physics.Arcade.Sprite {
         this.stateTimer = ALERT_DURATION_MS;
         this.setVelocity(0);
         this.setAlpha(1);
-        this.anims.play(`${this.config.spriteKey}-sit-${this.lastDirection}`, true);
+        this.anims.play(`${this.animPrefix}-sit-${this.lastDirection}`, true);
         break;
 
       case "fleeing":
@@ -228,13 +250,18 @@ export class NPCCat extends Phaser.Physics.Arcade.Sprite {
       this.lastDirection = this.walkDir.y < 0 ? "up" : "down";
     }
 
-    const key = this.config.spriteKey;
-    const animKey = this.state === "fleeing" ? `${key}-run` : `${key}-walk`;
+    const animKey = this.state === "fleeing" ? `${this.animPrefix}-run` : `${this.animPrefix}-walk`;
     this.anims.play(animKey, true);
   }
 
   private createAnimations(scene: Phaser.Scene, key: string): void {
     if (scene.anims.exists(`${key}-sit-down`)) return;
+
+    // Ginger cats use separate strip sheets instead of a grid
+    if (key === "ginger") {
+      this.createGingerAnimations(scene, key);
+      return;
+    }
 
     const row = (r: number, count = 4) => {
       const start = r * COLS;
@@ -284,6 +311,40 @@ export class NPCCat extends Phaser.Physics.Arcade.Sprite {
     scene.anims.create({
       key: `${key}-rest`,
       frames: scene.anims.generateFrameNumbers(key, row(6, 4)),
+      frameRate: 2,
+      repeat: -1,
+    });
+  }
+
+  /** Strip-based animations for ginger cats (64px frames scaled to 0.5). */
+  private createGingerAnimations(scene: Phaser.Scene, key: string): void {
+    // Idle strip (10 frames) used for all sit directions
+    for (const dir of ["down", "left", "right", "up"] as const) {
+      scene.anims.create({
+        key: `${key}-sit-${dir}`,
+        frames: scene.anims.generateFrameNumbers("ginger-idle", { start: 0, end: 3 }),
+        frameRate: 3,
+        repeat: -1,
+      });
+    }
+    // Walk strip (15 frames)
+    scene.anims.create({
+      key: `${key}-walk`,
+      frames: scene.anims.generateFrameNumbers("ginger-walk", { start: 0, end: 7 }),
+      frameRate: 6,
+      repeat: -1,
+    });
+    // Run strip (10 frames)
+    scene.anims.create({
+      key: `${key}-run`,
+      frames: scene.anims.generateFrameNumbers("ginger-run", { start: 0, end: 7 }),
+      frameRate: 12,
+      repeat: -1,
+    });
+    // Rest: use idle frames slowed down
+    scene.anims.create({
+      key: `${key}-rest`,
+      frames: scene.anims.generateFrameNumbers("ginger-idle", { start: 0, end: 3 }),
       frameRate: 2,
       repeat: -1,
     });
