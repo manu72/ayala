@@ -181,6 +181,8 @@ export class JournalScene extends Phaser.Scene {
 
     const knownCats = (gameScene.registry.get("KNOWN_CATS") as string[]) ?? [];
     const dayCount = gameScene.dayNight?.dayCount ?? 1;
+    const metDays = (gameScene.registry.get("JOURNAL_MET_DAYS") as Record<string, number> | undefined) ?? {};
+    let metDaysUpdated = false;
     const entries: JournalEntry[] = [];
 
     for (const name of knownCats) {
@@ -193,13 +195,24 @@ export class JournalScene extends Phaser.Scene {
           : desc.low
         : "A cat from the colony.";
 
+      if (typeof metDays[name] !== "number") {
+        // Backfill for older saves that predate journal met-day tracking.
+        metDays[name] = dayCount;
+        metDaysUpdated = true;
+      }
+
       entries.push({
         name,
         description,
-        metOnDay: Math.max(1, dayCount - Math.floor(Math.random() * 2)),
+        metOnDay: metDays[name],
         trust,
         disposition: this.getEffectiveDisposition(name, trust, gameScene),
       });
+    }
+
+    if (metDaysUpdated) {
+      gameScene.registry.set("JOURNAL_MET_DAYS", metDays);
+      gameScene.autoSave();
     }
 
     // Sort by trust descending

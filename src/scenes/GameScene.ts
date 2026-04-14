@@ -122,7 +122,7 @@ export class GameScene extends Phaser.Scene {
     for (const key of [
       "MET_BLACKY", "TIGER_TALKS", "JAYCO_TALKS", "KNOWN_CATS",
       "CHAPTER", "CH1_RESTED", "FLUFFY_TALKS", "PEDIGREE_TALKS",
-      "MET_GINGER_A", "MET_GINGER_B", "JAYCO_JR_TALKS",
+      "MET_GINGER_A", "MET_GINGER_B", "JAYCO_JR_TALKS", "JOURNAL_MET_DAYS",
     ]) {
       this.registry.remove(key);
     }
@@ -527,6 +527,17 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  private addKnownCat(name: string): void {
+    this.knownCats.add(name);
+    this.registry.set("KNOWN_CATS", Array.from(this.knownCats));
+
+    const metDays = (this.registry.get("JOURNAL_MET_DAYS") as Record<string, number> | undefined) ?? {};
+    if (typeof metDays[name] !== "number") {
+      metDays[name] = this.dayNight.dayCount;
+      this.registry.set("JOURNAL_MET_DAYS", metDays);
+    }
+  }
+
   // ──────────── NPC ────────────
 
   private updateNPCs(delta: number): void {
@@ -543,8 +554,7 @@ export class GameScene extends Phaser.Scene {
       if (!indicator.known) {
         if (dist < LEARN_NAME_DISTANCE) {
           indicator.reveal();
-          this.knownCats.add(cat.npcName);
-          this.registry.set("KNOWN_CATS", Array.from(this.knownCats));
+          this.addKnownCat(cat.npcName);
         }
       }
 
@@ -904,8 +914,7 @@ export class GameScene extends Phaser.Scene {
             ],
             () => {
               this.registry.set("MET_BLACKY", true);
-              this.knownCats.add("Blacky");
-              this.registry.set("KNOWN_CATS", Array.from(this.knownCats));
+              this.addKnownCat("Blacky");
               this.npcs.find((e) => e.cat === cat)?.indicator.reveal();
               this.trust.firstConversation("Blacky");
               this.autoSave();
@@ -925,8 +934,7 @@ export class GameScene extends Phaser.Scene {
             ["*The cat's ears flatten slightly. Its tail flicks once.*", '"Ssss. This is my spot."'],
             () => {
               this.registry.set("TIGER_TALKS", 1);
-              this.knownCats.add("Tiger");
-              this.registry.set("KNOWN_CATS", Array.from(this.knownCats));
+              this.addKnownCat("Tiger");
               this.npcs.find((e) => e.cat === cat)?.indicator.reveal();
               this.trust.firstConversation("Tiger");
               this.autoSave();
@@ -964,8 +972,7 @@ export class GameScene extends Phaser.Scene {
             ],
             () => {
               this.registry.set("JAYCO_TALKS", 1);
-              this.knownCats.add("Jayco");
-              this.registry.set("KNOWN_CATS", Array.from(this.knownCats));
+              this.addKnownCat("Jayco");
               const entry = this.npcs.find((e) => e.cat === cat);
               entry?.indicator.reveal();
               entry?.indicator.setDisposition("friendly");
@@ -991,8 +998,7 @@ export class GameScene extends Phaser.Scene {
             ],
             () => {
               this.registry.set("JAYCO_JR_TALKS", 1);
-              this.knownCats.add("Jayco Jr");
-              this.registry.set("KNOWN_CATS", Array.from(this.knownCats));
+              this.addKnownCat("Jayco Jr");
               this.npcs.find((e) => e.cat === cat)?.indicator.reveal();
               this.trust.firstConversation("Jayco Jr");
               this.autoSave();
@@ -1018,8 +1024,7 @@ export class GameScene extends Phaser.Scene {
             ],
             () => {
               this.registry.set("FLUFFY_TALKS", 1);
-              this.knownCats.add("Fluffy");
-              this.registry.set("KNOWN_CATS", Array.from(this.knownCats));
+              this.addKnownCat("Fluffy");
               this.npcs.find((e) => e.cat === cat)?.indicator.reveal();
               this.trust.firstConversation("Fluffy");
               this.autoSave();
@@ -1051,8 +1056,7 @@ export class GameScene extends Phaser.Scene {
             ],
             () => {
               this.registry.set("PEDIGREE_TALKS", 1);
-              this.knownCats.add("Pedigree");
-              this.registry.set("KNOWN_CATS", Array.from(this.knownCats));
+              this.addKnownCat("Pedigree");
               this.npcs.find((e) => e.cat === cat)?.indicator.reveal();
               this.trust.firstConversation("Pedigree");
               this.autoSave();
@@ -1077,8 +1081,7 @@ export class GameScene extends Phaser.Scene {
             ],
             () => {
               this.registry.set("MET_GINGER_A", true);
-              this.knownCats.add("Ginger");
-              this.registry.set("KNOWN_CATS", Array.from(this.knownCats));
+              this.addKnownCat("Ginger");
               this.npcs.find((e) => e.cat === cat)?.indicator.reveal();
               this.trust.firstConversation("Ginger");
               this.autoSave();
@@ -1106,8 +1109,7 @@ export class GameScene extends Phaser.Scene {
             ["*This one just watches. It doesn't speak. Its twin does the talking.*"],
             () => {
               this.registry.set("MET_GINGER_B", true);
-              this.knownCats.add("Ginger B");
-              this.registry.set("KNOWN_CATS", Array.from(this.knownCats));
+              this.addKnownCat("Ginger B");
               this.npcs.find((e) => e.cat === cat)?.indicator.reveal();
               this.trust.firstConversation("Ginger B");
               this.autoSave();

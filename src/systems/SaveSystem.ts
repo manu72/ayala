@@ -21,7 +21,7 @@ const CURRENT_VERSION = 1
 const TRACKED_KEYS = [
   'MET_BLACKY', 'TIGER_TALKS', 'JAYCO_TALKS', 'KNOWN_CATS',
   'CHAPTER', 'CH1_RESTED', 'FLUFFY_TALKS', 'PEDIGREE_TALKS',
-  'MET_GINGER_A', 'MET_GINGER_B', 'JAYCO_JR_TALKS',
+  'MET_GINGER_A', 'MET_GINGER_B', 'JAYCO_JR_TALKS', 'JOURNAL_MET_DAYS',
 ] as const
 
 const VALID_PHASES: ReadonlySet<string> = new Set(['dawn', 'day', 'evening', 'night'])
