@@ -1,6 +1,7 @@
 import Phaser from 'phaser'
 import { MammaCat } from '../sprites/MammaCat'
 import { NPCCat } from '../sprites/NPCCat'
+import { GuardNPC } from '../sprites/GuardNPC'
 import { DayNightCycle } from '../systems/DayNightCycle'
 import { DialogueSystem } from '../systems/DialogueSystem'
 import { StatsSystem } from '../systems/StatsSystem'
@@ -23,6 +24,8 @@ export class GameScene extends Phaser.Scene {
   stats!: StatsSystem
 
   private npcs: NPCEntry[] = []
+  private guard!: GuardNPC
+  private guardIndicator!: ThreatIndicator
   private dialogue!: DialogueSystem
   private hud!: StatsHUD
   private foodSources!: FoodSourceManager
@@ -69,6 +72,16 @@ export class GameScene extends Phaser.Scene {
 
     // Spawn NPCs
     this.spawnNPC('Blacky', 'blacky', 'spawn_blacky', 'neutral', 150, 1024, 544)
+    this.spawnNPC('Tiger', 'tiger', 'spawn_tiger', 'territorial', 200, 1600, 1152)
+    this.spawnNPC('Jayco', 'jayco', 'spawn_jayco', 'friendly', 150, 2560, 512)
+
+    // Guard NPC near restaurants
+    const guardPoint = this.map.findObject('spawns', o => o.name === 'spawn_guard')
+    const gx = guardPoint?.x ?? 2336
+    const gy = guardPoint?.y ?? 1728
+    this.guard = new GuardNPC(this, gx, gy)
+    this.guard.setTarget(this.player)
+    this.guardIndicator = new ThreatIndicator(this, this.guard, 'Guard', 'dangerous', true)
 
     // Systems
     this.dialogue = new DialogueSystem(this)
@@ -152,6 +165,10 @@ export class GameScene extends Phaser.Scene {
 
     this.hud.update(this.stats)
     this.foodSources.update(this.dayNight.currentPhase, time)
+
+    // Guard update
+    this.guard.update(delta)
+    this.guardIndicator.update()
 
     // NPC AI + indicators
     for (const { cat, indicator } of this.npcs) {
