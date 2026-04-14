@@ -428,109 +428,123 @@ For background colony cats, a smaller set of animations with color variations.
 
 ### 8.1 Framework
 
-**RPG JS v4** — An open-source TypeScript framework for creating 2D RPGs in the browser.
+**Phaser 3** — A mature, widely-used open-source HTML5 game framework for 2D games.
 
 Key technologies:
 
 - TypeScript 5
-- PixiJS v7 (WebGL rendering)
-- ViteJS v4 (compilation and hot-reload)
-- Vue 3 (GUI — dialogue boxes, menus, HUD)
-- Tiled Map Editor (map creation)
+- Phaser 3.90+ (Canvas/WebGL rendering via Phaser's built-in renderer)
+- ViteJS (compilation, hot-reload, production bundling)
+- Tiled Map Editor (map creation, exported as JSON)
+
+Note: The project originally used RPG JS v4 but switched to Phaser 3 during Phase 1 due to build issues with RPG JS's standalone mode (TSX tileset files conflicted with Vite's JSX compiler). Phaser 3 provides a simpler, purely client-side architecture with no server/client separation.
 
 ### 8.2 Build Mode
 
-**RPG (single-player standalone)**
+**Static single-player build**
 
-- Built with `RPG_TYPE=rpg npm run build`
-- Produces static files in `dist/standalone/`
+- Built with `npm run build` (Vite production build)
+- Produces static files in `dist/`
 - Deployable to any static host (Netlify, Vercel, GitHub Pages) or playable locally
-- No server required
+- No server required — everything runs in the browser
 
 ### 8.3 Offline / PWA
 
-- RPG JS v4 has built-in PWA support (enabled by default in production builds)
-- Service worker automatically caches game assets for offline play
-- Configurable via `rpg.toml` (game name, icon, theme color)
-- Camille can "install" the game to her iPad/iPhone home screen
+- Offline play achievable by adding a service worker to cache game assets
+- Can be configured as a PWA so Camille can "install" the game to her iPad/iPhone home screen
+- Service worker implementation planned for Phase 5 (polish)
 
 ### 8.4 Mobile / Responsive
 
-- RPG JS includes responsive design support via CSS media queries
-- Mobile touch controls available via `@rpgjs/mobile-gui` plugin (virtual d-pad)
+- Phaser 3 Scale Manager handles responsive sizing (`Phaser.Scale.FIT` + `CENTER_BOTH`)
+- Touch input supported natively by Phaser
+- Virtual d-pad overlay for mobile controls (to be implemented — Phase 2 or later)
 - iPad landscape is the target mobile experience
 - iPhone landscape is secondary (smaller screen, same controls)
 - Desktop/keyboard is the development target
 
 ### 8.5 Save System
 
-- `player.save()` serialises all player state to JSON
-- In standalone mode, save to `localStorage`
+- Game state serialised to JSON
+- Saved to `localStorage` in the browser
 - Auto-save at key story moments
 - Manual save via interaction (e.g., sleeping in Mamma Cat's safe spot)
-- Title screen / save screen plugins available (`@rpgjs/save`, `@rpgjs/title-screen`)
+- Phaser's `registry` and `data` systems used for game state tracking
 
-### 8.6 Key RPG JS Features We'll Use
+### 8.6 Key Phaser 3 Features We'll Use
 
-| Game Need                    | RPG JS Feature                                          |
-| ---------------------------- | ------------------------------------------------------- |
-| Cat NPC characters           | Events (Scenario mode for per-player state)             |
-| Cat dialogue/body language   | `player.showText()`, `player.showChoices()`, custom GUI |
-| Colony relationship tracking | `player.setVariable()` / `player.getVariable()`         |
-| Map zones                    | Tiled World (.world) with connected maps                |
-| Day/night cycle              | Custom time system with event hooks                     |
-| Threat indicators            | Component system (floating elements above entities)     |
-| Items (food, water)          | Database items system                                   |
-| Story progression            | Variable-driven event changes via `onChanges()` hook    |
-| Save/load                    | `player.save()` → localStorage                          |
-| Mobile controls              | `@rpgjs/mobile-gui` plugin                              |
-| Offline play                 | Built-in PWA support                                    |
+| Game Need                    | Phaser 3 Feature                                         |
+| ---------------------------- | -------------------------------------------------------- |
+| Cat NPC characters           | Arcade Physics sprites with custom AI behaviors          |
+| Cat dialogue/body language   | Custom DialogueSystem overlay (DOM or Phaser text)       |
+| Colony relationship tracking | `this.registry.set()` / `this.registry.get()`            |
+| Map zones                    | Tiled JSON tilemaps loaded via `tilemapTiledJSON()`      |
+| Day/night cycle              | Color-tinted overlay rectangle with `setScrollFactor(0)` |
+| Threat indicators            | Text/sprite labels floating above entities               |
+| Items (food, water)          | Custom inventory system using game registry              |
+| Story progression            | State machine driven by registry variables               |
+| Save/load                    | JSON serialise → localStorage                            |
+| Mobile controls              | Phaser touch input + virtual d-pad overlay               |
+| Offline play                 | Service worker + PWA manifest (Phase 5)                  |
+| Camera                       | `this.cameras.main` with zoom (2.5x) and follow          |
 
 ---
 
 ## 9. DEVELOPMENT ROADMAP
 
-### Phase 1: Foundation (Weeks 1-4)
+### Phase 1: Foundation ✅ COMPLETE
 
-- Set up RPG JS v4 development environment
-- Create basic map of ATG in Tiled (simplified, one or two zones)
-- Implement Mamma Cat sprite with basic movement (4-directional walking)
-- Implement basic day/night visual cycle
-- Test standalone build and offline play
+- Set up Phaser 3 + Vite + TypeScript project
+- Create tilemap of ATG (100x80 tiles, triangle boundaries)
+- Implement Mamma Cat sprite with 4-directional movement
+- Implement basic day/night visual cycle (day → evening → night)
+- Add Blacky NPC with dialogue system
+- Verify production build works as static files
 
-### Phase 2: Core Mechanics (Weeks 5-8)
+### Phase 1.5: Visual Polish ✅ COMPLETE
+
+- Camera zoom (2.5x) — world feels large, Mamma Cat feels small
+- Improved tileset with texture and variation
+- Environmental objects (trees with canopies, benches, boulders, lampposts)
+- Road boundaries with lane markings and sidewalk strip
+- Expanded map to 100x80 tiles (3200x2560 pixels)
+- Zone transitions between grass, paths, and plaza areas
+
+### Phase 2: Core Mechanics (current)
 
 - Implement hunger/thirst/energy stats and HUD
 - Add food/water sources to map
-- Create NPC cat events with basic behavior (idle, wander, sleep)
+- Create NPC cat behaviors (idle, wander, sleep cycles)
 - Implement threat/friend indicator system
-- Add first named NPC (Blacky) with dialogue
+- Add more named NPC cats with dialogue
 - Implement basic collision and territory boundaries
 
-### Phase 3: Social & Story (Weeks 9-12)
+### Phase 3: Social & Story
 
 - Add remaining named NPC cats with dialogue trees
 - Implement cat body language animations (tail up, ears flat, etc.)
-- Implement trust/reputation system
+- Implement trust/reputation points system
 - Build Chapter 1-3 story progression
 - Add human NPC types (joggers, feeders, dog walkers)
 - Add dog NPCs
 
-### Phase 4: Camille & Endgame (Weeks 13-16)
+### Phase 4: Camille & Endgame
 
-- Implement Camille NPC and encounter sequence
+- Implement Camille NPC and fixed encounter sequence
 - Build Chapters 4-6
-- Implement snatchers (night threat)
+- Implement snatchers (night threat — caught = reset to last save)
+- Implement colony dynamics (dumping events, cats arriving/leaving)
 - Build epilogue and end screen with welfare message
-- Polish save/load system
-- Mobile touch control testing
+- Colony journal / cat-dex
 
-### Phase 5: Polish & Release (Weeks 17-20)
+### Phase 5: Polish & Release
 
+- Visual overhaul — real tilesets, organic paths, ATG-accurate landmarks
 - Playtesting (Camille is primary tester!)
 - Bug fixes, balance adjustments
-- Audio implementation
-- PWA configuration and offline testing
+- Audio implementation (sourced ambient tracks, cat sounds)
+- PWA / service worker for offline play
+- Mobile touch controls (virtual d-pad)
 - Deploy to hosting
 - Gift to Camille
 
