@@ -137,8 +137,13 @@ export class HumanNPC extends Phaser.Physics.Arcade.Sprite {
     this.setActive(true);
     const start = this.waypointPath[0]!;
     this.setPosition(start.x, start.y);
-    // Feeders spawn at waypoint 0 and should head to station first.
-    this.currentWaypoint = this.humanType === "feeder" && this.waypointPath.length > 1 ? 1 : 0;
+    // Feeders spawn at waypoint 0 and should head to configured station first.
+    if (this.humanType === "feeder" && this.waypointPath.length > 1) {
+      const targetIdx = this.config.lingerWaypointIndex ?? 1;
+      this.currentWaypoint = Math.max(0, Math.min(targetIdx, this.waypointPath.length - 1));
+    } else {
+      this.currentWaypoint = 0;
+    }
     this.lingering = false;
   }
 

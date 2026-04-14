@@ -162,7 +162,7 @@ export class GameScene extends Phaser.Scene {
     this.spawnNPC("Jayco", "jayco", "spawn_jayco", "friendly", 150, 2560, 512);
 
     // Phase 3 named cats
-    this.spawnNPC("Jayco Jr", "jayco", "spawn_jayco", "friendly", 100, 2580, 530, {
+    this.spawnNPC("Jayco Jr", "jayco", "spawn_jayco_jr", "friendly", 100, 2580, 530, {
       scale: 0.7,
       walkSpeed: 40,
       hyperactive: true,
@@ -434,6 +434,10 @@ export class GameScene extends Phaser.Scene {
     this.physics.resume();
     const hud = this.scene.get("HUDScene") as HUDScene | undefined;
     hud?.hidePauseMenu?.();
+  }
+
+  getNPCDisposition(name: string): string | undefined {
+    return this.npcs.find((entry) => entry.cat.npcName === name)?.cat.disposition;
   }
 
   quitToTitle(): void {

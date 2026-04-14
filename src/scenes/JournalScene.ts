@@ -220,10 +220,8 @@ export class JournalScene extends Phaser.Scene {
 
   private getEffectiveDisposition(name: string, trust: number, gameScene: GameScene): string {
     if (trust >= 50) return "friendly";
-    // Check NPC's current disposition from scene
-    const npcs = (gameScene as unknown as { npcs: Array<{ cat: { npcName: string; disposition: string } }> }).npcs;
-    const entry = npcs?.find((e) => e.cat.npcName === name);
-    return entry?.cat.disposition ?? "neutral";
+    const disposition = gameScene.getNPCDisposition(name);
+    return disposition ?? "neutral";
   }
 
   private getDispositionSymbol(disposition: string): string {
