@@ -46,7 +46,7 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 |-------|--------|
 | Arrow keys / WASD | Move Mamma Cat |
 | Shift + direction | Run (2x speed, drains energy faster) |
-| Shift + Down (S / Arrow Down) | Crouch / hide (slow, harder for threats to detect) |
+| C | Crouch / hide (slow, harder for threats to detect) |
 | Space (tap) | Interact -- context-sensitive: talk to nearby cat, eat food, drink water |
 | Space | Advance dialogue text |
 | Z (hold 2 seconds while stationary) | Rest / sleep -- restores energy over time |

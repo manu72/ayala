@@ -33,14 +33,14 @@ Run speed: ~2x walk speed (240 px/s).
 
 | Action | Keys |
 |--------|------|
-| Crouch / hide | Shift + S (or Shift + Arrow Down) |
+| Crouch / hide | C |
 
 When crouching:
 - Mamma Cat's sprite changes to a low/crouched pose (ears flat, body low)
 - Movement speed is reduced to ~40% of walk speed
 - Mamma Cat is harder for threats to detect (reduced detection radius from snatchers, guards, dogs)
 - Only effective near cover (bushes, boulders, under stairs, tree trunks). If crouching in the open, detection radius is only slightly reduced.
-- Release Shift to stand back up
+- Release C to stand back up
 
 ### Interact
 
@@ -57,13 +57,13 @@ Context-sensitive based on proximity:
 
 | Action | Keys |
 |--------|------|
-| Lie down and rest | Hold Space for 2 seconds (while stationary) |
-| Wake up | Any movement key or tap Space |
+| Lie down and rest | Hold Z for 2 seconds (while stationary) |
+| Wake up | Any movement key, tap Space, or tap Z |
 
 Resting is how Mamma Cat restores energy. It's a deliberate decision to stop and be vulnerable.
 
 **Entering rest mode:**
-- Player must be stationary (not moving) and hold Space for 2 seconds
+- Player must be stationary (not moving) and hold Z for 2 seconds
 - A small progress indicator appears (a subtle "zzz" filling in, or a circular progress ring) so the player knows they need to keep holding
 - After 2 seconds: Mamma Cat curls up — sprite changes to sleeping pose
 - The hold-to-rest prevents accidental resting when the player meant to interact
@@ -83,7 +83,7 @@ Resting is how Mamma Cat restores energy. It's a deliberate decision to stop and
 
 **Waking up:**
 - Any movement key (WASD or Arrows) instantly wakes Mamma Cat
-- Tapping Space also wakes her
+- Tapping Space or Z also wakes her
 - Sprite returns to idle standing pose
 - Brief 0.5 second "getting up" delay before full movement speed is available (cats stretch when they wake up)
 
@@ -138,6 +138,8 @@ const wasd = this.input.keyboard.addKeys({
 })
 const shift = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT)
 const space = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE)
+const crouch = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.C)
+const rest = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.Z)
 const tab = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.TAB)
 
 // In update():
@@ -151,16 +153,16 @@ if (this.isResting) {
     this.showSleepWarning()  // red pulse, warning sound
   }
   
-  // Wake up on any movement key or space tap
+// Wake up on any movement key, space tap, or Z tap
   const anyMovement = up || down || left || right
-  if (anyMovement || Phaser.Input.Keyboard.JustDown(space)) {
+if (anyMovement || Phaser.Input.Keyboard.JustDown(space) || Phaser.Input.Keyboard.JustDown(rest)) {
     this.wakeUp()  // restore idle sprite, brief delay
   }
   return  // skip movement processing while resting
 }
 
-// --- Rest initiation (hold Space for 2 seconds while stationary) ---
-if (space.isDown && this.player.body.velocity.length() === 0) {
+// --- Rest initiation (hold Z for 2 seconds while stationary) ---
+if (rest.isDown && this.player.body.velocity.length() === 0) {
   this.restHoldTimer += delta
   this.showRestProgress(this.restHoldTimer / 2000)  // progress indicator
   if (this.restHoldTimer >= 2000) {
@@ -185,8 +187,8 @@ const up = cursors.up.isDown || wasd.up.isDown
 const down = cursors.down.isDown || wasd.down.isDown
 const left = cursors.left.isDown || wasd.left.isDown
 const right = cursors.right.isDown || wasd.right.isDown
-const isRunning = shift.isDown && (up || left || right)  // shift + direction = run
-const isCrouching = shift.isDown && down                  // shift + down = crouch
+const isRunning = shift.isDown && (up || down || left || right) && !crouch.isDown
+const isCrouching = crouch.isDown
 
 const speed = isCrouching ? 48 : isRunning ? 240 : 120
 

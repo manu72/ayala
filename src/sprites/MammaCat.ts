@@ -19,6 +19,7 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
     right: Phaser.Input.Keyboard.Key;
   };
   private shiftKey!: Phaser.Input.Keyboard.Key;
+  private crouchKey!: Phaser.Input.Keyboard.Key;
   private nameLabel: Phaser.GameObjects.Text;
 
   speedMultiplier = 1.0;
@@ -59,6 +60,7 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
     if (scene.input.keyboard) {
       this.cursors = scene.input.keyboard.createCursorKeys();
       this.shiftKey = scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT);
+      this.crouchKey = scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.C);
       this.wasd = {
         up: scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.W),
         down: scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S),
@@ -124,9 +126,10 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
     const left = this.cursors.left.isDown || this.wasd.left.isDown;
     const right = this.cursors.right.isDown || this.wasd.right.isDown;
     const shift = this.shiftKey?.isDown ?? false;
+    const crouch = this.crouchKey?.isDown ?? false;
 
-    // Crouch: Shift + Down (and no other direction)
-    const wantsCrouch = shift && down && !up && !left && !right;
+    // Crouch/hide uses the dedicated C key.
+    const wantsCrouch = crouch;
     // Run: Shift + any direction (but not crouching)
     const wantsRun = shift && !wantsCrouch && canRun;
 
