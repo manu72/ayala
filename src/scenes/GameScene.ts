@@ -121,6 +121,10 @@ export class GameScene extends Phaser.Scene {
     this.hud.update(this.stats)
     this.foodSources.update(this.dayNight.currentPhase, time)
 
+    // NPC AI update
+    this.blacky.setPhase(this.dayNight.currentPhase)
+    this.blacky.update(delta)
+
     // Action key: try food source first, then NPC interaction
     const actionDown = this.actionKey?.isDown || this.spaceKey?.isDown
     if (actionDown && !this.dialogue.isActive) {
