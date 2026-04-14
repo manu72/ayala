@@ -155,7 +155,12 @@ export class GameScene extends Phaser.Scene {
   }
 
   update(time: number, delta: number): void {
-    // Paused — skip all game logic
+    // Escape must be checked before the pause gate so it can unpause
+    if (this.escapeKey && Phaser.Input.Keyboard.JustDown(this.escapeKey)) {
+      this.togglePause();
+      return;
+    }
+
     if (this.isPaused) return;
 
     const deltaSec = delta / 1000;
@@ -174,12 +179,6 @@ export class GameScene extends Phaser.Scene {
       if (this.collapseRecoveryTimer >= 3000) {
         this.recoverFromCollapse();
       }
-      return;
-    }
-
-    // Escape → toggle pause menu
-    if (this.escapeKey && Phaser.Input.Keyboard.JustDown(this.escapeKey)) {
-      this.togglePause();
       return;
     }
 
