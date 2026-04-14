@@ -12,7 +12,7 @@ import type { HUDScene } from './HUDScene'
 const INTERACTION_DISTANCE = 50;
 const LEARN_NAME_DISTANCE = 100;
 const TILE_SIZE = 32;
-const REST_HOLD_MS = 2000;
+import { REST_HOLD_MS } from "../config/constants";
 const DEFAULT_ZOOM = 2.5;
 const PEEK_ZOOM = 0.8;
 const ZOOM_DURATION = 500;

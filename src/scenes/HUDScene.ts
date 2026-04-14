@@ -12,7 +12,7 @@ const BAR_H = 10
 const BAR_GAP = 6
 const BAR_LABEL_W = 50
 
-const REST_HOLD_MS = 2000
+import { REST_HOLD_MS } from '../config/constants'
 
 const FONT_FAMILY = 'Arial, Helvetica, sans-serif'
 
