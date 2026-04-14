@@ -7,7 +7,6 @@ interface PhaseConfig {
   alpha: number
   durationMs: number
   next: TimeOfDay
-  /** In-game hour this phase starts at (for clock display) */
   startHour: number
 }
 
@@ -24,7 +23,6 @@ export class DayNightCycle {
   private overlay: Phaser.GameObjects.Rectangle
   private phase: TimeOfDay = 'dawn'
   private phaseTimer = 0
-  private label: Phaser.GameObjects.Text
 
   private transitioning = false
   private transitionTimer = 0
@@ -33,7 +31,6 @@ export class DayNightCycle {
   private fromColor = { r: 0, g: 0, b: 0 }
   private toColor = { r: 0, g: 0, b: 0 }
 
-  /** Cumulative game time in ms since dawn of day 1, used for clock display */
   private gameTimeMs = 0
 
   constructor(scene: Phaser.Scene) {
@@ -42,41 +39,27 @@ export class DayNightCycle {
     this.overlay = scene.add.rectangle(
       cam.width / 2,
       cam.height / 2,
-      cam.width,
-      cam.height,
+      cam.width * 4,
+      cam.height * 4,
       PHASES.dawn.color,
       PHASES.dawn.alpha,
     )
     this.overlay.setScrollFactor(0)
     this.overlay.setDepth(50)
-
-    this.label = scene.add.text(8, 8, '', {
-      fontSize: '11px',
-      color: '#ffffff',
-      stroke: '#000000',
-      strokeThickness: 2,
-    })
-    this.label.setScrollFactor(0)
-    this.label.setDepth(51)
-
-    this.applyPhase()
   }
 
   get currentPhase(): TimeOfDay {
     return this.phase
   }
 
-  /** Returns true during the day phase (heat penalty period). */
   get isHeatActive(): boolean {
     return this.phase === 'day'
   }
 
-  /** Fraction of current phase elapsed (0..1). */
   get phaseProgress(): number {
     return Math.min(this.phaseTimer / PHASES[this.phase].durationMs, 1)
   }
 
-  /** Current in-game hour (6-24/0-5 range, float). */
   get gameHour(): number {
     const cfg = PHASES[this.phase]
     const nextCfg = PHASES[cfg.next]
@@ -84,7 +67,6 @@ export class DayNightCycle {
     return (cfg.startHour + hoursInPhase * this.phaseProgress) % 24
   }
 
-  /** Formatted clock string, e.g. "Dawn 7:30 AM". */
   get clockText(): string {
     const h = this.gameHour
     const hour12 = Math.floor(h) % 12 || 12
@@ -97,7 +79,6 @@ export class DayNightCycle {
     return `${names[this.phase]} ${hour12}:${pad}${mins} ${ampm}`
   }
 
-  /** Restore from saved state. */
   restore(phase: TimeOfDay, gameTimeMs: number): void {
     this.phase = phase
     this.gameTimeMs = gameTimeMs
@@ -106,7 +87,6 @@ export class DayNightCycle {
 
     const cfg = PHASES[this.phase]
     this.overlay.setFillStyle(cfg.color, cfg.alpha)
-    this.applyPhase()
   }
 
   get totalGameTimeMs(): number {
@@ -138,8 +118,6 @@ export class DayNightCycle {
       this.phaseTimer -= PHASES[this.phase].durationMs
       this.cyclePhase()
     }
-
-    this.label.setText(this.clockText)
   }
 
   private cyclePhase(): void {
@@ -166,9 +144,5 @@ export class DayNightCycle {
 
     this.transitioning = true
     this.transitionTimer = 0
-  }
-
-  private applyPhase(): void {
-    this.label.setText(this.clockText)
   }
 }

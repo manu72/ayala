@@ -5,10 +5,10 @@ import { GuardNPC } from '../sprites/GuardNPC'
 import { DayNightCycle } from '../systems/DayNightCycle'
 import { DialogueSystem } from '../systems/DialogueSystem'
 import { StatsSystem } from '../systems/StatsSystem'
-import { StatsHUD } from '../systems/StatsHUD'
 import { FoodSourceManager } from '../systems/FoodSource'
 import { ThreatIndicator } from '../systems/ThreatIndicator'
 import { SaveSystem } from '../systems/SaveSystem'
+import type { HUDScene } from './HUDScene'
 
 const INTERACTION_DISTANCE = 50
 const LEARN_NAME_DISTANCE = 100
@@ -28,7 +28,6 @@ export class GameScene extends Phaser.Scene {
   private guard!: GuardNPC
   private guardIndicator!: ThreatIndicator
   private dialogue!: DialogueSystem
-  private hud!: StatsHUD
   private foodSources!: FoodSourceManager
   private actionKey!: Phaser.Input.Keyboard.Key
   private spaceKey!: Phaser.Input.Keyboard.Key
@@ -36,7 +35,6 @@ export class GameScene extends Phaser.Scene {
   private overheadLayer!: Phaser.Tilemaps.TilemapLayer | null
   private map!: Phaser.Tilemaps.Tilemap
   private knownCats: Set<string> = new Set()
-  private saveNotice!: Phaser.GameObjects.Text
   private collapseRecoveryTimer = 0
   private collapseRecovering = false
 
@@ -68,7 +66,7 @@ export class GameScene extends Phaser.Scene {
     let spawnX = spawnPoint?.x ?? this.map.widthInPixels / 2
     let spawnY = spawnPoint?.y ?? this.map.heightInPixels / 2
 
-    // Systems (created before restore so we can apply save data)
+    // Systems
     this.stats = new StatsSystem()
     this.dayNight = new DayNightCycle(this)
 
@@ -93,7 +91,7 @@ export class GameScene extends Phaser.Scene {
       this.physics.add.collider(this.player, objectsLayer)
     }
 
-    // Known cats from registry
+    // Known cats
     const savedKnown = this.registry.get('KNOWN_CATS') as string[] | undefined
     this.knownCats = new Set(savedKnown ?? [])
 
@@ -101,8 +99,6 @@ export class GameScene extends Phaser.Scene {
     this.spawnNPC('Blacky', 'blacky', 'spawn_blacky', 'neutral', 150, 1024, 544)
     this.spawnNPC('Tiger', 'tiger', 'spawn_tiger', 'territorial', 200, 1600, 1152)
     this.spawnNPC('Jayco', 'jayco', 'spawn_jayco', 'friendly', 150, 2560, 512)
-
-    // Restore disposition from saved variables
     this.restoreDispositions()
 
     // Guard NPC
@@ -111,9 +107,8 @@ export class GameScene extends Phaser.Scene {
     this.guard.setTarget(this.player)
     this.guardIndicator = new ThreatIndicator(this, this.guard, 'Guard', 'dangerous', true)
 
-    // Dialogue & HUD
+    // Dialogue
     this.dialogue = new DialogueSystem(this)
-    this.hud = new StatsHUD(this)
 
     // Food sources
     this.foodSources = new FoodSourceManager(this)
@@ -134,14 +129,10 @@ export class GameScene extends Phaser.Scene {
     this.cameras.main.startFollow(this.player, true, 0.08, 0.08)
     this.cameras.main.setDeadzone(50, 50)
 
-    // Save notice (hidden by default)
-    const cam = this.cameras.main
-    this.saveNotice = this.add.text(cam.width - 10, 10, 'Saved', {
-      fontSize: '10px',
-      color: '#44DD44',
-      stroke: '#000000',
-      strokeThickness: 2,
-    }).setOrigin(1, 0).setScrollFactor(0).setDepth(200).setAlpha(0)
+    // Launch the HUD overlay scene (runs in parallel, no zoom)
+    if (!this.scene.isActive('HUDScene')) {
+      this.scene.launch('HUDScene')
+    }
   }
 
   update(time: number, delta: number): void {
@@ -152,14 +143,12 @@ export class GameScene extends Phaser.Scene {
 
     if (this.stats.collapsed) {
       this.player.setVelocity(0)
-      this.hud.update(this.stats)
 
       if (!this.collapseRecovering) {
         this.collapseRecovering = true
         this.collapseRecoveryTimer = 0
       }
       this.collapseRecoveryTimer += delta
-      // After 3 seconds, teleport to safe spot and recover
       if (this.collapseRecoveryTimer >= 3000) {
         this.recoverFromCollapse()
       }
@@ -182,7 +171,6 @@ export class GameScene extends Phaser.Scene {
       inShelter,
     )
 
-    this.hud.update(this.stats)
     this.foodSources.update(this.dayNight.currentPhase, time)
 
     // Guard
@@ -222,7 +210,6 @@ export class GameScene extends Phaser.Scene {
 
   // ──────────── Save/Load ────────────
 
-  /** Trigger auto-save (called after story events and rest). */
   autoSave(): void {
     this.performSave()
   }
@@ -240,21 +227,10 @@ export class GameScene extends Phaser.Scene {
       this.dayNight.totalGameTimeMs,
       this.registry,
     )
-    this.showSaveNotice()
+    const hud = this.scene.get('HUDScene') as HUDScene | undefined
+    hud?.showSaveNotice?.()
   }
 
-  private showSaveNotice(): void {
-    this.saveNotice.setAlpha(1)
-    this.tweens.add({
-      targets: this.saveNotice,
-      alpha: 0,
-      delay: 800,
-      duration: 600,
-      ease: 'Linear',
-    })
-  }
-
-  /** Teleport player to the safe sleep spot and restore minimum stats. */
   private recoverFromCollapse(): void {
     const safeSleep = this.map.findObject('spawns', o => o.name === 'poi_safe_sleep')
     const safeX = safeSleep?.x ?? this.map.widthInPixels / 2
@@ -265,12 +241,10 @@ export class GameScene extends Phaser.Scene {
     this.collapseRecovering = false
     this.collapseRecoveryTimer = 0
 
-    // Brief screen flash to signal the transition
     this.cameras.main.flash(500, 0, 0, 0)
     this.autoSave()
   }
 
-  /** Re-apply disposition changes from saved registry variables. */
   private restoreDispositions(): void {
     const tigerTalks = (this.registry.get('TIGER_TALKS') as number) ?? 0
     if (tigerTalks >= 2) {
