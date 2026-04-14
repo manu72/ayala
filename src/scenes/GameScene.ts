@@ -860,7 +860,7 @@ export class GameScene extends Phaser.Scene {
       },
     ];
 
-    const walkerDogKeys = Phaser.Utils.Array.Shuffle(["SmallDog", "BrownDog"]);
+    const walkerDogKeys = Phaser.Utils.Array.Shuffle(["SmallDog", "BrownDog", "WhiteDog"]);
     let walkerDogIdx = 0;
 
     for (const config of configs) {

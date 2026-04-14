@@ -19,6 +19,8 @@ export class DogNPC extends Phaser.GameObjects.Sprite {
   private lastBarkTime = -Infinity;
   private isLunging = false;
   private lungeTween: Phaser.Tweens.Tween | null = null;
+  private barkText: Phaser.GameObjects.Text | null = null;
+  private barkTextTween: Phaser.Tweens.Tween | null = null;
   private spriteKey: string;
 
   constructor(scene: Phaser.Scene, owner: HumanNPC, spriteKey: string) {
@@ -48,6 +50,7 @@ export class DogNPC extends Phaser.GameObjects.Sprite {
         this.lungeTween.stop();
         this.lungeTween = null;
       }
+      this.cleanupBarkText();
       this.isLunging = false;
       this.setVisible(false);
       return;
@@ -104,7 +107,9 @@ export class DogNPC extends Phaser.GameObjects.Sprite {
     }
     this.isLunging = true;
 
-    const text = scene.add
+    this.cleanupBarkText();
+
+    this.barkText = scene.add
       .text(this.x, this.y - 20, "WOOF!", {
         fontSize: "12px",
         fontFamily: "monospace",
@@ -115,13 +120,15 @@ export class DogNPC extends Phaser.GameObjects.Sprite {
       .setOrigin(0.5)
       .setDepth(100);
 
-    scene.tweens.add({
-      targets: text,
+    this.barkTextTween = scene.tweens.add({
+      targets: this.barkText,
       y: this.y - 40,
       alpha: 0,
       duration: 1200,
       ease: "Power2",
-      onComplete: () => text.destroy(),
+      onComplete: () => {
+        this.cleanupBarkText();
+      },
     });
 
     emotes.show(scene, player, "alert");
@@ -148,6 +155,17 @@ export class DogNPC extends Phaser.GameObjects.Sprite {
         cat.triggerAlert();
         emotes.show(scene, cat, "alert");
       }
+    }
+  }
+
+  private cleanupBarkText(): void {
+    if (this.barkTextTween) {
+      this.barkTextTween.stop();
+      this.barkTextTween = null;
+    }
+    if (this.barkText) {
+      this.barkText.destroy();
+      this.barkText = null;
     }
   }
 
