@@ -536,17 +536,38 @@ export class GameScene extends Phaser.Scene {
       this.setNPCDisposition("Jayco", "friendly");
     }
 
-    // Trust-based disposition upgrades for all named cats
-    for (const { cat, indicator } of this.npcs) {
-      const catTrust = this.trust.getCatTrust(cat.npcName);
-      if (catTrust >= 50 && cat.disposition !== "friendly") {
-        cat.disposition = "friendly";
-        indicator.setDisposition("friendly");
-      } else if (catTrust >= 15 && cat.disposition === "territorial") {
-        cat.disposition = "neutral";
-        indicator.setDisposition("neutral");
-      }
+    for (const { cat } of this.npcs) {
+      this.syncTrustDisposition(cat.npcName);
     }
+  }
+
+  /**
+   * Re-evaluate a cat's disposition based on current trust thresholds
+   * and update both the NPCCat and its ThreatIndicator. Safe to call
+   * after any trust change -- it only promotes, never demotes.
+   */
+  private syncTrustDisposition(catName: string): void {
+    const entry = this.npcs.find((e) => e.cat.npcName === catName);
+    if (!entry) return;
+
+    const catTrust = this.trust.getCatTrust(catName);
+    if (catTrust >= 50 && entry.cat.disposition !== "friendly") {
+      entry.cat.disposition = "friendly";
+      entry.indicator.setDisposition("friendly");
+    } else if (catTrust >= 15 && entry.cat.disposition === "territorial") {
+      entry.cat.disposition = "neutral";
+      entry.indicator.setDisposition("neutral");
+    }
+  }
+
+  private awardFirstConversation(catName: string): void {
+    this.trust.firstConversation(catName);
+    this.syncTrustDisposition(catName);
+  }
+
+  private awardReturnConversation(catName: string): void {
+    this.trust.returnConversation(catName);
+    this.syncTrustDisposition(catName);
   }
 
   private setNPCDisposition(name: string, disposition: "friendly" | "neutral" | "territorial" | "wary"): void {
@@ -591,6 +612,7 @@ export class GameScene extends Phaser.Scene {
       // Proximity trust: being near cats builds trust over time
       if (dist < LEARN_NAME_DISTANCE && cat.state !== "sleeping") {
         this.trust.proximityTick(cat.npcName, now);
+        this.syncTrustDisposition(cat.npcName);
       }
 
       // Body language emotes and contextual narration on approach
@@ -952,13 +974,13 @@ export class GameScene extends Phaser.Scene {
               this.registry.set("MET_BLACKY", true);
               this.addKnownCat("Blacky");
               this.npcs.find((e) => e.cat === cat)?.indicator.reveal();
-              this.trust.firstConversation("Blacky");
+              this.awardFirstConversation("Blacky");
               this.autoSave();
             },
           );
         } else {
           this.dialogue.show(["Still here? Good. You're tougher than you look."], () => {
-            this.trust.returnConversation("Blacky");
+            this.awardReturnConversation("Blacky");
           });
         }
         break;
@@ -972,7 +994,7 @@ export class GameScene extends Phaser.Scene {
               this.registry.set("TIGER_TALKS", 1);
               this.addKnownCat("Tiger");
               this.npcs.find((e) => e.cat === cat)?.indicator.reveal();
-              this.trust.firstConversation("Tiger");
+              this.awardFirstConversation("Tiger");
               this.autoSave();
             },
           );
@@ -986,13 +1008,13 @@ export class GameScene extends Phaser.Scene {
               this.registry.set("TIGER_TALKS", 2);
               cat.disposition = "friendly";
               this.npcs.find((e) => e.cat === cat)?.indicator.setDisposition("friendly");
-              this.trust.returnConversation("Tiger");
+              this.awardReturnConversation("Tiger");
               this.autoSave();
             },
           );
         } else {
           this.dialogue.show(['"Mrrp. You can rest here. Under this tree. I\'ll keep watch."'], () => {
-            this.trust.returnConversation("Tiger");
+            this.awardReturnConversation("Tiger");
           });
         }
         break;
@@ -1013,13 +1035,13 @@ export class GameScene extends Phaser.Scene {
               entry?.indicator.reveal();
               entry?.indicator.setDisposition("friendly");
               cat.disposition = "friendly";
-              this.trust.firstConversation("Jayco");
+              this.awardFirstConversation("Jayco");
               this.autoSave();
             },
           );
         } else {
           this.dialogue.show(['"The ginger ones fight over the bench near the fountain. Stay clear at dusk."'], () => {
-            this.trust.returnConversation("Jayco");
+            this.awardReturnConversation("Jayco");
           });
         }
         break;
@@ -1036,14 +1058,14 @@ export class GameScene extends Phaser.Scene {
               this.registry.set("JAYCO_JR_TALKS", 1);
               this.addKnownCat("Jayco Jr");
               this.npcs.find((e) => e.cat === cat)?.indicator.reveal();
-              this.trust.firstConversation("Jayco Jr");
+              this.awardFirstConversation("Jayco Jr");
               this.autoSave();
             },
           );
         } else {
           this.dialogue.show(
             ["\"Did you find the water bowls? They're near the big trees! I can show you!\""],
-            () => { this.trust.returnConversation("Jayco Jr"); },
+            () => { this.awardReturnConversation("Jayco Jr"); },
           );
         }
         break;
@@ -1062,7 +1084,7 @@ export class GameScene extends Phaser.Scene {
               this.registry.set("FLUFFY_TALKS", 1);
               this.addKnownCat("Fluffy");
               this.npcs.find((e) => e.cat === cat)?.indicator.reveal();
-              this.trust.firstConversation("Fluffy");
+              this.awardFirstConversation("Fluffy");
               this.autoSave();
             },
           );
@@ -1072,11 +1094,11 @@ export class GameScene extends Phaser.Scene {
               "\"You're still alive. That's something, I suppose.\"",
               "\"The humans with the bags come at dawn and dusk. Follow the sound of rustling.\"",
             ],
-            () => { this.trust.returnConversation("Fluffy"); },
+            () => { this.awardReturnConversation("Fluffy"); },
           );
         } else {
           this.dialogue.show(["*The cat flicks an ear in your direction but doesn't look up.*"], () => {
-            this.trust.returnConversation("Fluffy");
+            this.awardReturnConversation("Fluffy");
           });
         }
         break;
@@ -1094,14 +1116,14 @@ export class GameScene extends Phaser.Scene {
               this.registry.set("PEDIGREE_TALKS", 1);
               this.addKnownCat("Pedigree");
               this.npcs.find((e) => e.cat === cat)?.indicator.reveal();
-              this.trust.firstConversation("Pedigree");
+              this.awardFirstConversation("Pedigree");
               this.autoSave();
             },
           );
         } else {
           this.dialogue.show(
             ["\"The ones in dark clothes at night... they took my friend. Stay hidden after dark.\""],
-            () => { this.trust.returnConversation("Pedigree"); },
+            () => { this.awardReturnConversation("Pedigree"); },
           );
         }
         break;
@@ -1119,7 +1141,7 @@ export class GameScene extends Phaser.Scene {
               this.registry.set("MET_GINGER_A", true);
               this.addKnownCat("Ginger");
               this.npcs.find((e) => e.cat === cat)?.indicator.reveal();
-              this.trust.firstConversation("Ginger");
+              this.awardFirstConversation("Ginger");
               this.autoSave();
             },
           );
@@ -1129,11 +1151,11 @@ export class GameScene extends Phaser.Scene {
               "*The ginger cat flicks an ear at you.*",
               "\"...Fine. Drink. But don't bring anyone else.\"",
             ],
-            () => { this.trust.returnConversation("Ginger"); },
+            () => { this.awardReturnConversation("Ginger"); },
           );
         } else {
           this.dialogue.show(["*The ginger cat hisses softly.*"], () => {
-            this.trust.returnConversation("Ginger");
+            this.awardReturnConversation("Ginger");
           });
         }
         break;
@@ -1147,13 +1169,13 @@ export class GameScene extends Phaser.Scene {
               this.registry.set("MET_GINGER_B", true);
               this.addKnownCat("Ginger B");
               this.npcs.find((e) => e.cat === cat)?.indicator.reveal();
-              this.trust.firstConversation("Ginger B");
+              this.awardFirstConversation("Ginger B");
               this.autoSave();
             },
           );
         } else {
           this.dialogue.show(["*The cat stares at you, unblinking.*"], () => {
-            this.trust.returnConversation("Ginger B");
+            this.awardReturnConversation("Ginger B");
           });
         }
         break;
