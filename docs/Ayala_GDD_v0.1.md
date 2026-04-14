@@ -581,12 +581,15 @@ Note: The project originally used RPG JS v4 but switched to Phaser 3 during Phas
 
 ### 10.3 Technical Research
 
-- RPG JS v4: Open-source TypeScript RPG framework, PixiJS rendering, Vue 3 GUI, Tiled map editor support
-- Standalone RPG build produces static files deployable anywhere
-- Built-in PWA support for offline play
-- Mobile responsive design guide and touch control plugin available
+- Phaser 3: Mature open-source HTML5 game framework, Canvas/WebGL rendering, extensive documentation and community
+- Vite: Fast build tool with hot-reload for development, produces optimised static files for production
+- Tiled Map Editor: Free tilemap editor, exports to JSON format that Phaser 3 loads natively
+- Standalone static build — no server required, deployable to any static host
+- PWA achievable via service worker (planned for Phase 5)
+- Mobile responsive via Phaser Scale Manager, touch input supported natively
 - Cat sprite assets available on itch.io and OpenGameArt.org
-- Phaser 3 is a fallback option if RPG JS proves insufficient
+- RPG JS v4 was evaluated and attempted but abandoned due to build conflicts between Tiled TSX files and Vite's JSX compiler in standalone mode
+- Phaser 3 v3.90+ is the current stable release, actively maintained by Phaser Studio
 
 ### 10.4 Photo References (from developer)
 
