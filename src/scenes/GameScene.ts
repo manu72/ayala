@@ -38,6 +38,7 @@ export class GameScene extends Phaser.Scene {
   private guardIndicator!: ThreatIndicator;
   private foodSources!: FoodSourceManager;
   private spaceKey!: Phaser.Input.Keyboard.Key;
+  private restKey!: Phaser.Input.Keyboard.Key;
   private tabKey!: Phaser.Input.Keyboard.Key;
   private escapeKey!: Phaser.Input.Keyboard.Key;
   private objectsLayer: Phaser.Tilemaps.TilemapLayer | null = null;
@@ -129,6 +130,7 @@ export class GameScene extends Phaser.Scene {
 
     if (this.input.keyboard) {
       this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+      this.restKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.Z);
       this.tabKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.TAB);
       this.escapeKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
 
@@ -204,8 +206,7 @@ export class GameScene extends Phaser.Scene {
       this.cameras.main.zoomTo(DEFAULT_ZOOM, ZOOM_DURATION);
     }
 
-    // ──── Interact (Space tap) — must be checked BEFORE rest hold ────
-    let interactedThisFrame = false;
+    // ──── Interact (Space tap) ────
     const spaceJust = this.spaceKey && Phaser.Input.Keyboard.JustDown(this.spaceKey);
     if (spaceJust && !this.dialogue.isActive) {
       const usedSource = this.foodSources.tryInteract(
@@ -218,14 +219,13 @@ export class GameScene extends Phaser.Scene {
       if (!usedSource) {
         this.tryInteract();
       }
-      interactedThisFrame = true;
     }
 
-    // ──── Rest hold initiation (only if no interaction this frame) ────
+    // ──── Rest hold initiation (Z key, separate from interact) ────
     const playerBody = this.player.body as Phaser.Physics.Arcade.Body;
     const playerStationary = playerBody.velocity.length() < 1;
 
-    if (!interactedThisFrame && this.spaceKey?.isDown && playerStationary && !this.dialogue.isActive) {
+    if (this.restKey?.isDown && playerStationary && !this.dialogue.isActive) {
       this.restHoldTimer += delta;
       this.restHoldActive = true;
       if (this.restHoldTimer >= REST_HOLD_MS) {
@@ -236,7 +236,7 @@ export class GameScene extends Phaser.Scene {
           this.autoSave();
         }
       }
-    } else if (!this.spaceKey?.isDown) {
+    } else if (!this.restKey?.isDown) {
       this.restHoldTimer = 0;
       this.restHoldActive = false;
     }
@@ -275,12 +275,15 @@ export class GameScene extends Phaser.Scene {
 
     this.stats.update(deltaSec, false, false, this.dayNight.isHeatActive, inShade, inShelter, true);
 
-    // Wake on any movement key or Space tap
+    // Wake on any movement key, Space, or Z
     if (this.player.isMoving) {
       this.player.wakeUp();
       return;
     }
-    if (this.spaceKey && Phaser.Input.Keyboard.JustDown(this.spaceKey)) {
+    const wakePressed =
+      (this.spaceKey && Phaser.Input.Keyboard.JustDown(this.spaceKey)) ||
+      (this.restKey && Phaser.Input.Keyboard.JustDown(this.restKey));
+    if (wakePressed) {
       this.player.wakeUp();
     }
   }

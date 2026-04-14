@@ -49,8 +49,8 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 | Shift + Down (S / Arrow Down) | Crouch / hide (slow, harder for threats to detect) |
 | Space (tap) | Interact -- context-sensitive: talk to nearby cat, eat food, drink water |
 | Space | Advance dialogue text |
-| Space (hold 2 seconds while stationary) | Rest / sleep -- restores energy over time |
-| Any movement key or Space tap | Wake up from rest |
+| Z (hold 2 seconds while stationary) | Rest / sleep -- restores energy over time |
+| Any movement key, Space, or Z | Wake up from rest |
 | Hold Tab | Look around -- camera zooms out to survey the area |
 | Escape | Pause menu (Save Game, Resume, Quit to Title) |
 
@@ -59,7 +59,7 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 - **Survival stats** (hunger, thirst, energy) are shown as bars in the top-left corner alongside the in-game clock. Keep them topped up by finding food sources, water, and safe resting spots around the park.
 - **Running** is costly -- it drains energy fast and should be used to escape threats, not for casual travel.
 - **Crouching** near bushes or tree canopy makes Mamma Cat much harder for the guard to spot.
-- **Resting** requires you to hold Space for 2 seconds while standing still. A progress ring appears so you know it's working. Energy restores faster in shade and even faster at designated safe spots.
+- **Resting** requires you to hold Z for 2 seconds while standing still. A progress ring appears so you know it's working. Energy restores faster in shade and even faster at designated safe spots.
 - **Look around** (Tab) is useful for spotting food, water, threats, and other cats before committing to a direction.
 - The **day/night cycle** advances automatically. Different food sources and NPC behaviours are tied to the time of day.
 - The game **auto-saves** at key story moments and safe rest spots. You can also save manually from the pause menu (Escape).
