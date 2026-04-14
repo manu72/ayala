@@ -50,6 +50,9 @@ export class NPCCat extends Phaser.Physics.Arcade.Sprite {
   /** Walking direction (unit vector). */
   private walkDir = new Phaser.Math.Vector2(0, 0);
 
+  /** Reused for home-direction math (avoid per-frame allocations). */
+  private readonly _toHomeVec = new Phaser.Math.Vector2(0, 0);
+
   /** Last facing direction for idle pose. */
   private lastDirection: "down" | "left" | "right" | "up" = "down";
 
@@ -119,8 +122,8 @@ export class NPCCat extends Phaser.Physics.Arcade.Sprite {
         // Drift back towards home zone if straying
         const distFromHome = Phaser.Math.Distance.Between(this.x, this.y, this.homeX, this.homeY);
         if (distFromHome > this.homeRadius * 0.8) {
-          const toHome = new Phaser.Math.Vector2(this.homeX - this.x, this.homeY - this.y).normalize();
-          this.walkDir.lerp(toHome, 0.05);
+          this._toHomeVec.set(this.homeX - this.x, this.homeY - this.y).normalize();
+          this.walkDir.lerp(this._toHomeVec, 0.05);
           this.walkDir.normalize();
         }
 
@@ -207,9 +210,11 @@ export class NPCCat extends Phaser.Physics.Arcade.Sprite {
     // Bias toward home zone center if far away
     const distFromHome = Phaser.Math.Distance.Between(this.x, this.y, this.homeX, this.homeY);
     if (distFromHome > this.homeRadius * 0.6) {
-      const toHome = new Phaser.Math.Vector2(this.homeX - this.x, this.homeY - this.y).normalize();
-      const jitter = new Phaser.Math.Vector2(Math.random() - 0.5, Math.random() - 0.5).scale(0.5);
-      this.walkDir = toHome.add(jitter).normalize();
+      this._toHomeVec.set(this.homeX - this.x, this.homeY - this.y).normalize();
+      this.walkDir.copy(this._toHomeVec);
+      this.walkDir.x += (Math.random() - 0.5) * 0.5;
+      this.walkDir.y += (Math.random() - 0.5) * 0.5;
+      this.walkDir.normalize();
     } else {
       const angle = Math.random() * Math.PI * 2;
       this.walkDir.set(Math.cos(angle), Math.sin(angle));
