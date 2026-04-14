@@ -1,10 +1,13 @@
 import Phaser from 'phaser'
+import type { MammaCat } from './MammaCat'
 
 const COLS = 8
 const SPRITE_KEY = 'guard'
 const PATROL_SPEED = 30
 const CHASE_SPEED = 100
 const DETECT_RANGE = 120
+const DETECT_RANGE_CROUCHING_COVER = 40
+const DETECT_RANGE_CROUCHING_OPEN = 80
 const CHASE_RANGE = 250
 const PUSHBACK_FORCE = 300
 
@@ -20,7 +23,7 @@ export class GuardNPC extends Phaser.Physics.Arcade.Sprite {
   private homeY: number
   private patrolDir = new Phaser.Math.Vector2(1, 0)
   private patrolTimer = 0
-  private target: Phaser.Physics.Arcade.Sprite | null = null
+  private target: MammaCat | null = null
   private nameLabel: Phaser.GameObjects.Text
 
   constructor(scene: Phaser.Scene, x: number, y: number) {
@@ -48,8 +51,16 @@ export class GuardNPC extends Phaser.Physics.Arcade.Sprite {
     }).setOrigin(0.5, 1).setDepth(6)
   }
 
-  setTarget(player: Phaser.Physics.Arcade.Sprite): void {
+  setTarget(player: MammaCat): void {
     this.target = player
+  }
+
+  private getEffectiveDetectRange(): number {
+    if (!this.target?.isCrouching) return DETECT_RANGE
+    // Player is crouching near cover (overhead tile) → much harder to detect
+    const gameScene = this.scene as { isUnderCanopy?: (x: number, y: number) => boolean }
+    const nearCover = gameScene.isUnderCanopy?.(this.target.x, this.target.y) ?? false
+    return nearCover ? DETECT_RANGE_CROUCHING_COVER : DETECT_RANGE_CROUCHING_OPEN
   }
 
   update(delta: number): void {
@@ -63,7 +74,7 @@ export class GuardNPC extends Phaser.Physics.Arcade.Sprite {
     switch (this.guardState) {
       case 'patrol':
         this.patrol(delta)
-        if (distToPlayer < DETECT_RANGE) {
+        if (distToPlayer < this.getEffectiveDetectRange()) {
           this.guardState = 'chasing'
         }
         break

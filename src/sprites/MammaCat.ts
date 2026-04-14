@@ -1,27 +1,38 @@
 import Phaser from 'phaser'
 
 const BASE_SPEED = 120
-const RUN_SPEED = 200
+const RUN_SPEED = 240
+const CROUCH_SPEED = 48
+const WAKE_DELAY_MS = 500
 
 const SPRITE_KEY = 'mammacat'
 const COLS = 8
 
+export type PlayerState = 'normal' | 'crouching' | 'resting' | 'waking'
+
 export class MammaCat extends Phaser.Physics.Arcade.Sprite {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys
-  private runKey!: Phaser.Input.Keyboard.Key
+  private wasd!: { up: Phaser.Input.Keyboard.Key; down: Phaser.Input.Keyboard.Key; left: Phaser.Input.Keyboard.Key; right: Phaser.Input.Keyboard.Key }
+  private shiftKey!: Phaser.Input.Keyboard.Key
   private nameLabel: Phaser.GameObjects.Text
 
-  /** Externally set by GameScene each frame based on stats. */
   speedMultiplier = 1.0
-
-  /** True if the player is pressing the run key and canRun is true. */
   isRunning = false
+  playerState: PlayerState = 'normal'
 
-  /** True if the player is moving (walking or running). */
+  /** Timer for the brief wake-up delay. */
+  private wakeTimer = 0
+
+  get isCrouching(): boolean {
+    return this.playerState === 'crouching'
+  }
+
+  get isResting(): boolean {
+    return this.playerState === 'resting'
+  }
+
   get isMoving(): boolean {
-    if (!this.cursors) return false
-    return this.cursors.left.isDown || this.cursors.right.isDown
-      || this.cursors.up.isDown || this.cursors.down.isDown
+    return this.anyDirectionDown()
   }
 
   constructor(scene: Phaser.Scene, x: number, y: number) {
@@ -41,7 +52,13 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
 
     if (scene.input.keyboard) {
       this.cursors = scene.input.keyboard.createCursorKeys()
-      this.runKey = scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT)
+      this.shiftKey = scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT)
+      this.wasd = {
+        up: scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.W),
+        down: scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S),
+        left: scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.A),
+        right: scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D),
+      }
     }
 
     this.nameLabel = scene.add.text(x, y - 20, 'Mamma Cat', {
@@ -50,6 +67,113 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
       stroke: '#000000',
       strokeThickness: 2,
     }).setOrigin(0.5, 1).setDepth(5)
+  }
+
+  /** Enter the resting/sleep state. Called by GameScene after hold-to-rest completes. */
+  enterRest(): void {
+    this.playerState = 'resting'
+    this.setVelocity(0)
+    this.anims.play(`${SPRITE_KEY}-idle`, true)
+    this.setAlpha(0.8)
+  }
+
+  /** Wake from rest. Returns to normal after a brief delay. */
+  wakeUp(): void {
+    if (this.playerState !== 'resting') return
+    this.playerState = 'waking'
+    this.wakeTimer = WAKE_DELAY_MS
+    this.setAlpha(1)
+    this.anims.play(`${SPRITE_KEY}-idle`, true)
+  }
+
+  update(canRun = true, delta = 0): void {
+    if (!this.cursors) return
+
+    // Waking delay — cannot move for a brief moment
+    if (this.playerState === 'waking') {
+      this.setVelocity(0)
+      this.wakeTimer -= delta
+      if (this.wakeTimer <= 0) {
+        this.playerState = 'normal'
+      }
+      this.nameLabel.setPosition(this.x, this.y - 20)
+      return
+    }
+
+    // Resting — no movement, handled by GameScene
+    if (this.playerState === 'resting') {
+      this.setVelocity(0)
+      this.nameLabel.setPosition(this.x, this.y - 20)
+      return
+    }
+
+    this.setVelocity(0)
+    this.isRunning = false
+
+    const up = this.cursors.up.isDown || this.wasd.up.isDown
+    const down = this.cursors.down.isDown || this.wasd.down.isDown
+    const left = this.cursors.left.isDown || this.wasd.left.isDown
+    const right = this.cursors.right.isDown || this.wasd.right.isDown
+    const shift = this.shiftKey?.isDown ?? false
+
+    // Crouch: Shift + Down (and no other direction)
+    const wantsCrouch = shift && down && !up && !left && !right
+    // Run: Shift + any direction (but not crouching)
+    const wantsRun = shift && !wantsCrouch && canRun
+
+    if (wantsCrouch) {
+      this.playerState = 'crouching'
+    } else {
+      this.playerState = 'normal'
+    }
+
+    const speed = wantsCrouch
+      ? CROUCH_SPEED * this.speedMultiplier
+      : wantsRun
+        ? RUN_SPEED * this.speedMultiplier
+        : BASE_SPEED * this.speedMultiplier
+
+    let movingX = false
+    let movingY = false
+
+    if (left) { this.setVelocityX(-speed); movingX = true }
+    else if (right) { this.setVelocityX(speed); movingX = true }
+
+    if (up) { this.setVelocityY(-speed); movingY = true }
+    else if (down) { this.setVelocityY(speed); movingY = true }
+
+    if (movingX && movingY) {
+      const body = this.body as Phaser.Physics.Arcade.Body
+      body.velocity.normalize().scale(speed)
+    }
+
+    this.isRunning = wantsRun && (movingX || movingY)
+
+    const frameRate = this.isRunning ? 12 : wantsCrouch ? 4 : 8
+
+    if (movingX || movingY) {
+      if (left) this.anims.play(`${SPRITE_KEY}-walk-left`, true)
+      else if (right) this.anims.play(`${SPRITE_KEY}-walk-right`, true)
+      else if (up) this.anims.play(`${SPRITE_KEY}-walk-up`, true)
+      else if (down) this.anims.play(`${SPRITE_KEY}-walk-down`, true)
+
+      if (this.anims.currentAnim) {
+        this.anims.currentAnim.frameRate = frameRate
+      }
+    } else {
+      this.anims.play(`${SPRITE_KEY}-idle`, true)
+    }
+
+    this.nameLabel.setPosition(this.x, this.y - 20)
+  }
+
+  /** True if any directional key (arrows or WASD) is pressed. */
+  private anyDirectionDown(): boolean {
+    if (!this.cursors) return false
+    return this.cursors.left.isDown || this.cursors.right.isDown
+      || this.cursors.up.isDown || this.cursors.down.isDown
+      || this.wasd?.up.isDown || this.wasd?.down.isDown
+      || this.wasd?.left.isDown || this.wasd?.right.isDown
   }
 
   private createAnimations(scene: Phaser.Scene): void {
@@ -65,49 +189,6 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
     scene.anims.create({ key: `${SPRITE_KEY}-walk-right`, frames: scene.anims.generateFrameNumbers(SPRITE_KEY, row(2)), frameRate: 8, repeat: -1 })
     scene.anims.create({ key: `${SPRITE_KEY}-walk-up`, frames: scene.anims.generateFrameNumbers(SPRITE_KEY, row(3)), frameRate: 8, repeat: -1 })
     scene.anims.create({ key: `${SPRITE_KEY}-idle`, frames: scene.anims.generateFrameNumbers(SPRITE_KEY, row(4, 3)), frameRate: 4, repeat: -1 })
-  }
-
-  update(canRun = true): void {
-    if (!this.cursors) return
-
-    this.setVelocity(0)
-    this.isRunning = false
-
-    let movingX = false
-    let movingY = false
-
-    const wantsRun = this.runKey?.isDown && canRun
-    const speed = (wantsRun ? RUN_SPEED : BASE_SPEED) * this.speedMultiplier
-
-    if (this.cursors.left.isDown) { this.setVelocityX(-speed); movingX = true }
-    else if (this.cursors.right.isDown) { this.setVelocityX(speed); movingX = true }
-
-    if (this.cursors.up.isDown) { this.setVelocityY(-speed); movingY = true }
-    else if (this.cursors.down.isDown) { this.setVelocityY(speed); movingY = true }
-
-    if (movingX && movingY) {
-      const body = this.body as Phaser.Physics.Arcade.Body
-      body.velocity.normalize().scale(speed)
-    }
-
-    this.isRunning = wantsRun && (movingX || movingY)
-
-    const frameRate = this.isRunning ? 12 : 8
-
-    if (movingX || movingY) {
-      if (this.cursors.left.isDown) this.anims.play(`${SPRITE_KEY}-walk-left`, true)
-      else if (this.cursors.right.isDown) this.anims.play(`${SPRITE_KEY}-walk-right`, true)
-      else if (this.cursors.up.isDown) this.anims.play(`${SPRITE_KEY}-walk-up`, true)
-      else if (this.cursors.down.isDown) this.anims.play(`${SPRITE_KEY}-walk-down`, true)
-
-      if (this.anims.currentAnim) {
-        this.anims.currentAnim.frameRate = frameRate
-      }
-    } else {
-      this.anims.play(`${SPRITE_KEY}-idle`, true)
-    }
-
-    this.nameLabel.setPosition(this.x, this.y - 20)
   }
 
   destroy(fromScene?: boolean): void {

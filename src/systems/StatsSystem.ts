@@ -17,6 +17,14 @@ const HEAT_MULTIPLIER = 1.5
 const SHADE_ENERGY_REGEN = 0.5
 const SHELTER_ENERGY_REGEN = 1.0
 
+/** Deliberate rest/sleep energy rates (per second). */
+const REST_RATE_OPEN = 0.5
+const REST_RATE_SHADE = 1.0
+const REST_RATE_SAFE = 2.0
+
+/** Hunger/thirst decay while sleeping is halved (lower metabolic rate). */
+const REST_DECAY_MULTIPLIER = 0.5
+
 const SPEED_PENALTY_HUNGER_30 = 0.80
 const SPEED_PENALTY_HUNGER_10 = 0.50
 const SPEED_PENALTY_THIRST_20 = 0.80
@@ -63,6 +71,7 @@ export class StatsSystem {
    * @param isHeatActive - midday heat phase
    * @param inShade - under tree canopy
    * @param inShelter - in a sheltered rest spot
+   * @param isResting - player is deliberately resting/sleeping
    */
   update(
     deltaSec: number,
@@ -71,24 +80,28 @@ export class StatsSystem {
     isHeatActive: boolean,
     inShade: boolean,
     inShelter: boolean,
+    isResting = false,
   ): void {
     if (this._collapsed) return
 
     const heatMod = (isHeatActive && !inShade) ? HEAT_MULTIPLIER : 1.0
 
-    this.hunger = Math.max(0, this.hunger - DECAY.hunger * heatMod * deltaSec)
-    this.thirst = Math.max(0, this.thirst - DECAY.thirst * heatMod * deltaSec)
+    // Hunger/thirst always decay, but at half rate while resting
+    const decayMod = isResting ? REST_DECAY_MULTIPLIER : 1.0
+    this.hunger = Math.max(0, this.hunger - DECAY.hunger * heatMod * decayMod * deltaSec)
+    this.thirst = Math.max(0, this.thirst - DECAY.thirst * heatMod * decayMod * deltaSec)
 
-    if (isRunning && this.canRun) {
+    if (isResting) {
+      const rate = inShelter ? REST_RATE_SAFE : inShade ? REST_RATE_SHADE : REST_RATE_OPEN
+      this.energy = Math.min(100, this.energy + rate * deltaSec)
+    } else if (isRunning && this.canRun) {
       this.energy = Math.max(0, this.energy - DECAY.energyRunning * heatMod * deltaSec)
     } else if (isMoving) {
       this.energy = Math.max(0, this.energy - DECAY.energyMoving * heatMod * deltaSec)
     } else {
       this.energy = Math.max(0, this.energy - DECAY.energyRest * heatMod * deltaSec)
-    }
 
-    // Shade/shelter regen (only while stationary)
-    if (!isMoving && !isRunning) {
+      // Passive shade/shelter regen (stationary but not deliberately resting)
       if (inShelter) {
         this.energy = Math.min(100, this.energy + SHELTER_ENERGY_REGEN * deltaSec)
       } else if (inShade) {
@@ -96,8 +109,8 @@ export class StatsSystem {
       }
     }
 
-    // Collapse check
-    if (this.hunger <= 0 || this.thirst <= 0 || this.energy <= 0) {
+    // Collapse check — resting cats don't collapse (they chose to stop and recover)
+    if (!isResting && (this.hunger <= 0 || this.thirst <= 0 || this.energy <= 0)) {
       this.collapseTimer += deltaSec * 1000
       if (this.collapseTimer >= COLLAPSE_THRESHOLD_MS) {
         this._collapsed = true

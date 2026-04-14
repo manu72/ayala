@@ -13,6 +13,10 @@ import type { HUDScene } from './HUDScene'
 const INTERACTION_DISTANCE = 50
 const LEARN_NAME_DISTANCE = 100
 const TILE_SIZE = 32
+const REST_HOLD_MS = 2000
+const DEFAULT_ZOOM = 2.5
+const PEEK_ZOOM = 0.8
+const ZOOM_DURATION = 500
 
 interface NPCEntry {
   cat: NPCCat
@@ -24,13 +28,19 @@ export class GameScene extends Phaser.Scene {
   dayNight!: DayNightCycle
   stats!: StatsSystem
 
+  /** Expose for HUDScene to read rest progress. */
+  restHoldTimer = 0
+  restHoldActive = false
+  isPeeking = false
+  isPaused = false
+
   private npcs: NPCEntry[] = []
   private guard!: GuardNPC
   private guardIndicator!: ThreatIndicator
   private dialogue!: DialogueSystem
   private foodSources!: FoodSourceManager
-  private actionKey!: Phaser.Input.Keyboard.Key
   private spaceKey!: Phaser.Input.Keyboard.Key
+  private tabKey!: Phaser.Input.Keyboard.Key
   private escapeKey!: Phaser.Input.Keyboard.Key
   private overheadLayer!: Phaser.Tilemaps.TilemapLayer | null
   private map!: Phaser.Tilemaps.Tilemap
@@ -44,6 +54,10 @@ export class GameScene extends Phaser.Scene {
 
   create(data?: { loadSave?: boolean }): void {
     this.npcs = []
+    this.restHoldTimer = 0
+    this.restHoldActive = false
+    this.isPeeking = false
+    this.isPaused = false
 
     this.map = this.make.tilemap({ key: 'atg' })
     const tileset = this.map.addTilesetImage('park-tiles', 'park-tiles')
@@ -61,16 +75,13 @@ export class GameScene extends Phaser.Scene {
       this.overheadLayer.setDepth(10)
     }
 
-    // Default spawn
     const spawnPoint = this.map.findObject('spawns', obj => obj.name === 'spawn_mammacat')
     let spawnX = spawnPoint?.x ?? this.map.widthInPixels / 2
     let spawnY = spawnPoint?.y ?? this.map.heightInPixels / 2
 
-    // Systems
     this.stats = new StatsSystem()
     this.dayNight = new DayNightCycle(this)
 
-    // Restore save if requested
     if (data?.loadSave) {
       const save = SaveSystem.load()
       if (save) {
@@ -78,7 +89,6 @@ export class GameScene extends Phaser.Scene {
         spawnY = save.playerPosition.y
         this.stats.fromJSON(save.stats)
         this.dayNight.restore(save.timeOfDay, save.gameTimeMs)
-
         for (const [key, val] of Object.entries(save.variables)) {
           this.registry.set(key, val)
         }
@@ -91,59 +101,56 @@ export class GameScene extends Phaser.Scene {
       this.physics.add.collider(this.player, objectsLayer)
     }
 
-    // Known cats
     const savedKnown = this.registry.get('KNOWN_CATS') as string[] | undefined
     this.knownCats = new Set(savedKnown ?? [])
 
-    // NPCs
     this.spawnNPC('Blacky', 'blacky', 'spawn_blacky', 'neutral', 150, 1024, 544)
     this.spawnNPC('Tiger', 'tiger', 'spawn_tiger', 'territorial', 200, 1600, 1152)
     this.spawnNPC('Jayco', 'jayco', 'spawn_jayco', 'friendly', 150, 2560, 512)
     this.restoreDispositions()
 
-    // Guard NPC
     const guardPoint = this.map.findObject('spawns', o => o.name === 'spawn_guard')
     this.guard = new GuardNPC(this, guardPoint?.x ?? 2336, guardPoint?.y ?? 1728)
     this.guard.setTarget(this.player)
     this.guardIndicator = new ThreatIndicator(this, this.guard, 'Guard', 'dangerous', true)
 
-    // Dialogue
     this.dialogue = new DialogueSystem(this)
 
-    // Food sources
     this.foodSources = new FoodSourceManager(this)
     this.placeFoodSources()
 
-    // Input
     if (this.input.keyboard) {
-      this.actionKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER)
       this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE)
+      this.tabKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.TAB)
       this.escapeKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC)
-      this.escapeKey.on('down', () => this.manualSave())
+
+      // Prevent Tab from leaving the game canvas
+      this.input.keyboard.addCapture('TAB')
     }
 
-    // Camera
     this.cameras.main.setBounds(0, 0, this.map.widthInPixels, this.map.heightInPixels)
     this.physics.world.setBounds(0, 0, this.map.widthInPixels, this.map.heightInPixels)
-    this.cameras.main.setZoom(2.5)
+    this.cameras.main.setZoom(DEFAULT_ZOOM)
     this.cameras.main.startFollow(this.player, true, 0.08, 0.08)
     this.cameras.main.setDeadzone(50, 50)
 
-    // Launch the HUD overlay scene (runs in parallel, no zoom)
     if (!this.scene.isActive('HUDScene')) {
       this.scene.launch('HUDScene')
     }
   }
 
   update(time: number, delta: number): void {
+    // Paused — skip all game logic
+    if (this.isPaused) return
+
     const deltaSec = delta / 1000
     this.dayNight.update(delta)
 
     this.player.speedMultiplier = this.stats.speedMultiplier
 
+    // Collapse recovery
     if (this.stats.collapsed) {
       this.player.setVelocity(0)
-
       if (!this.collapseRecovering) {
         this.collapseRecovering = true
         this.collapseRecoveryTimer = 0
@@ -155,8 +162,82 @@ export class GameScene extends Phaser.Scene {
       return
     }
 
+    // Escape → toggle pause menu
+    if (this.escapeKey && Phaser.Input.Keyboard.JustDown(this.escapeKey)) {
+      this.togglePause()
+      return
+    }
+
+    // ──── Resting state ────
+    if (this.player.isResting) {
+      this.updateResting(deltaSec)
+      this.updateNPCs(delta)
+      this.foodSources.update(this.dayNight.currentPhase, time)
+      this.guard.update(delta)
+      this.guardIndicator.update()
+      return
+    }
+
+    // ──── Tab peek ────
+    if (this.tabKey?.isDown) {
+      this.player.setVelocity(0)
+      if (!this.isPeeking) {
+        this.isPeeking = true
+        this.cameras.main.zoomTo(PEEK_ZOOM, ZOOM_DURATION)
+      }
+      this.updateNPCs(delta)
+      this.foodSources.update(this.dayNight.currentPhase, time)
+      this.guard.update(delta)
+      this.guardIndicator.update()
+      return
+    }
+    if (this.isPeeking) {
+      this.isPeeking = false
+      this.cameras.main.zoomTo(DEFAULT_ZOOM, ZOOM_DURATION)
+    }
+
+    // ──── Interact (Space tap) — must be checked BEFORE rest hold ────
+    let interactedThisFrame = false
+    const spaceJust = this.spaceKey && Phaser.Input.Keyboard.JustDown(this.spaceKey)
+    if (spaceJust && !this.dialogue.isActive) {
+      const usedSource = this.foodSources.tryInteract(
+        this.player.x, this.player.y,
+        this.stats, this.dayNight.currentPhase, time,
+      )
+      if (!usedSource) {
+        this.tryInteract()
+      }
+      interactedThisFrame = true
+    }
+
+    // ──── Rest hold initiation (only if no interaction this frame) ────
+    const playerBody = this.player.body as Phaser.Physics.Arcade.Body
+    const playerStationary = playerBody.velocity.length() < 1
+
+    if (
+      !interactedThisFrame
+      && this.spaceKey?.isDown
+      && playerStationary
+      && !this.dialogue.isActive
+    ) {
+      this.restHoldTimer += delta
+      this.restHoldActive = true
+      if (this.restHoldTimer >= REST_HOLD_MS) {
+        this.player.enterRest()
+        this.restHoldTimer = 0
+        this.restHoldActive = false
+        if (this.isNearShelter(this.player.x, this.player.y)) {
+          this.autoSave()
+        }
+      }
+    } else if (!this.spaceKey?.isDown) {
+      this.restHoldTimer = 0
+      this.restHoldActive = false
+    }
+
+    // ──── Normal movement ────
     if (!this.dialogue.isActive) {
-      this.player.update(this.stats.canRun)
+      this.player.update(this.stats.canRun, delta)
     }
 
     const inShade = this.isUnderCanopy(this.player.x, this.player.y)
@@ -169,54 +250,62 @@ export class GameScene extends Phaser.Scene {
       this.dayNight.isHeatActive,
       inShade,
       inShelter,
+      false,
     )
 
     this.foodSources.update(this.dayNight.currentPhase, time)
-
-    // Guard
     this.guard.update(delta)
     this.guardIndicator.update()
+    this.updateNPCs(delta)
+  }
 
-    // NPC AI + indicators + name learning
-    for (const { cat, indicator } of this.npcs) {
-      cat.setPhase(this.dayNight.currentPhase)
-      cat.update(delta)
-      indicator.update()
+  // ──────────── Resting ────────────
 
-      if (!indicator.known) {
-        const dist = Phaser.Math.Distance.Between(
-          this.player.x, this.player.y, cat.x, cat.y,
-        )
-        if (dist < LEARN_NAME_DISTANCE) {
-          indicator.reveal()
-          this.knownCats.add(cat.npcName)
-          this.registry.set('KNOWN_CATS', Array.from(this.knownCats))
-        }
-      }
+  private updateResting(deltaSec: number): void {
+    const inShade = this.isUnderCanopy(this.player.x, this.player.y)
+    const inShelter = this.isNearShelter(this.player.x, this.player.y)
+
+    this.stats.update(deltaSec, false, false, this.dayNight.isHeatActive, inShade, inShelter, true)
+
+    // Wake on any movement key or Space tap
+    if (this.player.isMoving) {
+      this.player.wakeUp()
+      return
     }
-
-    // Interaction — use JustDown to prevent same-frame re-trigger after dialogue closes
-    const actionDown =
-      (this.actionKey && Phaser.Input.Keyboard.JustDown(this.actionKey)) ||
-      (this.spaceKey && Phaser.Input.Keyboard.JustDown(this.spaceKey))
-    if (actionDown && !this.dialogue.isActive) {
-      const usedSource = this.foodSources.tryInteract(
-        this.player.x, this.player.y,
-        this.stats, this.dayNight.currentPhase, time,
-      )
-      if (!usedSource) {
-        this.tryInteract()
-      }
+    if (this.spaceKey && Phaser.Input.Keyboard.JustDown(this.spaceKey)) {
+      this.player.wakeUp()
     }
+  }
+
+  // ──────────── Pause ────────────
+
+  togglePause(): void {
+    this.isPaused = !this.isPaused
+    const hud = this.scene.get('HUDScene') as HUDScene | undefined
+    if (this.isPaused) {
+      this.physics.pause()
+      hud?.showPauseMenu?.()
+    } else {
+      this.physics.resume()
+      hud?.hidePauseMenu?.()
+    }
+  }
+
+  resumeGame(): void {
+    this.isPaused = false
+    this.physics.resume()
+  }
+
+  quitToTitle(): void {
+    this.isPaused = false
+    this.physics.resume()
+    this.scene.stop('HUDScene')
+    this.scene.start('StartScene')
   }
 
   // ──────────── Save/Load ────────────
 
   autoSave(): void {
-    this.performSave()
-  }
-
-  private manualSave(): void {
     this.performSave()
   }
 
@@ -256,7 +345,6 @@ export class GameScene extends Phaser.Scene {
         entry.indicator.setDisposition('friendly')
       }
     }
-
     const jaycoTalks = (this.registry.get('JAYCO_TALKS') as number) ?? 0
     if (jaycoTalks >= 1) {
       const entry = this.npcs.find(e => e.cat.npcName === 'Jayco')
@@ -267,27 +355,40 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  // ──────────── NPC Spawning ────────────
+  // ──────────── NPC ────────────
+
+  private updateNPCs(delta: number): void {
+    for (const { cat, indicator } of this.npcs) {
+      cat.setPhase(this.dayNight.currentPhase)
+      cat.update(delta)
+      indicator.update()
+
+      if (!indicator.known) {
+        const dist = Phaser.Math.Distance.Between(
+          this.player.x, this.player.y, cat.x, cat.y,
+        )
+        if (dist < LEARN_NAME_DISTANCE) {
+          indicator.reveal()
+          this.knownCats.add(cat.npcName)
+          this.registry.set('KNOWN_CATS', Array.from(this.knownCats))
+        }
+      }
+    }
+  }
 
   spawnNPC(
-    name: string,
-    spriteKey: string,
-    spawnPOI: string,
+    name: string, spriteKey: string, spawnPOI: string,
     disposition: 'friendly' | 'neutral' | 'territorial',
-    homeRadius: number,
-    fallbackX: number,
-    fallbackY: number,
+    homeRadius: number, fallbackX: number, fallbackY: number,
   ): NPCCat {
     const point = this.map.findObject('spawns', obj => obj.name === spawnPOI)
     const x = point?.x ?? fallbackX
     const y = point?.y ?? fallbackY
-
     const cat = new NPCCat(this, {
       name, spriteKey, x, y,
       homeZone: { cx: x, cy: y, radius: homeRadius },
       disposition,
     })
-
     const known = this.knownCats.has(name)
     const indicator = new ThreatIndicator(this, cat, name, disposition, known)
     this.npcs.push({ cat, indicator })
@@ -298,7 +399,6 @@ export class GameScene extends Phaser.Scene {
 
   private placeFoodSources(): void {
     const poi = (name: string) => this.map.findObject('spawns', o => o.name === name)
-
     const sources: Array<[string, string]> = [
       ['poi_feeding_station_1', 'feeding_station'],
       ['poi_feeding_station_2', 'feeding_station'],
@@ -308,20 +408,16 @@ export class GameScene extends Phaser.Scene {
       ['poi_restaurant_scraps', 'restaurant_scraps'],
       ['poi_safe_sleep', 'safe_sleep'],
     ]
-
     for (const [poiName, type] of sources) {
       const obj = poi(poiName)
-      if (obj) {
-        this.foodSources.addSource(type as any, obj.x ?? 0, obj.y ?? 0)
-      }
+      if (obj) this.foodSources.addSource(type as any, obj.x ?? 0, obj.y ?? 0)
     }
-
     this.foodSources.addBugSpawns(this.map, 15)
   }
 
   // ──────────── Environment ────────────
 
-  private isUnderCanopy(worldX: number, worldY: number): boolean {
+  isUnderCanopy(worldX: number, worldY: number): boolean {
     if (!this.overheadLayer) return false
     const tileX = Math.floor(worldX / TILE_SIZE)
     const tileY = Math.floor(worldY / TILE_SIZE)
@@ -329,7 +425,7 @@ export class GameScene extends Phaser.Scene {
     return tile !== null
   }
 
-  private isNearShelter(worldX: number, worldY: number): boolean {
+  isNearShelter(worldX: number, worldY: number): boolean {
     const shelterNames = ['poi_pyramid_steps', 'poi_starbucks', 'poi_safe_sleep']
     return shelterNames.some(name => {
       const s = this.map.findObject('spawns', o => o.name === name)
@@ -343,32 +439,23 @@ export class GameScene extends Phaser.Scene {
   private tryInteract(): void {
     let nearestEntry: NPCEntry | null = null
     let nearestDist = Infinity
-
     for (const entry of this.npcs) {
       const dist = Phaser.Math.Distance.Between(
-        this.player.x, this.player.y,
-        entry.cat.x, entry.cat.y,
+        this.player.x, this.player.y, entry.cat.x, entry.cat.y,
       )
       if (dist < INTERACTION_DISTANCE && dist < nearestDist) {
         nearestEntry = entry
         nearestDist = dist
       }
     }
-
     if (!nearestEntry) return
     const cat = nearestEntry.cat
-
-    if (cat.state === 'sleeping') {
-      cat.triggerAlert()
-      return
-    }
-
+    if (cat.state === 'sleeping') { cat.triggerAlert(); return }
     this.showCatDialogue(cat)
   }
 
   private showCatDialogue(cat: NPCCat): void {
     const name = cat.npcName
-
     switch (name) {
       case 'Blacky': {
         const met = this.registry.get('MET_BLACKY') as boolean | undefined
@@ -386,13 +473,10 @@ export class GameScene extends Phaser.Scene {
             this.autoSave()
           })
         } else {
-          this.dialogue.show([
-            "Still here? Good. You're tougher than you look.",
-          ])
+          this.dialogue.show(["Still here? Good. You're tougher than you look."])
         }
         break
       }
-
       case 'Tiger': {
         const talks = (this.registry.get('TIGER_TALKS') as number) ?? 0
         if (talks === 0) {
@@ -417,13 +501,10 @@ export class GameScene extends Phaser.Scene {
             this.autoSave()
           })
         } else {
-          this.dialogue.show([
-            '"Mrrp. You can rest here. Under this tree. I\'ll keep watch."',
-          ])
+          this.dialogue.show(['"Mrrp. You can rest here. Under this tree. I\'ll keep watch."'])
         }
         break
       }
-
       case 'Jayco': {
         const talks = (this.registry.get('JAYCO_TALKS') as number) ?? 0
         if (talks === 0) {
@@ -442,13 +523,10 @@ export class GameScene extends Phaser.Scene {
             this.autoSave()
           })
         } else {
-          this.dialogue.show([
-            '"The ginger ones fight over the bench near the fountain. Stay clear at dusk."',
-          ])
+          this.dialogue.show(['"The ginger ones fight over the bench near the fountain. Stay clear at dusk."'])
         }
         break
       }
-
       default:
         this.dialogue.show(['*The cat regards you warily.*'])
     }
