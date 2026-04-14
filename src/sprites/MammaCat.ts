@@ -48,6 +48,8 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
   }
 
   private createAnimations(scene: Phaser.Scene): void {
+    if (scene.anims.exists(`${SPRITE_KEY}-walk-down`)) return
+
     const row = (r: number, count = 4) => {
       const start = r * COLS
       return { start, end: start + count - 1 }
