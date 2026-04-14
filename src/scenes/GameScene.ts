@@ -231,9 +231,21 @@ export class GameScene extends Phaser.Scene {
   }
 
   update(time: number, delta: number): void {
-    // Escape must be checked before the pause gate so it can unpause
+    // Escape must be checked before the pause gate so it can unpause.
+    // When the journal is open, ESC closes it (same pattern as J key).
     if (this.escapeKey && Phaser.Input.Keyboard.JustDown(this.escapeKey)) {
-      this.togglePause();
+      if (this.scene.isActive("JournalScene")) {
+        this.scene.stop("JournalScene");
+        if (this.journalOpenedFromPause) {
+          this.journalOpenedFromPause = false;
+          const hud = this.scene.get("HUDScene") as HUDScene | undefined;
+          hud?.showPauseMenu?.();
+        } else {
+          this.resumeGame();
+        }
+      } else {
+        this.togglePause();
+      }
       return;
     }
 

@@ -166,11 +166,7 @@ export class JournalScene extends Phaser.Scene {
       this.container.setY(PANEL_PADDING + 40 - this.scrollY);
     });
 
-    // ESC to close
-    if (this.input.keyboard) {
-      const escKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
-      escKey.once("down", () => this.closeJournal());
-    }
+    // ESC closing is handled by GameScene to avoid double-fire across scenes.
   }
 
   private closeJournal(): void {
