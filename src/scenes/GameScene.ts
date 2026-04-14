@@ -71,7 +71,9 @@ export class GameScene extends Phaser.Scene {
     // Camera
     this.cameras.main.setBounds(0, 0, map.widthInPixels, map.heightInPixels)
     this.physics.world.setBounds(0, 0, map.widthInPixels, map.heightInPixels)
+    this.cameras.main.setZoom(2.5)
     this.cameras.main.startFollow(this.player, true, 0.08, 0.08)
+    this.cameras.main.setDeadzone(50, 50)
   }
 
   update(_time: number, delta: number): void {
