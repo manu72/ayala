@@ -46,6 +46,7 @@ export class GameScene extends Phaser.Scene {
   private overheadLayer!: Phaser.Tilemaps.TilemapLayer | null;
   private map!: Phaser.Tilemaps.Tilemap;
   private knownCats: Set<string> = new Set();
+  private shelterPoints: Array<{ x: number; y: number }> = [];
   private collapseRecoveryTimer = 0;
   private collapseRecovering = false;
 
@@ -62,6 +63,7 @@ export class GameScene extends Phaser.Scene {
 
   create(data?: { loadSave?: boolean }): void {
     this.npcs = [];
+    this.shelterPoints = [];
     this.restHoldTimer = 0;
     this.restHoldActive = false;
     this.isPeeking = false;
@@ -85,6 +87,7 @@ export class GameScene extends Phaser.Scene {
     if (this.overheadLayer) {
       this.overheadLayer.setDepth(10);
     }
+    this.cacheShelterPoints();
 
     const spawnPoint = this.map.findObject("spawns", (obj) => obj.name === "spawn_mammacat");
     let spawnX = spawnPoint?.x ?? this.map.widthInPixels / 2;
@@ -467,12 +470,15 @@ export class GameScene extends Phaser.Scene {
   }
 
   isNearShelter(worldX: number, worldY: number): boolean {
+    return this.shelterPoints.some((s) => Phaser.Math.Distance.Between(worldX, worldY, s.x, s.y) < 80);
+  }
+
+  private cacheShelterPoints(): void {
     const shelterNames = ["poi_pyramid_steps", "poi_starbucks", "poi_safe_sleep"];
-    return shelterNames.some((name) => {
-      const s = this.map.findObject("spawns", (o) => o.name === name);
-      if (!s) return false;
-      return Phaser.Math.Distance.Between(worldX, worldY, s.x ?? 0, s.y ?? 0) < 80;
-    });
+    this.shelterPoints = shelterNames
+      .map((name) => this.map.findObject("spawns", (o) => o.name === name))
+      .filter((s): s is Phaser.Types.Tilemaps.TiledObject => Boolean(s))
+      .map((s) => ({ x: s.x ?? 0, y: s.y ?? 0 }));
   }
 
   // ──────────── NPC Interaction ────────────
