@@ -162,7 +162,6 @@ guard.png (also used tinted for joggers/feeders/dogwalkers)
 
 ## Technical Debt
 
-- **README is outdated:** Still says v0.1.1, Phase 2/3 "Not started", project structure incomplete.
 - **No test suite:** No unit or integration tests exist.
 - **No audio:** Planned for Phase 5.
 - **No CI/CD pipeline.**
