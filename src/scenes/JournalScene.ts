@@ -186,7 +186,7 @@ export class JournalScene extends Phaser.Scene {
     const entries: JournalEntry[] = [];
 
     for (const name of knownCats) {
-      if (name === "Colony Cat") continue;
+      if (name.startsWith("Colony Cat")) continue;
       const trust = gameScene.trust.getCatTrust(name);
       const desc = CAT_DESCRIPTIONS[name];
       const description = desc

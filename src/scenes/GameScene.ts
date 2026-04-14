@@ -700,7 +700,7 @@ export class GameScene extends Phaser.Scene {
       const homeRadius = 80 + Math.random() * 80;
 
       const cat = new NPCCat(this, {
-        name: `Colony Cat`,
+        name: `Colony Cat ${i + 1}`,
         spriteKey: sprite,
         x,
         y,
@@ -901,6 +901,10 @@ export class GameScene extends Phaser.Scene {
 
   private showCatDialogue(cat: NPCCat): void {
     const name = cat.npcName;
+    if (name.startsWith("Colony Cat")) {
+      this.showColonyDialogue();
+      return;
+    }
     switch (name) {
       case "Blacky": {
         const met = this.registry.get("MET_BLACKY") as boolean | undefined;
@@ -1120,9 +1124,6 @@ export class GameScene extends Phaser.Scene {
         }
         break;
       }
-      case "Colony Cat":
-        this.showColonyDialogue();
-        break;
       default:
         this.dialogue.show(["*The cat regards you warily.*"]);
     }
