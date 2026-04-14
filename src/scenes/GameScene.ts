@@ -8,6 +8,7 @@ import { StatsSystem } from '../systems/StatsSystem'
 import { StatsHUD } from '../systems/StatsHUD'
 import { FoodSourceManager } from '../systems/FoodSource'
 import { ThreatIndicator } from '../systems/ThreatIndicator'
+import { SaveSystem } from '../systems/SaveSystem'
 
 const INTERACTION_DISTANCE = 50
 const LEARN_NAME_DISTANCE = 100
@@ -31,15 +32,19 @@ export class GameScene extends Phaser.Scene {
   private foodSources!: FoodSourceManager
   private actionKey!: Phaser.Input.Keyboard.Key
   private spaceKey!: Phaser.Input.Keyboard.Key
+  private escapeKey!: Phaser.Input.Keyboard.Key
   private overheadLayer!: Phaser.Tilemaps.TilemapLayer | null
   private map!: Phaser.Tilemaps.Tilemap
   private knownCats: Set<string> = new Set()
+  private saveNotice!: Phaser.GameObjects.Text
 
   constructor() {
     super({ key: 'GameScene' })
   }
 
-  create(): void {
+  create(data?: { loadSave?: boolean }): void {
+    this.npcs = []
+
     this.map = this.make.tilemap({ key: 'atg' })
     const tileset = this.map.addTilesetImage('park-tiles', 'park-tiles')
     if (!tileset) throw new Error('Failed to load tileset "park-tiles"')
@@ -56,46 +61,68 @@ export class GameScene extends Phaser.Scene {
       this.overheadLayer.setDepth(10)
     }
 
-    // Spawn Mamma Cat
+    // Default spawn
     const spawnPoint = this.map.findObject('spawns', obj => obj.name === 'spawn_mammacat')
-    const spawnX = spawnPoint?.x ?? this.map.widthInPixels / 2
-    const spawnY = spawnPoint?.y ?? this.map.heightInPixels / 2
+    let spawnX = spawnPoint?.x ?? this.map.widthInPixels / 2
+    let spawnY = spawnPoint?.y ?? this.map.heightInPixels / 2
+
+    // Systems (created before restore so we can apply save data)
+    this.stats = new StatsSystem()
+    this.dayNight = new DayNightCycle(this)
+
+    // Restore save if requested
+    if (data?.loadSave) {
+      const save = SaveSystem.load()
+      if (save) {
+        spawnX = save.playerPosition.x
+        spawnY = save.playerPosition.y
+        this.stats.fromJSON(save.stats)
+        this.dayNight.restore(save.timeOfDay, save.gameTimeMs)
+
+        for (const [key, val] of Object.entries(save.variables)) {
+          this.registry.set(key, val)
+        }
+      }
+    }
+
     this.player = new MammaCat(this, spawnX, spawnY)
 
     if (objectsLayer) {
       this.physics.add.collider(this.player, objectsLayer)
     }
 
-    // Known cats from registry (save/load)
+    // Known cats from registry
     const savedKnown = this.registry.get('KNOWN_CATS') as string[] | undefined
     this.knownCats = new Set(savedKnown ?? [])
 
-    // Spawn NPCs
+    // NPCs
     this.spawnNPC('Blacky', 'blacky', 'spawn_blacky', 'neutral', 150, 1024, 544)
     this.spawnNPC('Tiger', 'tiger', 'spawn_tiger', 'territorial', 200, 1600, 1152)
     this.spawnNPC('Jayco', 'jayco', 'spawn_jayco', 'friendly', 150, 2560, 512)
 
-    // Guard NPC near restaurants
+    // Restore disposition from saved variables
+    this.restoreDispositions()
+
+    // Guard NPC
     const guardPoint = this.map.findObject('spawns', o => o.name === 'spawn_guard')
-    const gx = guardPoint?.x ?? 2336
-    const gy = guardPoint?.y ?? 1728
-    this.guard = new GuardNPC(this, gx, gy)
+    this.guard = new GuardNPC(this, guardPoint?.x ?? 2336, guardPoint?.y ?? 1728)
     this.guard.setTarget(this.player)
     this.guardIndicator = new ThreatIndicator(this, this.guard, 'Guard', 'dangerous', true)
 
-    // Systems
+    // Dialogue & HUD
     this.dialogue = new DialogueSystem(this)
-    this.stats = new StatsSystem()
-    this.dayNight = new DayNightCycle(this)
     this.hud = new StatsHUD(this)
 
-    // Food & water sources
+    // Food sources
     this.foodSources = new FoodSourceManager(this)
     this.placeFoodSources()
 
+    // Input
     if (this.input.keyboard) {
       this.actionKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER)
       this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE)
+      this.escapeKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC)
+      this.escapeKey.on('down', () => this.manualSave())
     }
 
     // Camera
@@ -104,35 +131,15 @@ export class GameScene extends Phaser.Scene {
     this.cameras.main.setZoom(2.5)
     this.cameras.main.startFollow(this.player, true, 0.08, 0.08)
     this.cameras.main.setDeadzone(50, 50)
-  }
 
-  /** Helper to spawn an NPC cat with an indicator. */
-  spawnNPC(
-    name: string,
-    spriteKey: string,
-    spawnPOI: string,
-    disposition: 'friendly' | 'neutral' | 'territorial',
-    homeRadius: number,
-    fallbackX: number,
-    fallbackY: number,
-  ): NPCCat {
-    const point = this.map.findObject('spawns', obj => obj.name === spawnPOI)
-    const x = point?.x ?? fallbackX
-    const y = point?.y ?? fallbackY
-
-    const cat = new NPCCat(this, {
-      name,
-      spriteKey,
-      x, y,
-      homeZone: { cx: x, cy: y, radius: homeRadius },
-      disposition,
-    })
-
-    const known = this.knownCats.has(name)
-    const indicator = new ThreatIndicator(this, cat, name, disposition, known)
-
-    this.npcs.push({ cat, indicator })
-    return cat
+    // Save notice (hidden by default)
+    const cam = this.cameras.main
+    this.saveNotice = this.add.text(cam.width - 10, 10, 'Saved', {
+      fontSize: '10px',
+      color: '#44DD44',
+      stroke: '#000000',
+      strokeThickness: 2,
+    }).setOrigin(1, 0).setScrollFactor(0).setDepth(200).setAlpha(0)
   }
 
   update(time: number, delta: number): void {
@@ -166,17 +173,16 @@ export class GameScene extends Phaser.Scene {
     this.hud.update(this.stats)
     this.foodSources.update(this.dayNight.currentPhase, time)
 
-    // Guard update
+    // Guard
     this.guard.update(delta)
     this.guardIndicator.update()
 
-    // NPC AI + indicators
+    // NPC AI + indicators + name learning
     for (const { cat, indicator } of this.npcs) {
       cat.setPhase(this.dayNight.currentPhase)
       cat.update(delta)
       indicator.update()
 
-      // Proximity-based name learning
       if (!indicator.known) {
         const dist = Phaser.Math.Distance.Between(
           this.player.x, this.player.y, cat.x, cat.y,
@@ -189,7 +195,7 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    // Action key: food source → NPC dialogue
+    // Interaction
     const actionDown = this.actionKey?.isDown || this.spaceKey?.isDown
     if (actionDown && !this.dialogue.isActive) {
       const usedSource = this.foodSources.tryInteract(
@@ -201,6 +207,90 @@ export class GameScene extends Phaser.Scene {
       }
     }
   }
+
+  // ──────────── Save/Load ────────────
+
+  /** Trigger auto-save (called after story events and rest). */
+  autoSave(): void {
+    this.performSave()
+  }
+
+  private manualSave(): void {
+    this.performSave()
+  }
+
+  private performSave(): void {
+    SaveSystem.save(
+      this.player.x,
+      this.player.y,
+      this.stats.toJSON(),
+      this.dayNight.currentPhase,
+      this.dayNight.totalGameTimeMs,
+      this.registry,
+    )
+    this.showSaveNotice()
+  }
+
+  private showSaveNotice(): void {
+    this.saveNotice.setAlpha(1)
+    this.tweens.add({
+      targets: this.saveNotice,
+      alpha: 0,
+      delay: 800,
+      duration: 600,
+      ease: 'Linear',
+    })
+  }
+
+  /** Re-apply disposition changes from saved registry variables. */
+  private restoreDispositions(): void {
+    const tigerTalks = (this.registry.get('TIGER_TALKS') as number) ?? 0
+    if (tigerTalks >= 2) {
+      const entry = this.npcs.find(e => e.cat.npcName === 'Tiger')
+      if (entry) {
+        entry.cat.disposition = 'friendly'
+        entry.indicator.setDisposition('friendly')
+      }
+    }
+
+    const jaycoTalks = (this.registry.get('JAYCO_TALKS') as number) ?? 0
+    if (jaycoTalks >= 1) {
+      const entry = this.npcs.find(e => e.cat.npcName === 'Jayco')
+      if (entry) {
+        entry.cat.disposition = 'friendly'
+        entry.indicator.setDisposition('friendly')
+      }
+    }
+  }
+
+  // ──────────── NPC Spawning ────────────
+
+  spawnNPC(
+    name: string,
+    spriteKey: string,
+    spawnPOI: string,
+    disposition: 'friendly' | 'neutral' | 'territorial',
+    homeRadius: number,
+    fallbackX: number,
+    fallbackY: number,
+  ): NPCCat {
+    const point = this.map.findObject('spawns', obj => obj.name === spawnPOI)
+    const x = point?.x ?? fallbackX
+    const y = point?.y ?? fallbackY
+
+    const cat = new NPCCat(this, {
+      name, spriteKey, x, y,
+      homeZone: { cx: x, cy: y, radius: homeRadius },
+      disposition,
+    })
+
+    const known = this.knownCats.has(name)
+    const indicator = new ThreatIndicator(this, cat, name, disposition, known)
+    this.npcs.push({ cat, indicator })
+    return cat
+  }
+
+  // ──────────── Food Sources ────────────
 
   private placeFoodSources(): void {
     const poi = (name: string) => this.map.findObject('spawns', o => o.name === name)
@@ -225,6 +315,8 @@ export class GameScene extends Phaser.Scene {
     this.foodSources.addBugSpawns(this.map, 15)
   }
 
+  // ──────────── Environment ────────────
+
   private isUnderCanopy(worldX: number, worldY: number): boolean {
     if (!this.overheadLayer) return false
     const tileX = Math.floor(worldX / TILE_SIZE)
@@ -242,8 +334,9 @@ export class GameScene extends Phaser.Scene {
     })
   }
 
+  // ──────────── NPC Interaction ────────────
+
   private tryInteract(): void {
-    // Find nearest NPC in range
     let nearestEntry: NPCEntry | null = null
     let nearestDist = Infinity
 
@@ -261,13 +354,11 @@ export class GameScene extends Phaser.Scene {
     if (!nearestEntry) return
     const cat = nearestEntry.cat
 
-    // Wake sleeping cats
     if (cat.state === 'sleeping') {
       cat.triggerAlert()
       return
     }
 
-    // Dialogue based on name
     this.showCatDialogue(cat)
   }
 
@@ -287,8 +378,8 @@ export class GameScene extends Phaser.Scene {
             this.registry.set('MET_BLACKY', true)
             this.knownCats.add('Blacky')
             this.registry.set('KNOWN_CATS', Array.from(this.knownCats))
-            const entry = this.npcs.find(e => e.cat === cat)
-            entry?.indicator.reveal()
+            this.npcs.find(e => e.cat === cat)?.indicator.reveal()
+            this.autoSave()
           })
         } else {
           this.dialogue.show([
@@ -308,8 +399,8 @@ export class GameScene extends Phaser.Scene {
             this.registry.set('TIGER_TALKS', 1)
             this.knownCats.add('Tiger')
             this.registry.set('KNOWN_CATS', Array.from(this.knownCats))
-            const entry = this.npcs.find(e => e.cat === cat)
-            entry?.indicator.reveal()
+            this.npcs.find(e => e.cat === cat)?.indicator.reveal()
+            this.autoSave()
           })
         } else if (talks === 1) {
           this.dialogue.show([
@@ -318,8 +409,8 @@ export class GameScene extends Phaser.Scene {
           ], () => {
             this.registry.set('TIGER_TALKS', 2)
             cat.disposition = 'friendly'
-            const entry = this.npcs.find(e => e.cat === cat)
-            entry?.indicator.setDisposition('friendly')
+            this.npcs.find(e => e.cat === cat)?.indicator.setDisposition('friendly')
+            this.autoSave()
           })
         } else {
           this.dialogue.show([
@@ -344,6 +435,7 @@ export class GameScene extends Phaser.Scene {
             entry?.indicator.reveal()
             entry?.indicator.setDisposition('friendly')
             cat.disposition = 'friendly'
+            this.autoSave()
           })
         } else {
           this.dialogue.show([
@@ -354,9 +446,7 @@ export class GameScene extends Phaser.Scene {
       }
 
       default:
-        this.dialogue.show([
-          '*The cat regards you warily.*',
-        ])
+        this.dialogue.show(['*The cat regards you warily.*'])
     }
   }
 }
