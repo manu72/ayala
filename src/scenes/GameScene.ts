@@ -157,7 +157,8 @@ export class GameScene extends Phaser.Scene {
     const savedKnown = this.registry.get("KNOWN_CATS") as string[] | undefined;
     this.knownCats = new Set(savedKnown ?? []);
 
-    this.spawnNPC("Blacky", "blacky", "spawn_blacky", "neutral", 150, 1024, 544);
+    const blacky = this.spawnNPC("Blacky", "blacky", "spawn_blacky", "neutral", 150, 1024, 544);
+    blacky.setTint(0x333333);
     this.spawnNPC("Tiger", "tiger", "spawn_tiger", "territorial", 200, 1600, 1152);
     this.spawnNPC("Jayco", "jayco", "spawn_jayco", "friendly", 150, 2560, 512);
 
@@ -678,15 +679,12 @@ export class GameScene extends Phaser.Scene {
   }
 
   private spawnGingerTwins(): void {
-    this.spawnNPC("Ginger", "ginger-idle", "spawn_ginger", "wary", 200, 1900, 700, {
-      animPrefix: "ginger",
-      scale: 0.5,
-    });
-    this.spawnNPC("Ginger B", "ginger-idle", "spawn_ginger", "wary", 200, 1900, 700, {
-      animPrefix: "ginger",
-      scale: 0.5,
+    const ginger = this.spawnNPC("Ginger", "fluffy", "spawn_ginger", "wary", 200, 1900, 700);
+    ginger.setTint(0xffaa44);
+    const gingerB = this.spawnNPC("Ginger B", "fluffy", "spawn_ginger", "wary", 200, 1900, 700, {
       offsetX: 60,
     });
+    gingerB.setTint(0xffaa44);
   }
 
   private spawnColonyCats(): void {

@@ -18,20 +18,6 @@ export class BootScene extends Phaser.Scene {
       });
     }
 
-    // Ginger cat strips: 64x64 frames, scaled down to 32px in-game via setScale(0.5)
-    this.load.spritesheet("ginger-walk", "assets/sprites/ginger-WALK.png", {
-      frameWidth: 64,
-      frameHeight: 64,
-    });
-    this.load.spritesheet("ginger-idle", "assets/sprites/ginger-IDLE.png", {
-      frameWidth: 64,
-      frameHeight: 64,
-    });
-    this.load.spritesheet("ginger-run", "assets/sprites/ginger-RUN.png", {
-      frameWidth: 64,
-      frameHeight: 64,
-    });
-
     // Guard spritesheet: 8 cols x 7 rows of 64x64 frames
     this.load.spritesheet("guard", "assets/sprites/guard.png", {
       frameWidth: 64,

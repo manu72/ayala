@@ -257,12 +257,6 @@ export class NPCCat extends Phaser.Physics.Arcade.Sprite {
   private createAnimations(scene: Phaser.Scene, key: string): void {
     if (scene.anims.exists(`${key}-sit-down`)) return;
 
-    // Ginger cats use separate strip sheets instead of a grid
-    if (key === "ginger") {
-      this.createGingerAnimations(scene, key);
-      return;
-    }
-
     const row = (r: number, count = 4) => {
       const start = r * COLS;
       return { start, end: start + count - 1 };
@@ -311,40 +305,6 @@ export class NPCCat extends Phaser.Physics.Arcade.Sprite {
     scene.anims.create({
       key: `${key}-rest`,
       frames: scene.anims.generateFrameNumbers(key, row(6, 4)),
-      frameRate: 2,
-      repeat: -1,
-    });
-  }
-
-  /** Strip-based animations for ginger cats (64px frames scaled to 0.5). */
-  private createGingerAnimations(scene: Phaser.Scene, key: string): void {
-    // Idle strip: frames 0-3 (4 frames) used for all sit directions
-    for (const dir of ["down", "left", "right", "up"] as const) {
-      scene.anims.create({
-        key: `${key}-sit-${dir}`,
-        frames: scene.anims.generateFrameNumbers("ginger-idle", { start: 0, end: 3 }),
-        frameRate: 3,
-        repeat: -1,
-      });
-    }
-    // Walk strip: frames 0-7 (8 frames)
-    scene.anims.create({
-      key: `${key}-walk`,
-      frames: scene.anims.generateFrameNumbers("ginger-walk", { start: 0, end: 7 }),
-      frameRate: 6,
-      repeat: -1,
-    });
-    // Run strip: frames 0-7 (8 frames)
-    scene.anims.create({
-      key: `${key}-run`,
-      frames: scene.anims.generateFrameNumbers("ginger-run", { start: 0, end: 7 }),
-      frameRate: 12,
-      repeat: -1,
-    });
-    // Rest: idle frames 0-3 (4 frames) slowed down
-    scene.anims.create({
-      key: `${key}-rest`,
-      frames: scene.anims.generateFrameNumbers("ginger-idle", { start: 0, end: 3 }),
       frameRate: 2,
       repeat: -1,
     });
