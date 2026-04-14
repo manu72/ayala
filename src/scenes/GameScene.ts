@@ -741,6 +741,7 @@ export class GameScene extends Phaser.Scene {
         speed: 40,
         activePhases: ["dawn", "evening"],
         lingerSec: 45,
+        lingerWaypointIndex: 1,
         path: [
           { x: 300, y: 800 },
           { x: 600, y: 700 },
@@ -753,6 +754,7 @@ export class GameScene extends Phaser.Scene {
         speed: 40,
         activePhases: ["dawn", "evening"],
         lingerSec: 40,
+        lingerWaypointIndex: 1,
         path: [
           { x: 2200, y: 500 },
           { x: 2000, y: 600 },

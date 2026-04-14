@@ -10,6 +10,8 @@ export interface HumanConfig {
   activePhases: TimeOfDay[];
   /** Seconds to linger at feeding station (feeders only). */
   lingerSec?: number;
+  /** Waypoint index where feeder should linger (defaults to 1). */
+  lingerWaypointIndex?: number;
 }
 
 const SPRITE_KEY = "guard";
@@ -102,7 +104,12 @@ export class HumanNPC extends Phaser.Physics.Arcade.Sprite {
     const dist = Phaser.Math.Distance.Between(this.x, this.y, target.x, target.y);
     if (dist < 8) {
       // Reached waypoint
-      if (this.humanType === "feeder" && this.config.lingerSec && this.config.lingerSec > 0) {
+      if (
+        this.humanType === "feeder" &&
+        this.config.lingerSec &&
+        this.config.lingerSec > 0 &&
+        this.currentWaypoint === (this.config.lingerWaypointIndex ?? 1)
+      ) {
         this.lingering = true;
         this.lingerTimer = this.config.lingerSec * 1000;
         this.setVelocity(0);
@@ -130,7 +137,8 @@ export class HumanNPC extends Phaser.Physics.Arcade.Sprite {
     this.setActive(true);
     const start = this.waypointPath[0]!;
     this.setPosition(start.x, start.y);
-    this.currentWaypoint = 0;
+    // Feeders spawn at waypoint 0 and should head to station first.
+    this.currentWaypoint = this.humanType === "feeder" && this.waypointPath.length > 1 ? 1 : 0;
     this.lingering = false;
   }
 
