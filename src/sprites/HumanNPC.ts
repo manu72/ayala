@@ -88,6 +88,7 @@ const JOGGER_PROFILE: SpriteProfile = {
 function profileForType(type: HumanType): SpriteProfile {
   switch (type) {
     case "jogger":
+    case "feeder":
       return JOGGER_PROFILE;
     case "dogwalker":
       return DOGWALKER_PROFILE;

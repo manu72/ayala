@@ -78,20 +78,24 @@ export class FoodSourceManager {
 
     const marker = this.scene.add
       .text(worldX, worldY, def.symbol, {
+        fontFamily: "Arial, Helvetica, sans-serif",
         fontSize: type === "bugs" ? "8px" : "12px",
         color: def.symbolColor,
         stroke: "#000000",
         strokeThickness: 1,
+        resolution: 2,
       })
       .setOrigin(0.5)
       .setDepth(2);
 
     const statusLabel = this.scene.add
       .text(worldX, worldY + 14, "", {
-        fontSize: "7px",
+        fontFamily: "Arial, Helvetica, sans-serif",
+        fontSize: "8px",
         color: "#aaaaaa",
         stroke: "#000000",
         strokeThickness: 1,
+        resolution: 2,
       })
       .setOrigin(0.5, 0)
       .setDepth(2);
@@ -185,11 +189,13 @@ export class FoodSourceManager {
   private showFloatingText(text: string, x: number, y: number, color: string): void {
     const ft = this.scene.add
       .text(x, y, text, {
+        fontFamily: "Arial, Helvetica, sans-serif",
         fontSize: "10px",
         color,
         stroke: "#000000",
         strokeThickness: 2,
         fontStyle: "bold",
+        resolution: 2,
       })
       .setOrigin(0.5)
       .setDepth(100);

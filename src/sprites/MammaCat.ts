@@ -77,10 +77,12 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
 
     this.nameLabel = scene.add
       .text(x, y - 12, "Mamma Cat", {
+        fontFamily: "Arial, Helvetica, sans-serif",
         fontSize: "10px",
         color: "#ffffff",
         stroke: "#000000",
         strokeThickness: 2,
+        resolution: 2,
       })
       .setOrigin(0.5, 1)
       .setDepth(5);
