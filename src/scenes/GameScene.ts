@@ -52,6 +52,7 @@ export class GameScene extends Phaser.Scene {
   private journalKey!: Phaser.Input.Keyboard.Key;
   private journalToggleLocked = false;
   journalOpenedFromPause = false;
+  private groundLayer: Phaser.Tilemaps.TilemapLayer | null = null;
   private objectsLayer: Phaser.Tilemaps.TilemapLayer | null = null;
   private overheadLayer!: Phaser.Tilemaps.TilemapLayer | null;
   private map!: Phaser.Tilemaps.Tilemap;
@@ -99,7 +100,11 @@ export class GameScene extends Phaser.Scene {
     if (!plantsTileset) throw new Error('Failed to load tileset "plants"');
     const tilesets = [parkTileset, treesTileset, plantsTileset].filter(Boolean) as Phaser.Tilemaps.Tileset[];
 
-    this.map.createLayer("ground", tilesets, 0, 0);
+    const rawGroundLayer = this.map.createLayer("ground", tilesets, 0, 0);
+    if (rawGroundLayer && "setCollisionByProperty" in rawGroundLayer) {
+      this.groundLayer = rawGroundLayer as Phaser.Tilemaps.TilemapLayer;
+      this.groundLayer.setCollisionByProperty({ collides: true });
+    }
 
     const rawObjectsLayer = this.map.createLayer("objects", tilesets, 0, 0);
     if (rawObjectsLayer && "setCollisionByProperty" in rawObjectsLayer) {
@@ -165,6 +170,9 @@ export class GameScene extends Phaser.Scene {
 
     this.player = new MammaCat(this, spawnX, spawnY);
 
+    if (this.groundLayer) {
+      this.physics.add.collider(this.player, this.groundLayer);
+    }
     if (this.objectsLayer) {
       this.physics.add.collider(this.player, this.objectsLayer);
     }
@@ -172,27 +180,29 @@ export class GameScene extends Phaser.Scene {
     const savedKnown = this.registry.get("KNOWN_CATS") as string[] | undefined;
     this.knownCats = new Set(savedKnown ?? []);
 
-    const blacky = this.spawnNPC("Blacky", "blacky", "spawn_blacky", "neutral", 150, 1024, 544);
+    const blacky = this.spawnNPC("Blacky", "blacky", "spawn_blacky", "neutral", 150, 411, 1083);
     blacky.setTint(0x333333);
-    this.spawnNPC("Tiger", "tiger", "spawn_tiger", "territorial", 200, 1600, 1152);
-    this.spawnNPC("Jayco", "jayco", "spawn_jayco", "friendly", 150, 2560, 512);
+    this.spawnNPC("Tiger", "tiger", "spawn_tiger", "territorial", 200, 1141, 632);
+    this.spawnNPC("Jayco", "jayco", "spawn_jayco", "friendly", 150, 1427, 484);
 
-    // Phase 3 named cats
-    this.spawnNPC("Jayco Jr", "jayco", "spawn_jayco_jr", "friendly", 100, 2580, 530, {
+    this.spawnNPC("Jayco Jr", "jayco", "spawn_jayco_jr", "friendly", 100, 1470, 520, {
       scale: 0.7,
       walkSpeed: 40,
       hyperactive: true,
     });
-    this.spawnNPC("Fluffy", "fluffy", "spawn_fluffy", "neutral", 180, 1500, 1000);
-    this.spawnNPC("Pedigree", "fluffy", "spawn_pedigree", "neutral", 150, 800, 1400);
+    this.spawnNPC("Fluffy", "fluffy", "spawn_fluffy", "neutral", 180, 1500, 900);
+    this.spawnNPC("Pedigree", "fluffy", "spawn_pedigree", "neutral", 150, 2500, 1700);
     this.spawnGingerTwins();
     this.spawnColonyCats();
 
     this.restoreDispositions();
 
     const guardPoint = this.map.findObject("spawns", (o) => o.name === "spawn_guard");
-    this.guard = new GuardNPC(this, guardPoint?.x ?? 2336, guardPoint?.y ?? 1728);
+    this.guard = new GuardNPC(this, guardPoint?.x ?? 2169, guardPoint?.y ?? 1791);
     this.guard.setTarget(this.player);
+    if (this.groundLayer) {
+      this.physics.add.collider(this.guard, this.groundLayer);
+    }
     if (this.objectsLayer) {
       this.physics.add.collider(this.guard, this.objectsLayer);
     }
@@ -319,23 +329,24 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
-    // ──── Tab peek ────
-    if (this.tabKey?.isDown) {
-      this.player.setVelocity(0);
-      if (!this.isPeeking) {
-        this.isPeeking = true;
-        this.cameras.main.zoomTo(PEEK_ZOOM, ZOOM_DURATION);
-      }
-      this.updateNPCs(delta);
-      this.updateHumans(delta);
-      this.foodSources.update(this.dayNight.currentPhase, time);
-      this.guard.update(delta);
-      this.guardIndicator.update();
-      return;
+    // ──── Tab peek (toggle) ────
+    if (this.tabKey && Phaser.Input.Keyboard.JustDown(this.tabKey)) {
+      this.isPeeking = !this.isPeeking;
+      this.cameras.main.zoomTo(this.isPeeking ? PEEK_ZOOM : DEFAULT_ZOOM, ZOOM_DURATION);
     }
     if (this.isPeeking) {
-      this.isPeeking = false;
-      this.cameras.main.zoomTo(DEFAULT_ZOOM, ZOOM_DURATION);
+      if (this.player.isMoving) {
+        this.isPeeking = false;
+        this.cameras.main.zoomTo(DEFAULT_ZOOM, ZOOM_DURATION);
+      } else {
+        this.player.setVelocity(0);
+        this.updateNPCs(delta);
+        this.updateHumans(delta);
+        this.foodSources.update(this.dayNight.currentPhase, time);
+        this.guard.update(delta);
+        this.guardIndicator.update();
+        return;
+      }
     }
 
     // ──── Interact (Space tap) ────
@@ -395,21 +406,16 @@ export class GameScene extends Phaser.Scene {
     const inShade = this.isUnderCanopy(this.player.x, this.player.y);
     const inShelter = this.isNearShelter(this.player.x, this.player.y);
 
-    if (this.dialogue.isActive) {
-      this.player.setVelocity(0);
-      this.stats.update(deltaSec, false, false, this.dayNight.isHeatActive, inShade, inShelter, false);
-    } else {
-      this.player.update(this.stats.canRun, delta);
-      this.stats.update(
-        deltaSec,
-        this.player.isMoving,
-        this.player.isRunning,
-        this.dayNight.isHeatActive,
-        inShade,
-        inShelter,
-        false,
-      );
-    }
+    this.player.update(this.stats.canRun, delta);
+    this.stats.update(
+      deltaSec,
+      this.player.isMoving,
+      this.player.isRunning,
+      this.dayNight.isHeatActive,
+      inShade,
+      inShelter,
+      false,
+    );
 
     this.foodSources.update(this.dayNight.currentPhase, time);
     this.guard.update(delta);
@@ -727,6 +733,9 @@ export class GameScene extends Phaser.Scene {
       hyperactive: opts?.hyperactive,
       animPrefix: opts?.animPrefix,
     });
+    if (this.groundLayer) {
+      this.physics.add.collider(cat, this.groundLayer);
+    }
     if (this.objectsLayer) {
       this.physics.add.collider(cat, this.objectsLayer);
     }
@@ -737,9 +746,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   private spawnGingerTwins(): void {
-    const ginger = this.spawnNPC("Ginger", "fluffy", "spawn_ginger", "wary", 200, 1900, 700);
+    const ginger = this.spawnNPC("Ginger", "fluffy", "spawn_ginger", "wary", 200, 750, 1250);
     ginger.setTint(0xffaa44);
-    const gingerB = this.spawnNPC("Ginger B", "fluffy", "spawn_ginger", "wary", 200, 1900, 700, {
+    const gingerB = this.spawnNPC("Ginger B", "fluffy", "spawn_ginger", "wary", 200, 750, 1250, {
       offsetX: 60,
     });
     gingerB.setTint(0xffaa44);
@@ -760,11 +769,13 @@ export class GameScene extends Phaser.Scene {
       "territorial",
     ];
 
-    // Scatter across zones 2-4 (approximate world positions)
+    // Scatter across distinct zones matching the new ATG map layout
     const zones = [
-      { cx: 800, cy: 1300, radius: 250 },
-      { cx: 1600, cy: 1100, radius: 300 },
-      { cx: 1900, cy: 800, radius: 250 },
+      { cx: 1400, cy: 800, radius: 250 },   // Central Gardens north
+      { cx: 1600, cy: 1100, radius: 300 },   // Central Gardens south
+      { cx: 900, cy: 1000, radius: 200 },    // Western gardens / fountain area
+      { cx: 2200, cy: 600, radius: 200 },    // Eastern gardens near Shops
+      { cx: 2400, cy: 1500, radius: 200 },   // Southeast / Blackbird approach
     ];
 
     const count = 12;
@@ -786,6 +797,9 @@ export class GameScene extends Phaser.Scene {
         homeZone: { cx: x, cy: y, radius: homeRadius },
         disposition: disp,
       });
+      if (this.groundLayer) {
+        this.physics.add.collider(cat, this.groundLayer);
+      }
       if (this.objectsLayer) {
         this.physics.add.collider(cat, this.objectsLayer);
       }
@@ -798,58 +812,59 @@ export class GameScene extends Phaser.Scene {
 
   private spawnHumans(): void {
     const configs: HumanConfig[] = [
-      // Jogger 1: runs a loop through the main paths
+      // Jogger 1: long loop through central gardens via main walkways
       {
         type: "jogger",
         speed: 100,
         activePhases: ["dawn", "evening"],
         path: [
-          { x: 400, y: 600 },
-          { x: 1200, y: 600 },
-          { x: 2000, y: 800 },
-          { x: 2400, y: 1200 },
-          { x: 1600, y: 1400 },
-          { x: 800, y: 1200 },
+          { x: 600, y: 1100 },
+          { x: 1200, y: 700 },
+          { x: 1800, y: 600 },
+          { x: 2300, y: 500 },
+          { x: 2300, y: 1000 },
+          { x: 1600, y: 1200 },
+          { x: 1000, y: 1300 },
         ],
       },
-      // Jogger 2: shorter path near the gardens
+      // Jogger 2: shorter central gardens loop
       {
         type: "jogger",
         speed: 90,
         activePhases: ["dawn", "evening"],
         path: [
-          { x: 1200, y: 1000 },
-          { x: 1800, y: 1000 },
-          { x: 1800, y: 1400 },
-          { x: 1200, y: 1400 },
+          { x: 1200, y: 800 },
+          { x: 1700, y: 700 },
+          { x: 1900, y: 1000 },
+          { x: 1400, y: 1100 },
         ],
       },
-      // Feeders: walk to actual map feeding stations, linger, then leave
       ...this.buildFeederConfigs(),
-      // Dog walker 1
+      // Dog walker 1: western gardens near fountain and underpass
       {
         type: "dogwalker",
         speed: 60,
         activePhases: ["dawn", "evening", "day"],
         path: [
-          { x: 500, y: 1100 },
-          { x: 1000, y: 1100 },
-          { x: 1400, y: 1300 },
-          { x: 1000, y: 1500 },
-          { x: 500, y: 1300 },
+          { x: 550, y: 1000 },
+          { x: 800, y: 900 },
+          { x: 1100, y: 1000 },
+          { x: 1100, y: 1200 },
+          { x: 800, y: 1300 },
+          { x: 550, y: 1200 },
         ],
       },
-      // Dog walker 2
+      // Dog walker 2: eastern gardens near The Shops and restaurants
       {
         type: "dogwalker",
         speed: 55,
         activePhases: ["dawn", "evening"],
         path: [
-          { x: 1800, y: 600 },
-          { x: 2200, y: 800 },
-          { x: 2400, y: 1100 },
-          { x: 2000, y: 1300 },
-          { x: 1800, y: 900 },
+          { x: 1900, y: 600 },
+          { x: 2200, y: 700 },
+          { x: 2400, y: 1000 },
+          { x: 2100, y: 1300 },
+          { x: 1900, y: 1000 },
         ],
       },
     ];
@@ -859,6 +874,9 @@ export class GameScene extends Phaser.Scene {
 
     for (const config of configs) {
       const human = new HumanNPC(this, config);
+      if (this.groundLayer) {
+        this.physics.add.collider(human, this.groundLayer);
+      }
       if (this.objectsLayer) {
         this.physics.add.collider(human, this.objectsLayer);
       }
@@ -884,6 +902,7 @@ export class GameScene extends Phaser.Scene {
     }> = [
       { poi: "poi_feeding_station_1", approachOffset: { dx: -200, dy: 200 } },
       { poi: "poi_feeding_station_2", approachOffset: { dx: 200, dy: -200 } },
+      { poi: "poi_feeding_station_3", approachOffset: { dx: -200, dy: -150 } },
     ];
 
     const configs: HumanConfig[] = [];
@@ -945,16 +964,21 @@ export class GameScene extends Phaser.Scene {
     const sources: Array<[string, SourceType]> = [
       ["poi_feeding_station_1", "feeding_station"],
       ["poi_feeding_station_2", "feeding_station"],
+      ["poi_feeding_station_3", "feeding_station"],
       ["poi_fountain", "fountain"],
       ["poi_water_bowl_1", "water_bowl"],
       ["poi_water_bowl_2", "water_bowl"],
+      ["poi_water_bowl_3", "water_bowl"],
+      ["poi_starbucks_water", "water_bowl"],
       ["poi_restaurant_scraps", "restaurant_scraps"],
+      ["poi_restaurant_scraps_manam", "restaurant_scraps"],
+      ["poi_shops_supermarket", "restaurant_scraps"],
     ];
     for (const [poiName, type] of sources) {
       const obj = poi(poiName);
       if (obj) this.foodSources.addSource(type, obj.x ?? 0, obj.y ?? 0);
     }
-    this.foodSources.addBugSpawns(this.map, 15);
+    this.foodSources.addBugSpawns(this.map, 20);
   }
 
   // ──────────── Environment ────────────
@@ -972,7 +996,16 @@ export class GameScene extends Phaser.Scene {
   }
 
   private cacheShelterPoints(): void {
-    const shelterNames = ["poi_pyramid_steps", "poi_starbucks", "poi_safe_sleep"];
+    const shelterNames = [
+      "poi_pyramid_steps",
+      "poi_starbucks",
+      "poi_safe_sleep",
+      "poi_safe_sleep_central",
+      "poi_safe_sleep_blackbird",
+      "poi_covered_area",
+      "poi_escalator",
+      "poi_library",
+    ];
     this.shelterPoints = shelterNames
       .map((name) => this.map.findObject("spawns", (o) => o.name === name))
       .filter((s): s is Phaser.Types.Tilemaps.TiledObject => Boolean(s))

@@ -41,20 +41,24 @@ export class ThreatIndicator {
 
     this.icon = scene.add
       .text(0, 0, cfg.symbol, {
+        fontFamily: "Arial, Helvetica, sans-serif",
         fontSize: "10px",
         color: cfg.color,
         stroke: "#000000",
         strokeThickness: 2,
+        resolution: 2,
       })
       .setOrigin(0.5, 1)
       .setDepth(6);
 
     this.label = scene.add
       .text(0, 0, known ? name : "???", {
-        fontSize: "8px",
+        fontFamily: "Arial, Helvetica, sans-serif",
+        fontSize: "9px",
         color: "#cccccc",
         stroke: "#000000",
         strokeThickness: 1,
+        resolution: 2,
       })
       .setOrigin(0.5, 1)
       .setDepth(6);
@@ -84,8 +88,8 @@ export class ThreatIndicator {
   }
 
   private updatePosition(): void {
-    this.icon.setPosition(this.parent.x, this.parent.y - 26);
-    this.label.setPosition(this.parent.x, this.parent.y - 34);
+    this.icon.setPosition(this.parent.x, this.parent.y - 16);
+    this.label.setPosition(this.parent.x, this.parent.y - 22);
   }
 
   destroy(): void {
