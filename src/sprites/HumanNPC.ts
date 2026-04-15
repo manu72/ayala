@@ -231,7 +231,11 @@ export class HumanNPC extends Phaser.Physics.Arcade.Sprite {
     const body = this.body as Phaser.Physics.Arcade.Body | undefined;
     body?.setEnable(true);
     const start = this.waypointPath[0]!;
-    this.setPosition(start.x, start.y);
+    if (body) {
+      body.reset(start.x, start.y);
+    } else {
+      this.setPosition(start.x, start.y);
+    }
     if (this.waypointPath.length > 1) {
       // Start at spawn waypoint 0 only when linger is explicitly configured there.
       // Otherwise begin moving to the next waypoint after spawn.
