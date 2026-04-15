@@ -76,7 +76,7 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
     }
 
     this.nameLabel = scene.add
-      .text(x, y - 20, "Mamma Cat", {
+      .text(x, y - 12, "Mamma Cat", {
         fontSize: "10px",
         color: "#ffffff",
         stroke: "#000000",
@@ -116,14 +116,14 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
       if (this.wakeTimer <= 0) {
         this.playerState = "normal";
       }
-      this.nameLabel.setPosition(this.x, this.y - 20);
+      this.nameLabel.setPosition(this.x, this.y - 12);
       return;
     }
 
     // Resting — no movement, handled by GameScene
     if (this.playerState === "resting") {
       this.setVelocity(0);
-      this.nameLabel.setPosition(this.x, this.y - 20);
+      this.nameLabel.setPosition(this.x, this.y - 12);
       return;
     }
 
@@ -214,7 +214,7 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
       this.anims.play(`${SPRITE_KEY}-sit-${this.lastDirection}`, true);
     }
 
-    this.nameLabel.setPosition(this.x, this.y - 20);
+    this.nameLabel.setPosition(this.x, this.y - 12);
   }
 
   /** True if any directional key (arrows or WASD) is pressed. */

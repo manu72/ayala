@@ -84,8 +84,8 @@ export class ThreatIndicator {
   }
 
   private updatePosition(): void {
-    this.icon.setPosition(this.parent.x, this.parent.y - 26);
-    this.label.setPosition(this.parent.x, this.parent.y - 34);
+    this.icon.setPosition(this.parent.x, this.parent.y - 16);
+    this.label.setPosition(this.parent.x, this.parent.y - 22);
   }
 
   destroy(): void {
