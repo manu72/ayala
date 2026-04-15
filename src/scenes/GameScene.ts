@@ -91,18 +91,23 @@ export class GameScene extends Phaser.Scene {
     this.collapseRecoveryTimer = 0;
 
     this.map = this.make.tilemap({ key: "atg" });
-    const tileset = this.map.addTilesetImage("park-tiles", "park-tiles");
-    if (!tileset) throw new Error('Failed to load tileset "park-tiles"');
+    const parkTileset = this.map.addTilesetImage("park-tiles", "park-tiles");
+    if (!parkTileset) throw new Error('Failed to load tileset "park-tiles"');
+    const treesTileset = this.map.addTilesetImage("trees-pale", "trees-pale");
+    if (!treesTileset) throw new Error('Failed to load tileset "trees-pale"');
+    const plantsTileset = this.map.addTilesetImage("plants", "plants");
+    if (!plantsTileset) throw new Error('Failed to load tileset "plants"');
+    const tilesets = [parkTileset, treesTileset, plantsTileset].filter(Boolean) as Phaser.Tilemaps.Tileset[];
 
-    this.map.createLayer("ground", tileset, 0, 0);
+    this.map.createLayer("ground", tilesets, 0, 0);
 
-    const rawObjectsLayer = this.map.createLayer("objects", tileset, 0, 0);
+    const rawObjectsLayer = this.map.createLayer("objects", tilesets, 0, 0);
     if (rawObjectsLayer && "setCollisionByProperty" in rawObjectsLayer) {
       this.objectsLayer = rawObjectsLayer as Phaser.Tilemaps.TilemapLayer;
       this.objectsLayer.setCollisionByProperty({ collides: true });
     }
 
-    this.overheadLayer = this.map.createLayer("overhead", tileset, 0, 0) as Phaser.Tilemaps.TilemapLayer | null;
+    this.overheadLayer = this.map.createLayer("overhead", tilesets, 0, 0) as Phaser.Tilemaps.TilemapLayer | null;
     if (this.overheadLayer) {
       this.overheadLayer.setDepth(10);
     }
@@ -122,9 +127,18 @@ export class GameScene extends Phaser.Scene {
 
     // Clear story state from any prior session before restoring
     for (const key of [
-      "MET_BLACKY", "TIGER_TALKS", "JAYCO_TALKS", "KNOWN_CATS",
-      "CHAPTER", "CH1_RESTED", "FLUFFY_TALKS", "PEDIGREE_TALKS",
-      "MET_GINGER_A", "MET_GINGER_B", "JAYCO_JR_TALKS", "JOURNAL_MET_DAYS",
+      "MET_BLACKY",
+      "TIGER_TALKS",
+      "JAYCO_TALKS",
+      "KNOWN_CATS",
+      "CHAPTER",
+      "CH1_RESTED",
+      "FLUFFY_TALKS",
+      "PEDIGREE_TALKS",
+      "MET_GINGER_A",
+      "MET_GINGER_B",
+      "JAYCO_JR_TALKS",
+      "JOURNAL_MET_DAYS",
     ]) {
       this.registry.remove(key);
     }
@@ -482,9 +496,7 @@ export class GameScene extends Phaser.Scene {
   private checkChapterProgression(): void {
     if (this.dialogue.isActive) return;
 
-    const namedKnown = new Set(
-      [...this.knownCats].filter((name) => !name.startsWith("Colony Cat")),
-    );
+    const namedKnown = new Set([...this.knownCats].filter((name) => !name.startsWith("Colony Cat")));
     const triggered = this.chapters.check({
       trust: this.trust,
       dayNight: this.dayNight,
@@ -637,11 +649,7 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private showBodyLanguage(
-    cat: NPCCat,
-    _dist: number,
-    hud: HUDScene | undefined,
-  ): void {
+  private showBodyLanguage(cat: NPCCat, _dist: number, hud: HUDScene | undefined): void {
     const catTrust = this.trust.getCatTrust(cat.npcName);
     const effectiveDisposition = catTrust >= 50 ? "friendly" : cat.disposition;
 
@@ -669,10 +677,7 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private getNarrationForCat(
-    cat: NPCCat,
-    effectiveDisposition: string,
-  ): string | null {
+  private getNarrationForCat(cat: NPCCat, effectiveDisposition: string): string | null {
     if (cat.state === "sleeping") {
       return "This cat is curled up tight, breathing softly.";
     }
@@ -698,7 +703,14 @@ export class GameScene extends Phaser.Scene {
     homeRadius: number,
     fallbackX: number,
     fallbackY: number,
-    opts?: { scale?: number; walkSpeed?: number; hyperactive?: boolean; animPrefix?: string; offsetX?: number; offsetY?: number },
+    opts?: {
+      scale?: number;
+      walkSpeed?: number;
+      hyperactive?: boolean;
+      animPrefix?: string;
+      offsetX?: number;
+      offsetY?: number;
+    },
   ): NPCCat {
     const point = this.map.findObject("spawns", (obj) => obj.name === spawnPOI);
     const x = (point?.x ?? fallbackX) + (opts?.offsetX ?? 0);
@@ -736,9 +748,15 @@ export class GameScene extends Phaser.Scene {
   private spawnColonyCats(): void {
     const sprites = ["mammacat", "blacky", "tiger", "jayco", "fluffy"];
     const dispositions: Array<"neutral" | "wary" | "friendly" | "territorial"> = [
-      "neutral", "neutral", "neutral", "neutral",
-      "wary", "wary", "wary",
-      "friendly", "friendly",
+      "neutral",
+      "neutral",
+      "neutral",
+      "neutral",
+      "wary",
+      "wary",
+      "wary",
+      "friendly",
+      "friendly",
       "territorial",
     ];
 
@@ -1092,10 +1110,9 @@ export class GameScene extends Phaser.Scene {
             },
           );
         } else {
-          this.dialogue.show(
-            ["\"Did you find the water bowls? They're near the big trees! I can show you!\""],
-            () => { this.awardReturnConversation("Jayco Jr"); },
-          );
+          this.dialogue.show(['"Did you find the water bowls? They\'re near the big trees! I can show you!"'], () => {
+            this.awardReturnConversation("Jayco Jr");
+          });
         }
         break;
       }
@@ -1106,7 +1123,7 @@ export class GameScene extends Phaser.Scene {
           this.dialogue.show(
             [
               "*This cat regards you with half-closed eyes. Its long fur is immaculate.*",
-              "\"...\"",
+              '"..."',
               "*It returns to grooming. You've been dismissed.*",
             ],
             () => {
@@ -1121,9 +1138,11 @@ export class GameScene extends Phaser.Scene {
           this.dialogue.show(
             [
               "\"You're still alive. That's something, I suppose.\"",
-              "\"The humans with the bags come at dawn and dusk. Follow the sound of rustling.\"",
+              '"The humans with the bags come at dawn and dusk. Follow the sound of rustling."',
             ],
-            () => { this.awardReturnConversation("Fluffy"); },
+            () => {
+              this.awardReturnConversation("Fluffy");
+            },
           );
         } else {
           this.dialogue.show(["*The cat flicks an ear in your direction but doesn't look up.*"], () => {
@@ -1138,8 +1157,8 @@ export class GameScene extends Phaser.Scene {
           this.dialogue.show(
             [
               "*This cat has a look you recognise. Well-groomed but confused. A former pet, like you.*",
-              "\"I had a home once. A bed. A name they called me.\"",
-              "\"They moved away. I didn't.\"",
+              '"I had a home once. A bed. A name they called me."',
+              '"They moved away. I didn\'t."',
             ],
             () => {
               this.registry.set("PEDIGREE_TALKS", 1);
@@ -1151,8 +1170,10 @@ export class GameScene extends Phaser.Scene {
           );
         } else {
           this.dialogue.show(
-            ["\"The ones in dark clothes at night... they took my friend. Stay hidden after dark.\""],
-            () => { this.awardReturnConversation("Pedigree"); },
+            ['"The ones in dark clothes at night... they took my friend. Stay hidden after dark."'],
+            () => {
+              this.awardReturnConversation("Pedigree");
+            },
           );
         }
         break;
@@ -1162,10 +1183,7 @@ export class GameScene extends Phaser.Scene {
         const catTrust = this.trust.getCatTrust("Ginger");
         if (!met) {
           this.dialogue.show(
-            [
-              "*Two orange cats glare at you from beside the fountain. One hisses.*",
-              "\"SSSS! This water is OURS.\"",
-            ],
+            ["*Two orange cats glare at you from beside the fountain. One hisses.*", '"SSSS! This water is OURS."'],
             () => {
               this.registry.set("MET_GINGER_A", true);
               this.addKnownCat("Ginger");
@@ -1176,11 +1194,10 @@ export class GameScene extends Phaser.Scene {
           );
         } else if (catTrust >= 30) {
           this.dialogue.show(
-            [
-              "*The ginger cat flicks an ear at you.*",
-              "\"...Fine. Drink. But don't bring anyone else.\"",
-            ],
-            () => { this.awardReturnConversation("Ginger"); },
+            ["*The ginger cat flicks an ear at you.*", '"...Fine. Drink. But don\'t bring anyone else."'],
+            () => {
+              this.awardReturnConversation("Ginger");
+            },
           );
         } else {
           this.dialogue.show(["*The ginger cat hisses softly.*"], () => {
@@ -1192,16 +1209,13 @@ export class GameScene extends Phaser.Scene {
       case "Ginger B": {
         const met = this.registry.get("MET_GINGER_B") as boolean | undefined;
         if (!met) {
-          this.dialogue.show(
-            ["*This one just watches. It doesn't speak. Its twin does the talking.*"],
-            () => {
-              this.registry.set("MET_GINGER_B", true);
-              this.addKnownCat("Ginger B");
-              this.npcs.find((e) => e.cat === cat)?.indicator.reveal();
-              this.awardFirstConversation("Ginger B");
-              this.autoSave();
-            },
-          );
+          this.dialogue.show(["*This one just watches. It doesn't speak. Its twin does the talking.*"], () => {
+            this.registry.set("MET_GINGER_B", true);
+            this.addKnownCat("Ginger B");
+            this.npcs.find((e) => e.cat === cat)?.indicator.reveal();
+            this.awardFirstConversation("Ginger B");
+            this.autoSave();
+          });
         } else {
           this.dialogue.show(["*The cat stares at you, unblinking.*"], () => {
             this.awardReturnConversation("Ginger B");

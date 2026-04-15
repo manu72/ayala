@@ -7,6 +7,8 @@ export class BootScene extends Phaser.Scene {
 
   preload(): void {
     this.load.image("park-tiles", "assets/tilesets/park-tiles.png");
+    this.load.image("trees-pale", "assets/tilesets/trees-pale.png");
+    this.load.image("plants", "assets/tilesets/plants.png");
     this.load.tilemapTiledJSON("atg", "assets/tilemaps/atg.json");
 
     // Cat spritesheets: 8 cols x 10 rows of 32x32 frames
