@@ -517,8 +517,8 @@
                  "type":"",
                  "visible":true,
                  "width":32,
-                 "x":1500,
-                 "y":900
+                 "x":2818,
+                 "y":76
                 }, 
                 {
                  "height":32,
@@ -541,8 +541,8 @@
                  "type":"",
                  "visible":true,
                  "width":32,
-                 "x":750,
-                 "y":1250
+                 "x":1150,
+                 "y":2294
                 }, 
                 {
                  "height":32,
@@ -675,6 +675,18 @@
                  "width":32,
                  "x":122,
                  "y":2396
+                }, 
+                {
+                 "height":32,
+                 "id":34,
+                 "name":"poi_fountain_exchange",
+                 "opacity":1,
+                 "rotation":0,
+                 "type":"",
+                 "visible":true,
+                 "width":32,
+                 "x":480,
+                 "y":2016
                 }],
          "opacity":1,
          "type":"objectgroup",
@@ -683,7 +695,7 @@
          "y":0
         }],
  "nextlayerid":5,
- "nextobjectid":34,
+ "nextobjectid":35,
  "orientation":"orthogonal",
  "renderorder":"right-down",
  "tiledversion":"1.12.1",

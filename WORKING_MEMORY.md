@@ -1,7 +1,7 @@
 # WORKING_MEMORY
 
 > Persistent memory layer for AI-assisted development sessions.
-> Last Updated: 2026-04-14
+> Last Updated: 2026-04-15
 > Version: 0.1.3
 
 ---
@@ -11,7 +11,7 @@
 **Ayala** is a 2D top-down cat adventure game built with Phaser 3 + Vite + TypeScript. The player controls Mamma Cat, a dumped pet navigating the colony at Ayala Triangle Gardens in Makati, Manila.
 
 - **Branch:** `sit` (active development)
-- **Repo:** 65 commits, ~6300 LoC (22 TypeScript source files)
+- **Repo:** 96 commits, ~4600 LoC (22 TypeScript source files)
 - **Build:** `npx vite build` produces static files in `dist/`
 
 ---
@@ -39,7 +39,7 @@ BootScene -> StartScene -> GameScene + HUDScene (overlay) + JournalScene (overla
 
 - **BootScene** (`src/scenes/BootScene.ts`): Loads all assets (tilesets, spritesheets)
 - **StartScene** (`src/scenes/StartScene.ts`): Title screen, New/Continue
-- **GameScene** (`src/scenes/GameScene.ts`): Main game loop, NPC management, input, chapters (~1143 lines)
+- **GameScene** (`src/scenes/GameScene.ts`): Main game loop, NPC management, input, chapters (~1275 lines)
 - **HUDScene** (`src/scenes/HUDScene.ts`): Stats bars, clock, rest progress, pause menu, narration, dialogue
 - **JournalScene** (`src/scenes/JournalScene.ts`): Colony journal overlay (J key or pause menu)
 
@@ -50,7 +50,7 @@ BootScene -> StartScene -> GameScene + HUDScene (overlay) + JournalScene (overla
 | `MammaCat.ts` | Player (WASD, run, crouch tap/hold, rest)                                                     |
 | `NPCCat.ts`   | Generic NPC cat with state machine, config-driven (animPrefix, scale, walkSpeed, hyperactive) |
 | `GuardNPC.ts` | Guard that patrols and chases player from food scraps                                         |
-| `HumanNPC.ts` | Waypoint-following humans (jogger/feeder/dogwalker), phase-active                             |
+| `HumanNPC.ts` | Waypoint humans with SpriteProfile system (jogger/feeder/dogwalker), phase-active             |
 | `DogNPC.ts`   | Follows dog-walker owner, barks/lunges at player                                              |
 
 ### Systems
@@ -76,16 +76,20 @@ BootScene -> StartScene -> GameScene + HUDScene (overlay) + JournalScene (overla
 
 ## Sprite Assets
 
-**Grid sheets (256x320, 8 cols x 10 rows, 32x32 frames):**
+**Cat grid sheets (256x320, 8 cols x 10 rows, 32x32 frames):**
 mammacat, blacky, tiger, jayco, fluffy
 
-**Ginger strips (64x64 frames, scaled 0.5 in-game):**
-ginger-WALK (15 frames), ginger-IDLE (10), ginger-RUN (10)
-
 **Guard (512x448, 8 cols x 7 rows, 64x64 frames):**
-guard.png (also used tinted for joggers/feeders/dogwalkers)
+guard.png — used for guard NPC and feeders (green tint placeholder)
 
-### Animation Row Mapping (Grid Sheets)
+**Dog sheets (4 cols x 9 rows, 32x32 frames):**
+SmallDog.png, WhiteDog.png, BrownDog.png — randomly assigned to dog walkers
+
+**Human NPC sheets (via SpriteProfile system):**
+- `girl.png` (jogger): 8 cols x 6 rows, 150x85 frames, scaled 0.5
+- `dogwalker.png`: 7 cols x 3 rows, 50x45 frames (side-facing rows only, reused for up/down)
+
+### Animation Row Mapping (Cat Grid Sheets)
 
 | Row | Index | Animation                           |
 | --- | ----- | ----------------------------------- |
@@ -115,8 +119,8 @@ guard.png (also used tinted for joggers/feeders/dogwalkers)
 | Jayco Jr | jayco (0.7 scale)       | 6 (near Jayco) | friendly                | Hyperactive kitten          |
 | Fluffy   | fluffy                  | 3 (central)    | neutral                 | Aloof, trust-gated dialogue |
 | Pedigree | fluffy                  | 2 (Nielson)    | neutral                 | Former pet, night warnings  |
-| Ginger   | ginger-idle (0.5 scale) | 4 (fountain)   | wary                    | Territorial pair            |
-| Ginger B | ginger-idle (0.5 scale) | 4 (fountain)   | wary                    | Silent twin                 |
+| Ginger   | fluffy (orange tint)    | 4 (fountain)   | wary                    | Territorial pair            |
+| Ginger B | fluffy (orange tint)    | 4 (fountain)   | wary                    | Silent twin                 |
 
 12 background colony cats with unique IDs (`Colony Cat 1`..`12`), random sprites/dispositions.
 
@@ -156,7 +160,26 @@ guard.png (also used tinted for joggers/feeders/dogwalkers)
 
 ### Feeder Waypoint Behavior
 
-- Feeder linger logic must be constrained to the station waypoint index only. On activation, feeders should target waypoint 1 (the station) not waypoint 0 (spawn), to avoid immediately lingering at spawn.
+- Feeders use dynamic paths built from tilemap POIs (`poi_feeding_station_1`, `poi_feeding_station_2`) via `buildFeederConfigs()`. Paths are: entry -> station -> exit.
+- `normalizedLingerIndex` (clamped in constructor) determines the station waypoint. `activate()` sets `currentWaypoint` based on this index to avoid lingering at spawn.
+- `exitAfterLinger: true` causes `advanceWaypoint()` to call `deactivate()` after one trip instead of looping.
+- Arrival threshold is 20px (not 8px) to tolerate collision deflection near dense map objects.
+
+### Physics Body Lifecycle (HumanNPC)
+
+- Physics body must be **disabled** when the NPC is inactive/hidden. `activate()` calls `body?.setEnable(true)`, `deactivate()` calls `body?.setEnable(false)`, and the constructor starts with `body?.setEnable(false)`.
+- Use `body.reset(x, y)` (not `setPosition()`) on activation to fully sync the Arcade body's position, velocity, and acceleration.
+
+### Input Guards — Dialogue State
+
+- The J-key handler in `GameScene.update()` must check `!this.dialogue.isActive` before opening the journal, otherwise Space key presses silently advance dialogue in the background while the journal is open.
+- ESC key handling is centralized in `GameScene.update()` — it checks `JournalScene` first, then toggles pause. The journal and HUDScene do NOT register their own ESC listeners.
+
+### SpriteProfile System (HumanNPC)
+
+- `SpriteProfile` interface defines per-type sprite configuration: `key`, `cols`, `frameW`, `frameH`, `bodyW`, `bodyH`, `scale`, and `anims` row mappings.
+- Profiles: `GUARD_PROFILE`, `JOGGER_PROFILE`, `DOGWALKER_PROFILE`. Constructor selects profile by `humanType`.
+- `frameW` and `frameH` are separate to correctly calculate physics body offset for non-square frames (e.g. dogwalker 50x45).
 
 ---
 
@@ -166,6 +189,6 @@ guard.png (also used tinted for joggers/feeders/dogwalkers)
 - **No audio:** Planned for Phase 5.
 - **No CI/CD pipeline.**
 - **Tilemap POI names are hardcoded:** Spawn points, food sources, shelter POIs use string names matched between Tiled JSON and GameScene. No validation that map contains expected POIs.
-- **GameScene is ~1143 lines:** Becoming a god object. Dialogue handlers, NPC spawning, and human/dog management could be extracted.
+- **GameScene is ~1275 lines:** Becoming a god object. Dialogue handlers, NPC spawning, and human/dog management could be extracted.
 - **Colony cat random positions:** Not tied to map POIs; positions are hardcoded zone coordinates with random offsets. May clip into objects.
 - **Disposition type `"wary"` added in Phase 3:** Not yet used in NPC AI behavior weights (only affects emotes/narration/indicators).

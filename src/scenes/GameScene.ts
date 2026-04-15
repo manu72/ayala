@@ -966,6 +966,7 @@ export class GameScene extends Phaser.Scene {
       ["poi_feeding_station_2", "feeding_station"],
       ["poi_feeding_station_3", "feeding_station"],
       ["poi_fountain", "fountain"],
+      ["poi_fountain_exchange", "fountain"],
       ["poi_water_bowl_1", "water_bowl"],
       ["poi_water_bowl_2", "water_bowl"],
       ["poi_water_bowl_3", "water_bowl"],

@@ -62,7 +62,7 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 | Z (hold 2 seconds while stationary) | Rest / sleep -- restores energy over time                                |
 | Any movement key, Space, or Z       | Wake up from rest                                                        |
 | J                                   | Open colony journal                                                      |
-| Hold Tab                            | Look around -- camera zooms out to survey the area                       |
+| Tab (toggle)                        | Look around -- camera zooms out to survey the area, press again to return |
 | Escape                              | Pause menu (Save Game, Colony Journal, Resume, Quit to Title)            |
 
 ### Tips
@@ -143,6 +143,11 @@ ayala/
 │   │   ├── jayco.png                  #     NPC cat
 │   │   ├── fluffy.png                 #     NPC cat (also used as placeholder)
 │   │   ├── guard.png                  #     Guard / human NPCs (64x64 frames)
+│   │   ├── girl.png                   #     Jogger spritesheet (150x85 frames)
+│   │   ├── dogwalker.png              #     Dog walker spritesheet (50x45 frames)
+│   │   ├── SmallDog.png               #     Dog spritesheet (32x32 frames)
+│   │   ├── BrownDog.png               #     Dog spritesheet (32x32 frames)
+│   │   ├── WhiteDog.png               #     Dog spritesheet (32x32 frames)
 │   │   ├── ginger-IDLE.png            #     Ginger cat strip (64x64 frames)
 │   │   ├── ginger-WALK.png            #     Ginger cat strip
 │   │   ├── ginger-RUN.png             #     Ginger cat strip
@@ -203,7 +208,7 @@ node scripts/generate-map.mjs       # Regenerates atg.json (reads tile-indices.j
 
 Both scripts use `pngjs` (dev dependency) and write to `public/assets/`. The generated files are committed to git so the game runs without needing to regenerate them.
 
-Cat spritesheets use a mix of 32x32 grid sheets (mammacat, blacky, tiger, jayco, fluffy) and 64x64 strip sheets (ginger cats). The guard spritesheet is reused with colour tints for human NPCs (joggers, feeders, dog walkers).
+Cat spritesheets use a mix of 32x32 grid sheets (mammacat, blacky, tiger, jayco, fluffy) and 64x64 strip sheets (ginger cats, though ginger cats currently use fluffy with an orange tint in-game). Human NPCs use per-type spritesheets: `girl.png` for joggers, `dogwalker.png` for dog walkers, and the guard spritesheet with a green tint for feeders. Dog walkers are accompanied by dog sprites (`SmallDog.png`, `BrownDog.png`, `WhiteDog.png`).
 
 ## Architecture
 
@@ -242,7 +247,7 @@ Read the full document: [docs/Ayala_GDD_v0.1.md](docs/Ayala_GDD_v0.1.md)
 - No test suite
 - No CI/CD pipeline
 - Crouch has no dedicated animation yet (uses walk animation)
-- GameScene is growing large (~1143 lines) and could benefit from extraction of subsystems
+- GameScene is growing large (~1275 lines) and could benefit from extraction of subsystems
 - Colony cat spawn positions are hardcoded, not tied to map POIs
 - The `"wary"` disposition affects indicators and narration but not yet NPC AI behaviour weights
 
