@@ -139,9 +139,9 @@ export class HumanNPC extends Phaser.Physics.Arcade.Sprite {
       this.setScale(prof.scale);
     }
 
-    const body = this.body as Phaser.Physics.Arcade.Body;
-    body.setSize(prof.bodyW, prof.bodyH);
-    body.setOffset(
+    const body = this.body as Phaser.Physics.Arcade.Body | undefined;
+    body?.setSize(prof.bodyW, prof.bodyH);
+    body?.setOffset(
       (prof.frameW - prof.bodyW) / 2,
       prof.frameH - prof.bodyH,
     );
@@ -149,6 +149,7 @@ export class HumanNPC extends Phaser.Physics.Arcade.Sprite {
     this.createAnimations(scene);
     this.setVisible(false);
     this.setActive(false);
+    body?.setEnable(false);
 
     if (config.type === "feeder") {
       this.setTint(0x88ff88);
