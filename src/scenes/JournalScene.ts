@@ -134,8 +134,8 @@ export class JournalScene extends Phaser.Scene {
       yOffset += LINE_HEIGHT + 12;
     }
 
-    // Footer stats
-    const colonyCount = 42;
+    // Footer stats: use dynamic colony count from registry, fallback to 42
+    const colonyCount = (gameScene?.registry.get("COLONY_COUNT") as number) ?? 42;
     this.container.add(
       this.add.text(0, yOffset, `Colony count: ~${colonyCount} cats`, {
         fontFamily: FONT_FAMILY,
@@ -152,6 +152,18 @@ export class JournalScene extends Phaser.Scene {
       }),
     );
     yOffset += LINE_HEIGHT;
+
+    // Territory status
+    if (gameScene?.territory?.isClaimed) {
+      this.container.add(
+        this.add.text(0, yOffset, "Territory: The Shops pyramid steps", {
+          fontFamily: FONT_FAMILY,
+          fontSize: "12px",
+          color: "#44aa88",
+        }),
+      );
+      yOffset += LINE_HEIGHT;
+    }
 
     this.contentHeight = yOffset;
     this.scrollY = 0;

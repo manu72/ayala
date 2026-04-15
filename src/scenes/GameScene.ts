@@ -12,10 +12,22 @@ import type { SourceType } from "../systems/FoodSource";
 import { ThreatIndicator } from "../systems/ThreatIndicator";
 import { SaveSystem } from "../systems/SaveSystem";
 import { TrustSystem } from "../systems/TrustSystem";
-import { EmoteSystem } from "../systems/EmoteSystem";
+import { EmoteSystem, type EmoteType } from "../systems/EmoteSystem";
 import { ChapterSystem } from "../systems/ChapterSystem";
+import { TerritorySystem } from "../systems/TerritorySystem";
 import type { HUDScene } from "./HUDScene";
 import { REST_HOLD_MS } from "../config/constants";
+import {
+  ScriptedDialogueService,
+  type DialogueService,
+  type DialogueResponse,
+  type ConversationEntry,
+} from "../services/DialogueService";
+import {
+  storeConversation,
+  getRecentConversations,
+} from "../services/ConversationStore";
+import { CAT_DIALOGUE_SCRIPTS, getRandomColonyLine } from "../data/cat-dialogue";
 
 const INTERACTION_DISTANCE = 50;
 const LEARN_NAME_DISTANCE = 100;
@@ -67,6 +79,21 @@ export class GameScene extends Phaser.Scene {
   private dogs: DogNPC[] = [];
   /** Tracks which cats have already shown narration this approach, to avoid repeating. */
   private narrationShown = new Set<string>();
+  private dialogueService!: DialogueService;
+  territory!: TerritorySystem;
+
+  // Camille encounter sequence state
+  private camilleNPC: HumanNPC | null = null;
+  private manuNPC: HumanNPC | null = null;
+  private kishNPC: HumanNPC | null = null;
+  private camilleEncounterActive = false;
+
+  // Snatcher tracking
+  private snatchers: HumanNPC[] = [];
+  private snatcherSpawnChecked = false;
+
+  // Colony dynamics
+  private colonyCount = 42;
 
   /** Dialogue lives in HUDScene (1x zoom) so it's always visible. */
   private get dialogue(): { isActive: boolean; show: (lines: string[], onComplete?: () => void) => void } {
@@ -79,7 +106,7 @@ export class GameScene extends Phaser.Scene {
     super({ key: "GameScene" });
   }
 
-  create(data?: { loadSave?: boolean }): void {
+  create(data?: { loadSave?: boolean; newGamePlus?: boolean; snatcherCapture?: boolean }): void {
     this.npcs = [];
     this.humans = [];
     this.dogs = [];
@@ -129,6 +156,15 @@ export class GameScene extends Phaser.Scene {
     this.chapters = new ChapterSystem();
     this.chapterCheckTimer = 0;
     this.narrationShown = new Set();
+    this.dialogueService = new ScriptedDialogueService(CAT_DIALOGUE_SCRIPTS);
+    this.territory = new TerritorySystem();
+    this.camilleNPC = null;
+    this.manuNPC = null;
+    this.kishNPC = null;
+    this.camilleEncounterActive = false;
+    this.snatchers = [];
+    this.snatcherSpawnChecked = false;
+    this.colonyCount = 42;
 
     // Clear story state from any prior session before restoring
     for (const key of [
@@ -144,6 +180,16 @@ export class GameScene extends Phaser.Scene {
       "MET_GINGER_B",
       "JAYCO_JR_TALKS",
       "JOURNAL_MET_DAYS",
+      "VISITED_ZONE_6",
+      "TERRITORY_CLAIMED",
+      "TERRITORY_DAY",
+      "CAMILLE_ENCOUNTER",
+      "CAMILLE_ENCOUNTER_DAY",
+      "COLONY_COUNT",
+      "DUMPING_EVENTS_SEEN",
+      "CATS_SNATCHED",
+      "GAME_COMPLETED",
+      "NEW_GAME_PLUS",
     ]) {
       this.registry.remove(key);
     }
@@ -158,12 +204,19 @@ export class GameScene extends Phaser.Scene {
         this.dayNight.restore(save.timeOfDay, save.gameTimeMs);
         savedSourceStates = save.sourceStates;
         if (save.trust) this.trust.fromJSON(save.trust);
+        if (save.territory) this.territory.fromJSON(save.territory);
         for (const [key, val] of Object.entries(save.variables)) {
           this.registry.set(key, val);
         }
         const savedChapter = save.variables.CHAPTER;
         if (typeof savedChapter === "number") {
           this.chapters.restore(savedChapter);
+        }
+        if (typeof save.variables.COLONY_COUNT === "number") {
+          this.colonyCount = save.variables.COLONY_COUNT as number;
+        }
+        if (this.territory.isClaimed) {
+          this.player.setHasTerritory(true);
         }
       }
     }
@@ -238,18 +291,66 @@ export class GameScene extends Phaser.Scene {
       this.trust.survivedDay();
     });
 
+    // New Game+ setup: full trust, all cats known, territory claimed
+    if (data?.newGamePlus) {
+      this.registry.set("NEW_GAME_PLUS", true);
+      this.registry.set("CH1_RESTED", true);
+      this.registry.set("MET_BLACKY", true);
+      this.registry.set("TIGER_TALKS", 2);
+      this.registry.set("JAYCO_TALKS", 1);
+      this.registry.set("JAYCO_JR_TALKS", 1);
+      this.registry.set("FLUFFY_TALKS", 1);
+      this.registry.set("PEDIGREE_TALKS", 1);
+      this.registry.set("MET_GINGER_A", true);
+      this.registry.set("MET_GINGER_B", true);
+      this.registry.set("VISITED_ZONE_6", true);
+      this.registry.set("TERRITORY_CLAIMED", true);
+      this.registry.set("CHAPTER", 6);
+      this.chapters.restore(6);
+      this.territory.claim(1);
+
+      // Reveal and befriend all named cats
+      for (const name of [
+        "Blacky", "Tiger", "Jayco", "Jayco Jr",
+        "Fluffy", "Pedigree", "Ginger", "Ginger B",
+      ]) {
+        this.addKnownCat(name);
+        this.trust.firstConversation(name);
+        this.trust.returnConversation(name);
+        this.trust.returnConversation(name);
+        const entry = this.npcs.find((e) => e.cat.npcName === name);
+        entry?.indicator.reveal();
+        entry?.indicator.setDisposition("friendly");
+        if (entry) entry.cat.disposition = "friendly";
+      }
+      // Set dispositions on Tiger and Jayco
+      this.setNPCDisposition("Tiger", "friendly");
+      this.setNPCDisposition("Jayco", "friendly");
+
+      // Max out global trust
+      for (let i = 0; i < 20; i++) this.trust.survivedDay();
+    }
+
     if (!this.scene.isActive("HUDScene")) {
       this.scene.launch("HUDScene");
     }
 
     // Chapter 1 intro narration for new games
-    if (!data?.loadSave) {
+    if (!data?.loadSave && !data?.newGamePlus) {
       this.time.delayedCall(500, () => {
         const hud = this.scene.get("HUDScene") as HUDScene | undefined;
         const intro = this.chapters.getIntroNarration();
         if (hud && intro.length > 0) {
           this.dialogue.show(intro);
         }
+      });
+    }
+
+    // Post-snatcher-capture narration on reload
+    if (data?.snatcherCapture) {
+      this.time.delayedCall(1000, () => {
+        const hud = this.scene.get("HUDScene") as HUDScene | undefined;
+        hud?.showNarration("You wake up gasping. A nightmare? No. A warning. Stay hidden at night.");
       });
     }
   }
@@ -427,7 +528,13 @@ export class GameScene extends Phaser.Scene {
     this.chapterCheckTimer += delta;
     if (this.chapterCheckTimer >= 5_000) {
       this.chapterCheckTimer = 0;
+      this.checkZone6Visit();
       this.checkChapterProgression();
+      this.recheckTerritoryEligibility();
+      this.checkCamilleEncounter();
+      this.checkSnatcherSpawn();
+      this.checkColonyDynamics();
+      this.checkTerritoryBenefits();
     }
   }
 
@@ -508,6 +615,7 @@ export class GameScene extends Phaser.Scene {
       dayNight: this.dayNight,
       knownCats: namedKnown,
       registry: this.registry,
+      territory: this.territory,
     });
     if (triggered) {
       const narration = this.chapters.consumeNarration();
@@ -516,7 +624,326 @@ export class GameScene extends Phaser.Scene {
           this.autoSave();
         });
       }
+
+      // Chapter-specific triggers
+      const ch = this.chapters.chapter;
+      if (ch === 4) {
+        this.onChapter4Start();
+      } else if (ch === 6) {
+        this.onChapter6Start();
+      }
     }
+  }
+
+  // ──────────── Chapter 4: Territory ────────────
+
+  /**
+   * Track when the player first enters Zone 6 (The Shops area).
+   * Zone 6 is approximately x > 2100, y < 700.
+   */
+  private checkZone6Visit(): void {
+    if (this.registry.get("VISITED_ZONE_6")) return;
+    if (this.player.x > 2100 && this.player.y < 700) {
+      this.registry.set("VISITED_ZONE_6", true);
+    }
+  }
+
+  private onChapter4Start(): void {
+    // Territory negotiation with Jayco handled through dialogue
+    this.beginTerritoryNegotiation();
+  }
+
+  private beginTerritoryNegotiation(): void {
+    if (this.territory.isClaimed) return;
+
+    const jaycoTrust = this.trust.getCatTrust("Jayco");
+    const hud = this.scene.get("HUDScene") as HUDScene | undefined;
+
+    if (jaycoTrust >= 50 || this.trust.global >= 80) {
+      this.time.delayedCall(3000, () => {
+        if (this.dialogue.isActive) return;
+        this.dialogue.show(
+          [
+            '"You want to stay? ...There\'s room. The steps are wide enough for all of us."',
+          ],
+          () => {
+            this.claimTerritory();
+          },
+        );
+      });
+    } else {
+      this.time.delayedCall(3000, () => {
+        if (this.dialogue.isActive) return;
+        hud?.showNarration(
+          "Jayco watches you from the steps. You haven't earned his trust yet.",
+        );
+      });
+    }
+  }
+
+  /**
+   * Re-check territory eligibility periodically if Chapter 4 is active
+   * but territory hasn't been claimed yet.
+   */
+  private recheckTerritoryEligibility(): void {
+    if (this.chapters.chapter !== 4) return;
+    if (this.territory.isClaimed) return;
+    if (this.dialogue.isActive) return;
+    if (!this.isInTerritory(this.player.x, this.player.y) &&
+        !(this.player.x > 2100 && this.player.y < 700)) return;
+
+    const jaycoTrust = this.trust.getCatTrust("Jayco");
+    if (jaycoTrust >= 50 || this.trust.global >= 80) {
+      this.beginTerritoryNegotiation();
+    }
+  }
+
+  private claimTerritory(): void {
+    this.territory.claim(this.dayNight.dayCount);
+    this.registry.set("TERRITORY_CLAIMED", true);
+    this.registry.set("TERRITORY_DAY", this.dayNight.dayCount);
+    this.player.setHasTerritory(true);
+
+    const hud = this.scene.get("HUDScene") as HUDScene | undefined;
+    this.dialogue.show(
+      [
+        "For the first time since the car door slammed, you have a place. Your place.",
+      ],
+      () => {
+        hud?.showNarration("Territory established: The Shops pyramid steps");
+        this.autoSave();
+      },
+    );
+  }
+
+  /**
+   * Check if Mamma Cat is inside her claimed territory.
+   * Territory zone: near The Shops / Pyramid Steps.
+   */
+  isInTerritory(x: number, y: number): boolean {
+    if (!this.territory.isClaimed) return false;
+    const shopsPOI = this.map.findObject("spawns", (o) => o.name === "poi_pyramid_steps");
+    if (!shopsPOI) return false;
+    return Phaser.Math.Distance.Between(x, y, shopsPOI.x ?? 0, shopsPOI.y ?? 0) < 120;
+  }
+
+  // ──────────── Chapter 5: Camille Encounters ────────────
+
+  /**
+   * Check if conditions are met to spawn a Camille encounter for this evening.
+   * Called during phase transitions or periodic checks.
+   */
+  private checkCamilleEncounter(): void {
+    if (this.chapters.chapter < 5) return;
+    if (this.camilleEncounterActive) return;
+    if (this.dayNight.currentPhase !== "evening") return;
+
+    const currentEncounter = (this.registry.get("CAMILLE_ENCOUNTER") as number) ?? 0;
+    if (currentEncounter >= 5) return;
+
+    // One encounter per game day — check if we've already done one today
+    const lastDay = (this.registry.get("CAMILLE_ENCOUNTER_DAY") as number) ?? 0;
+    if (lastDay >= this.dayNight.dayCount) return;
+
+    // 60% chance per eligible evening (100% for first encounter)
+    if (currentEncounter > 0 && Math.random() > 0.6) return;
+
+    this.startCamilleEncounter(currentEncounter + 1);
+  }
+
+  private startCamilleEncounter(encounterNum: number): void {
+    this.camilleEncounterActive = true;
+    this.registry.set("CAMILLE_ENCOUNTER", encounterNum);
+    this.registry.set("CAMILLE_ENCOUNTER_DAY", this.dayNight.dayCount);
+
+    // Spawn Camille from the underpass area
+    const underpasses = this.map.findObject("spawns", (o) => o.name === "spawn_blacky");
+    const spawnX = (underpasses?.x ?? 411) - 50;
+    const spawnY = underpasses?.y ?? 1083;
+
+    // Target: The Shops area
+    const shopsPOI = this.map.findObject("spawns", (o) => o.name === "poi_pyramid_steps");
+    const targetX = shopsPOI?.x ?? 2200;
+    const targetY = shopsPOI?.y ?? 500;
+
+    const camilleConfig: HumanConfig = {
+      type: "feeder",
+      speed: 35,
+      activePhases: ["evening"],
+      path: [
+        { x: spawnX, y: spawnY },
+        { x: 1200, y: 900 },
+        { x: targetX, y: targetY },
+      ],
+    };
+
+    this.camilleNPC = new HumanNPC(this, camilleConfig);
+    if (this.groundLayer) this.physics.add.collider(this.camilleNPC, this.groundLayer);
+    if (this.objectsLayer) this.physics.add.collider(this.camilleNPC, this.objectsLayer);
+    this.humans.push(this.camilleNPC);
+
+    // Spawn Manu from Encounter 3 onwards
+    if (encounterNum >= 3) {
+      const manuConfig: HumanConfig = {
+        type: "feeder",
+        speed: 35,
+        activePhases: ["evening"],
+        path: [
+          { x: spawnX + 30, y: spawnY + 20 },
+          { x: 1200 + 30, y: 900 + 20 },
+          { x: targetX + 30, y: targetY + 20 },
+        ],
+      };
+      this.manuNPC = new HumanNPC(this, manuConfig);
+      this.manuNPC.setScale(1.2);
+      if (this.groundLayer) this.physics.add.collider(this.manuNPC, this.groundLayer);
+      if (this.objectsLayer) this.physics.add.collider(this.manuNPC, this.objectsLayer);
+      this.humans.push(this.manuNPC);
+    }
+
+    // Spawn Kish from Encounter 4 onwards
+    if (encounterNum >= 4) {
+      const kishConfig: HumanConfig = {
+        type: "feeder",
+        speed: 45,
+        activePhases: ["evening"],
+        path: [
+          { x: spawnX - 20, y: spawnY + 30 },
+          { x: 1200 - 20, y: 900 + 30 },
+          { x: targetX - 20, y: targetY + 30 },
+        ],
+      };
+      this.kishNPC = new HumanNPC(this, kishConfig);
+      this.kishNPC.setScale(0.85);
+      if (this.groundLayer) this.physics.add.collider(this.kishNPC, this.groundLayer);
+      if (this.objectsLayer) this.physics.add.collider(this.kishNPC, this.objectsLayer);
+      this.humans.push(this.kishNPC);
+    }
+
+    // Schedule the encounter narrative
+    this.time.delayedCall(5000, () => {
+      this.playCamilleEncounterNarrative(encounterNum);
+    });
+  }
+
+  private playCamilleEncounterNarrative(encounterNum: number): void {
+    const hud = this.scene.get("HUDScene") as HUDScene | undefined;
+
+    switch (encounterNum) {
+      case 1:
+        hud?.showNarration(
+          "A new human. She moves differently from the others. Slowly. Gently. She smells like... kindness?",
+        );
+        break;
+
+      case 2:
+        this.time.delayedCall(8000, () => {
+          if (this.dialogue.isActive) return;
+          this.dialogue.show(
+            [
+              "She sees you. She's not coming closer. She's... waiting. For you.",
+              "She places a treat on the ground between you. Doesn't move closer.",
+            ],
+            () => {
+              hud?.showNarration("She watches you eat. She doesn't reach for you. She understands.");
+              this.stats.restore("hunger", 30);
+            },
+          );
+        });
+        break;
+
+      case 3:
+        this.time.delayedCall(10000, () => {
+          if (this.dialogue.isActive) return;
+          this.dialogue.show(
+            [
+              "She closes her eyes. Slowly. Opens them again. That means... trust.",
+              "You've seen other cats do this.",
+              "Slow blink back?",
+            ],
+            () => {
+              // Auto-accept the slow blink for scripted path
+              this.emotes.show(this, this.player, "heart");
+              if (this.camilleNPC) this.emotes.show(this, this.camilleNPC, "heart");
+              hud?.showNarration("Something shifts between you. A thread, invisible but real.");
+            },
+          );
+        });
+        break;
+
+      case 4:
+        this.time.delayedCall(10000, () => {
+          if (this.dialogue.isActive) return;
+          this.dialogue.show(
+            [
+              "Her hand smells like fish treats and soap. And something else. Home.",
+              "You push your head against her fingers. You haven't done this since... before.",
+            ],
+            () => {
+              this.emotes.show(this, this.player, "heart");
+              hud?.showNarration("The small one is loud. But Camille keeps her still. She understands you.");
+            },
+          );
+        });
+        break;
+
+      case 5:
+        this.time.delayedCall(12000, () => {
+          if (this.dialogue.isActive) return;
+          this.dialogue.show(
+            [
+              "She has a box. You've seen boxes before. Cats go in. They don't come back.",
+              "This is different. She's not grabbing. She's asking.",
+              "And you... you want to say yes.",
+              "The garden shrinks behind you. The smells change. The sounds change.",
+              "But the hand on the carrier is warm. And for the first time in a long time... you're not afraid.",
+            ],
+            () => {
+              this.autoSave();
+              this.startChapter6Sequence();
+            },
+          );
+        });
+        break;
+    }
+  }
+
+  // ──────────── Chapter 6: Home ────────────
+
+  private onChapter6Start(): void {
+    this.startChapter6Sequence();
+  }
+
+  private startChapter6Sequence(): void {
+    // Fade to black
+    this.cameras.main.fade(2000, 0, 0, 0, false, (_cam: Phaser.Cameras.Scene2D.Camera, progress: number) => {
+      if (progress >= 1) {
+        this.showChapter6Narration();
+      }
+    });
+  }
+
+  private showChapter6Narration(): void {
+    this.dialogue.show(
+      [
+        "A door opens. A room. Soft floor. A bed — a real bed, with a blanket.",
+        "A bowl of water. Fresh. A plate of food. Just for you.",
+        "Camille sits on the floor beside you. She doesn't grab. She just... sits.",
+        "And you climb into her lap. And you close your eyes. And the purring starts before you even decide to purr.",
+        "You are Mamma Cat. You were lost. Now you are found.",
+        "You are home.",
+      ],
+      () => {
+        this.registry.set("GAME_COMPLETED", true);
+        this.autoSave();
+        this.startEpilogue();
+      },
+    );
+  }
+
+  private startEpilogue(): void {
+    this.scene.stop("HUDScene");
+    this.scene.start("EpilogueScene");
   }
 
   // ──────────── Save/Load ────────────
@@ -535,6 +962,7 @@ export class GameScene extends Phaser.Scene {
       this.registry,
       this.foodSources.getSourceStates(),
       this.trust.toJSON(),
+      this.territory.toJSON(),
     );
     if (ok) {
       const hud = this.scene.get("HUDScene") as HUDScene | undefined;
@@ -955,6 +1383,25 @@ export class GameScene extends Phaser.Scene {
     for (const dog of this.dogs) {
       dog.update(now, this.player, this.npcs, this.emotes, this);
     }
+
+    // Snatcher detection during night
+    if (this.dayNight.currentPhase === "night") {
+      this.checkSnatcherDetection();
+    }
+
+    // NPC cats flee from snatchers
+    if (this.snatchers.length > 0) {
+      for (const snatcher of this.snatchers) {
+        if (!snatcher.visible) continue;
+        for (const { cat } of this.npcs) {
+          if (cat.state === "sleeping" || cat.state === "alert" || cat.state === "fleeing") continue;
+          const dist = Phaser.Math.Distance.Between(snatcher.x, snatcher.y, cat.x, cat.y);
+          if (dist < 160) {
+            cat.triggerFlee(snatcher.x, snatcher.y);
+          }
+        }
+      }
+    }
   }
 
   // ──────────── Food Sources ────────────
@@ -1036,240 +1483,398 @@ export class GameScene extends Phaser.Scene {
 
   private showCatDialogue(cat: NPCCat): void {
     const name = cat.npcName;
+
     if (name.startsWith("Colony Cat")) {
-      this.showColonyDialogue();
+      this.dialogue.show([getRandomColonyLine()]);
       return;
     }
-    switch (name) {
-      case "Blacky": {
-        const met = this.registry.get("MET_BLACKY") as boolean | undefined;
-        if (!met) {
-          this.dialogue.show(
-            [
-              "Mrrp. New here, are you?",
-              "This is Ayala Triangle. The gardens are home to all of us.",
-              "Find shade. Find food. Stay away from the roads.",
-              "And at night... stay hidden. Not all humans are kind.",
-            ],
-            () => {
-              this.registry.set("MET_BLACKY", true);
-              this.addKnownCat("Blacky");
-              this.npcs.find((e) => e.cat === cat)?.indicator.reveal();
-              this.awardFirstConversation("Blacky");
-              this.autoSave();
-            },
-          );
-        } else {
-          this.dialogue.show(["Still here? Good. You're tougher than you look."], () => {
-            this.awardReturnConversation("Blacky");
-          });
+
+    this.requestCatDialogue(cat);
+  }
+
+  /**
+   * Request dialogue from the DialogueService, show it, and process the
+   * response events on completion. Conversation is stored in IndexedDB.
+   */
+  private async requestCatDialogue(cat: NPCCat): Promise<void> {
+    const name = cat.npcName;
+    const trustBefore = this.trust.getCatTrust(name);
+
+    const history = await getRecentConversations(name, 10);
+    const conversationHistory: ConversationEntry[] = history.map((r) => ({
+      timestamp: r.timestamp,
+      speaker: r.speaker,
+      text: r.lines.join(" "),
+    }));
+
+    const request = {
+      speaker: name,
+      speakerType: "cat" as const,
+      target: "Mamma Cat",
+      gameState: {
+        chapter: this.chapters.chapter,
+        timeOfDay: this.dayNight.currentPhase,
+        trustGlobal: this.trust.global,
+        trustWithSpeaker: trustBefore,
+        hunger: this.stats.hunger,
+        thirst: this.stats.thirst,
+        energy: this.stats.energy,
+        daysSurvived: this.dayNight.dayCount,
+        knownCats: Array.from(this.knownCats),
+        recentEvents: [] as string[],
+      },
+      conversationHistory,
+    };
+
+    const response = await this.dialogueService.getDialogue(request);
+
+    if (response.narration) {
+      const hud = this.scene.get("HUDScene") as HUDScene | undefined;
+      hud?.showNarration(response.narration);
+    }
+
+    this.dialogue.show(response.lines, () => {
+      this.processDialogueResponse(cat, name, trustBefore, response);
+    });
+  }
+
+  /**
+   * Handle all side effects from a completed dialogue:
+   * trust awards, registry updates, indicator reveals, disposition
+   * changes, conversation storage, and auto-saves.
+   */
+  private processDialogueResponse(
+    cat: NPCCat,
+    catName: string,
+    trustBefore: number,
+    response: DialogueResponse,
+  ): void {
+    const event = response.event;
+    if (!event) return;
+
+    const isFirst = event.endsWith("_first");
+
+    if (isFirst) {
+      this.addKnownCat(catName);
+      this.npcs.find((e) => e.cat === cat)?.indicator.reveal();
+      this.awardFirstConversation(catName);
+    } else if (event.endsWith("_return") || event.endsWith("_warmup")) {
+      this.awardReturnConversation(catName);
+    }
+
+    // Cat-specific event handling for registry and disposition changes
+    switch (event) {
+      case "blacky_first":
+        this.registry.set("MET_BLACKY", true);
+        break;
+      case "tiger_first":
+        this.registry.set("TIGER_TALKS", 1);
+        break;
+      case "tiger_warmup":
+        this.registry.set("TIGER_TALKS", 2);
+        cat.disposition = "friendly";
+        this.npcs.find((e) => e.cat === cat)?.indicator.setDisposition("friendly");
+        break;
+      case "jayco_first":
+        this.registry.set("JAYCO_TALKS", 1);
+        cat.disposition = "friendly";
+        {
+          const entry = this.npcs.find((e) => e.cat === cat);
+          entry?.indicator.setDisposition("friendly");
         }
         break;
-      }
-      case "Tiger": {
-        const talks = (this.registry.get("TIGER_TALKS") as number) ?? 0;
-        if (talks === 0) {
-          this.dialogue.show(
-            ["*The cat's ears flatten slightly. Its tail flicks once.*", '"Ssss. This is my spot."'],
-            () => {
-              this.registry.set("TIGER_TALKS", 1);
-              this.addKnownCat("Tiger");
-              this.npcs.find((e) => e.cat === cat)?.indicator.reveal();
-              this.awardFirstConversation("Tiger");
-              this.autoSave();
-            },
-          );
-        } else if (talks === 1) {
-          this.dialogue.show(
-            [
-              "*The cat watches you approach but doesn't hiss this time.*",
-              "\"...You again. There's food by the stone building at evening. Don't tell anyone.\"",
-            ],
-            () => {
-              this.registry.set("TIGER_TALKS", 2);
-              cat.disposition = "friendly";
-              this.npcs.find((e) => e.cat === cat)?.indicator.setDisposition("friendly");
-              this.awardReturnConversation("Tiger");
-              this.autoSave();
-            },
-          );
-        } else {
-          this.dialogue.show(['"Mrrp. You can rest here. Under this tree. I\'ll keep watch."'], () => {
-            this.awardReturnConversation("Tiger");
-          });
-        }
+      case "jaycojr_first":
+        this.registry.set("JAYCO_JR_TALKS", 1);
         break;
-      }
-      case "Jayco": {
-        const talks = (this.registry.get("JAYCO_TALKS") as number) ?? 0;
-        if (talks === 0) {
-          this.dialogue.show(
-            [
-              "*This cat approaches with tail up. Curious.*",
-              '"Prrrp! New face! I\'m Jayco. I know every corner of these steps."',
-              '"The humans below, the coffee place, they leave good scraps. But watch for the guard."',
-            ],
-            () => {
-              this.registry.set("JAYCO_TALKS", 1);
-              this.addKnownCat("Jayco");
-              const entry = this.npcs.find((e) => e.cat === cat);
-              entry?.indicator.reveal();
-              entry?.indicator.setDisposition("friendly");
-              cat.disposition = "friendly";
-              this.awardFirstConversation("Jayco");
-              this.autoSave();
-            },
-          );
-        } else {
-          this.dialogue.show(['"The ginger ones fight over the bench near the fountain. Stay clear at dusk."'], () => {
-            this.awardReturnConversation("Jayco");
-          });
-        }
+      case "fluffy_first":
+        this.registry.set("FLUFFY_TALKS", 1);
         break;
-      }
-      case "Jayco Jr": {
-        const talks = (this.registry.get("JAYCO_JR_TALKS") as number) ?? 0;
-        if (talks === 0) {
-          this.dialogue.show(
-            [
-              "*A tiny cat bounces toward you, tail straight up.*",
-              "\"Mrrp! Mrrp! You're new! Dad says I shouldn't talk to strangers but you smell okay!\"",
-            ],
-            () => {
-              this.registry.set("JAYCO_JR_TALKS", 1);
-              this.addKnownCat("Jayco Jr");
-              this.npcs.find((e) => e.cat === cat)?.indicator.reveal();
-              this.awardFirstConversation("Jayco Jr");
-              this.autoSave();
-            },
-          );
-        } else {
-          this.dialogue.show(['"Did you find the water bowls? They\'re near the big trees! I can show you!"'], () => {
-            this.awardReturnConversation("Jayco Jr");
-          });
-        }
+      case "pedigree_first":
+        this.registry.set("PEDIGREE_TALKS", 1);
         break;
-      }
-      case "Fluffy": {
-        const talks = (this.registry.get("FLUFFY_TALKS") as number) ?? 0;
-        const catTrust = this.trust.getCatTrust("Fluffy");
-        if (talks === 0) {
-          this.dialogue.show(
-            [
-              "*This cat regards you with half-closed eyes. Its long fur is immaculate.*",
-              '"..."',
-              "*It returns to grooming. You've been dismissed.*",
-            ],
-            () => {
-              this.registry.set("FLUFFY_TALKS", 1);
-              this.addKnownCat("Fluffy");
-              this.npcs.find((e) => e.cat === cat)?.indicator.reveal();
-              this.awardFirstConversation("Fluffy");
-              this.autoSave();
-            },
-          );
-        } else if (catTrust >= 20) {
-          this.dialogue.show(
-            [
-              "\"You're still alive. That's something, I suppose.\"",
-              '"The humans with the bags come at dawn and dusk. Follow the sound of rustling."',
-            ],
-            () => {
-              this.awardReturnConversation("Fluffy");
-            },
-          );
-        } else {
-          this.dialogue.show(["*The cat flicks an ear in your direction but doesn't look up.*"], () => {
-            this.awardReturnConversation("Fluffy");
-          });
-        }
+      case "ginger_first":
+        this.registry.set("MET_GINGER_A", true);
         break;
-      }
-      case "Pedigree": {
-        const talks = (this.registry.get("PEDIGREE_TALKS") as number) ?? 0;
-        if (talks === 0) {
-          this.dialogue.show(
-            [
-              "*This cat has a look you recognise. Well-groomed but confused. A former pet, like you.*",
-              '"I had a home once. A bed. A name they called me."',
-              '"They moved away. I didn\'t."',
-            ],
-            () => {
-              this.registry.set("PEDIGREE_TALKS", 1);
-              this.addKnownCat("Pedigree");
-              this.npcs.find((e) => e.cat === cat)?.indicator.reveal();
-              this.awardFirstConversation("Pedigree");
-              this.autoSave();
-            },
-          );
-        } else {
-          this.dialogue.show(
-            ['"The ones in dark clothes at night... they took my friend. Stay hidden after dark."'],
-            () => {
-              this.awardReturnConversation("Pedigree");
-            },
-          );
-        }
+      case "gingerb_first":
+        this.registry.set("MET_GINGER_B", true);
         break;
-      }
-      case "Ginger": {
-        const met = this.registry.get("MET_GINGER_A") as boolean | undefined;
-        const catTrust = this.trust.getCatTrust("Ginger");
-        if (!met) {
-          this.dialogue.show(
-            ["*Two orange cats glare at you from beside the fountain. One hisses.*", '"SSSS! This water is OURS."'],
-            () => {
-              this.registry.set("MET_GINGER_A", true);
-              this.addKnownCat("Ginger");
-              this.npcs.find((e) => e.cat === cat)?.indicator.reveal();
-              this.awardFirstConversation("Ginger");
-              this.autoSave();
-            },
-          );
-        } else if (catTrust >= 30) {
-          this.dialogue.show(
-            ["*The ginger cat flicks an ear at you.*", '"...Fine. Drink. But don\'t bring anyone else."'],
-            () => {
-              this.awardReturnConversation("Ginger");
-            },
-          );
-        } else {
-          this.dialogue.show(["*The ginger cat hisses softly.*"], () => {
-            this.awardReturnConversation("Ginger");
-          });
-        }
-        break;
-      }
-      case "Ginger B": {
-        const met = this.registry.get("MET_GINGER_B") as boolean | undefined;
-        if (!met) {
-          this.dialogue.show(["*This one just watches. It doesn't speak. Its twin does the talking.*"], () => {
-            this.registry.set("MET_GINGER_B", true);
-            this.addKnownCat("Ginger B");
-            this.npcs.find((e) => e.cat === cat)?.indicator.reveal();
-            this.awardFirstConversation("Ginger B");
-            this.autoSave();
-          });
-        } else {
-          this.dialogue.show(["*The cat stares at you, unblinking.*"], () => {
-            this.awardReturnConversation("Ginger B");
-          });
-        }
-        break;
-      }
-      default:
-        this.dialogue.show(["*The cat regards you warily.*"]);
+    }
+
+    if (response.emote) {
+      this.emotes.show(this, cat, response.emote as EmoteType);
+    }
+
+    if (isFirst) {
+      this.autoSave();
+    }
+
+    // Persist to IndexedDB for Phase 5 AI context
+    storeConversation({
+      speaker: catName,
+      timestamp: this.dayNight.totalGameTimeMs,
+      gameDay: this.dayNight.dayCount,
+      lines: response.lines,
+      trustBefore,
+      trustAfter: this.trust.getCatTrust(catName),
+      chapter: this.chapters.chapter,
+    });
+  }
+
+  // ──────────── Snatchers (Task 4) ────────────
+
+  private checkSnatcherSpawn(): void {
+    if (this.dayNight.currentPhase !== "night") {
+      this.snatcherSpawnChecked = false;
+      this.despawnSnatchers();
+      return;
+    }
+    if (this.snatcherSpawnChecked) return;
+    this.snatcherSpawnChecked = true;
+
+    // 40% chance per night
+    if (Math.random() > 0.4) return;
+
+    const snatcherCount = 1 + (Math.random() > 0.5 ? 1 : 0);
+    for (let i = 0; i < snatcherCount; i++) {
+      this.spawnSnatcher(i);
     }
   }
 
-  private showColonyDialogue(): void {
-    const lines = [
-      "*This cat ignores you.*",
-      "*This cat hisses softly and turns away.*",
-      "*This cat sniffs in your direction, then goes back to sleep.*",
-      "*This cat watches you for a moment, then loses interest.*",
-      "*This cat's ear twitches, but it doesn't move.*",
+  private spawnSnatcher(index: number): void {
+    // Snatchers patrol garden paths
+    const patrolPaths = [
+      [
+        { x: 600, y: 1100 },
+        { x: 1200, y: 800 },
+        { x: 1800, y: 600 },
+        { x: 2200, y: 700 },
+        { x: 1600, y: 1200 },
+      ],
+      [
+        { x: 2400, y: 1000 },
+        { x: 1900, y: 1000 },
+        { x: 1400, y: 1100 },
+        { x: 900, y: 1000 },
+        { x: 1200, y: 700 },
+      ],
     ];
-    this.dialogue.show([lines[Math.floor(Math.random() * lines.length)]!]);
+    const path = patrolPaths[index % patrolPaths.length]!;
+
+    const config: HumanConfig = {
+      type: "jogger",
+      speed: 40,
+      activePhases: ["night"],
+      path,
+    };
+    const snatcher = new HumanNPC(this, config);
+    snatcher.setTint(0x111111);
+    if (this.groundLayer) this.physics.add.collider(snatcher, this.groundLayer);
+    if (this.objectsLayer) this.physics.add.collider(snatcher, this.objectsLayer);
+    this.snatchers.push(snatcher);
+    this.humans.push(snatcher);
+
+    // Screen-edge darkening warning
+    const hud = this.scene.get("HUDScene") as HUDScene | undefined;
+    hud?.showNarration("Something moves in the dark...");
+  }
+
+  private despawnSnatchers(): void {
+    for (const snatcher of this.snatchers) {
+      snatcher.setVisible(false);
+      snatcher.setActive(false);
+      const body = snatcher.body as Phaser.Physics.Arcade.Body | undefined;
+      body?.setEnable(false);
+    }
+    this.snatchers = [];
+  }
+
+  /**
+   * Check if a snatcher has detected and caught Mamma Cat.
+   * Called from updateHumans during night phase.
+   */
+  private checkSnatcherDetection(): void {
+    if (this.snatchers.length === 0) return;
+
+    for (const snatcher of this.snatchers) {
+      if (!snatcher.visible) continue;
+      const dist = Phaser.Math.Distance.Between(
+        this.player.x,
+        this.player.y,
+        snatcher.x,
+        snatcher.y,
+      );
+
+      // Detection radius: 128px normal, 32px if crouching near cover
+      let detectionRadius = 128;
+      if (this.player.isCrouching && this.isUnderCanopy(this.player.x, this.player.y)) {
+        detectionRadius = 32;
+      } else if (this.player.isCrouching) {
+        detectionRadius = 64;
+      } else if (this.player.isRunning) {
+        detectionRadius = 192;
+      }
+
+      // Safe sleeping spots are invisible to snatchers
+      if (this.player.isResting && this.isNearShelter(this.player.x, this.player.y)) {
+        continue;
+      }
+
+      if (dist < detectionRadius) {
+        // Snatcher detected the player — move toward them
+        const angle = Phaser.Math.Angle.Between(snatcher.x, snatcher.y, this.player.x, this.player.y);
+        const chaseSpeed = 60;
+        snatcher.setVelocity(
+          Math.cos(angle) * chaseSpeed,
+          Math.sin(angle) * chaseSpeed,
+        );
+
+        if (dist < 16) {
+          this.handleSnatcherCapture();
+          return;
+        }
+      }
+    }
+  }
+
+  private handleSnatcherCapture(): void {
+    this.cameras.main.fade(100, 0, 0, 0, false, (_cam: Phaser.Cameras.Scene2D.Camera, progress: number) => {
+      if (progress >= 1) {
+        this.dialogue.show(
+          [
+            "Hands. Darkness. You can't move. You can't breathe.",
+            "...",
+          ],
+          () => {
+            const hasSave = SaveSystem.load() !== null;
+            if (hasSave) {
+              this.cameras.main.resetFX();
+              this.scene.restart({ loadSave: true, snatcherCapture: true });
+            } else {
+              this.cameras.main.resetFX();
+            }
+          },
+        );
+      }
+    });
+  }
+
+  // ──────────── Colony Dynamics (Task 5) ────────────
+
+  /**
+   * Check for colony population changes and dumping events.
+   * Colony count fluctuates to make the world feel alive.
+   */
+  private checkColonyDynamics(): void {
+    const dumpingSeen = (this.registry.get("DUMPING_EVENTS_SEEN") as number) ?? 0;
+    const chapter = this.chapters.chapter;
+
+    // Dumping Event 1: during Chapter 2-3
+    if (dumpingSeen === 0 && chapter >= 2 && chapter <= 3 && this.dayNight.currentPhase === "night") {
+      if (Math.random() < 0.1) {
+        this.triggerDumpingEvent(1);
+      }
+    }
+    // Dumping Event 2: during Chapter 3-4
+    else if (dumpingSeen === 1 && chapter >= 3 && chapter <= 4 && this.dayNight.currentPhase === "evening") {
+      if (Math.random() < 0.08) {
+        this.triggerDumpingEvent(2);
+      }
+    }
+    // Dumping Event 3: during Chapter 4-5
+    else if (dumpingSeen === 2 && chapter >= 4 && chapter <= 5 && this.dayNight.currentPhase === "dawn") {
+      if (Math.random() < 0.08) {
+        this.triggerDumpingEvent(3);
+      }
+    }
+  }
+
+  private triggerDumpingEvent(eventNum: number): void {
+    this.registry.set("DUMPING_EVENTS_SEEN", eventNum);
+    const hud = this.scene.get("HUDScene") as HUDScene | undefined;
+
+    switch (eventNum) {
+      case 1:
+        this.dialogue.show(
+          [
+            "A car. A door. A cat.",
+            "You remember.",
+          ],
+          () => {
+            this.colonyCount++;
+            this.registry.set("COLONY_COUNT", this.colonyCount);
+            hud?.showNarration("A new cat has appeared in the gardens.");
+            this.addBackgroundCat();
+          },
+        );
+        break;
+
+      case 2:
+        this.dialogue.show(
+          [
+            "This one wasn't thrown away. This one was... left.",
+            "With love, and grief, and no choice.",
+            "You sit beside her. You don't speak. There's nothing to say.",
+          ],
+          () => {
+            this.colonyCount++;
+            this.registry.set("COLONY_COUNT", this.colonyCount);
+            this.addBackgroundCat();
+          },
+        );
+        break;
+
+      case 3:
+        this.dialogue.show(
+          [
+            "Another one. How many of us started this way?",
+          ],
+          () => {
+            this.colonyCount++;
+            this.registry.set("COLONY_COUNT", this.colonyCount);
+            this.addBackgroundCat();
+          },
+        );
+        break;
+    }
+  }
+
+  /**
+   * Spawn an additional background colony cat after a dumping event.
+   */
+  private addBackgroundCat(): void {
+    const sprites = ["mammacat", "blacky", "tiger", "jayco", "fluffy"];
+    const sprite = sprites[Math.floor(Math.random() * sprites.length)]!;
+    const x = 600 + Math.random() * 200;
+    const y = 1100 + Math.random() * 200;
+
+    const cat = new NPCCat(this, {
+      name: `Colony Cat ${this.npcs.length + 1}`,
+      spriteKey: sprite,
+      x,
+      y,
+      homeZone: { cx: x, cy: y, radius: 100 },
+      disposition: "wary",
+    });
+    if (this.groundLayer) this.physics.add.collider(cat, this.groundLayer);
+    if (this.objectsLayer) this.physics.add.collider(cat, this.objectsLayer);
+    const indicator = new ThreatIndicator(this, cat, "???", "wary", false);
+    this.npcs.push({ cat, indicator });
+  }
+
+  // ──────────── Territory Benefits ────────────
+
+  /**
+   * When in claimed territory, apply benefits:
+   * faster energy restore and food proximity indicator.
+   */
+  private checkTerritoryBenefits(): void {
+    if (!this.territory.isClaimed) return;
+    if (!this.isInTerritory(this.player.x, this.player.y)) return;
+
+    // Territory provides a subtle comfort indicator
+    if (this.player.isResting) {
+      // Bonus energy restore is handled through shelter detection (poi_pyramid_steps)
+      // which is already in the shelter list. No additional logic needed.
+    }
   }
 }

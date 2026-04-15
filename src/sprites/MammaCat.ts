@@ -88,6 +88,11 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
       .setDepth(5);
   }
 
+  /** Update the name label to show a heart when Mamma Cat has a home. */
+  setHasTerritory(claimed: boolean): void {
+    this.nameLabel.setText(claimed ? "\u2665 Mamma Cat" : "Mamma Cat");
+  }
+
   /** Enter the resting/sleep state. Called by GameScene after hold-to-rest completes. */
   enterRest(): void {
     this.playerState = "resting";
