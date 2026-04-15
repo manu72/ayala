@@ -1,10 +1,9 @@
-# AYALA — Game Design Document v0.1
+# AYALA TRIANGLE — Game Design Document v0.1
 
-**A 2D browser-based adventure game about a homeless cat finding love in the heart of Manila**
+**A 2D browser-based adventure game about a homeless cat in Manila**
 
 _Draft: April 2026_
-_Developers: Manu & Claude (AI co-developer)_
-_For: Camille — and every cat who needs a forever home_
+_For Cam and Mamma Cat and every abandoned pet looking for their forever home._
 
 ---
 
@@ -12,11 +11,11 @@ _For: Camille — and every cat who needs a forever home_
 
 ### 1.1 Elevator Pitch
 
-Ayala is a cozy-but-real 2D top-down adventure game set in the Ayala Triangle Gardens in Makati, Manila. You play as Mamma Cat, a black-and-white former pet dumped in the gardens by her owners. You must survive the colony of 40-50 homeless cats, find food and water, establish territory, and ultimately find and befriend your human, Camille — who will adopt you and take you home.
+Ayala is a cozy-but-real 2D top-down adventure game set in the Ayala Triangle Gardens in Makati, Manila. You play as Mamma Cat, a black-and-white former pet dumped in the gardens by her owners. You must survive the colony of 40-50 homeless cats, find food and water, establish territory, and ultimately find and befriend your human who will adopt you and take you home.
 
 ### 1.2 Emotional Core
 
-This is a universal tale of loss, abandonment, and hope. Every cat in the colony is innocent — former pets or kittens born homeless. None are villains. The game is educational without being overt: by the time the player finishes, they should feel moved to think about what they can do for stray animals in the real world. The call to action is baked into the experience of playing, not delivered as a lecture.
+This is a universal tale of loss, abandonment, and hope. Every cat in the colony is innocent, mostly former pets or kittens born homeless. None are villains. The game is educational without being overt: by the time the player finishes, they should feel moved to think about what they can do for stray animals in the real world. The call to action is baked into the experience of playing, not delivered as a lecture.
 
 ### 1.3 Tone & Arc
 
@@ -565,6 +564,7 @@ Note: The project originally used RPG JS v4 but switched to Phaser 3 during Phas
 ### Phase 5: Polish & Release
 
 - Visual overhaul — real tilesets, organic paths, ATG-accurate landmarks
+- AI integration (Deepseek or Gemini) for cat-to-cat engagements TBC
 - Playtesting (Camille is primary tester!)
 - Bug fixes, balance adjustments
 - Audio implementation (sourced ambient tracks, cat sounds)

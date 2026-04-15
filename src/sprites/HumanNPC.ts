@@ -111,6 +111,7 @@ export class HumanNPC extends Phaser.Physics.Arcade.Sprite {
   private isActive = false;
   private lingerTimer = 0;
   private lingering = false;
+  private readonly normalizedLingerIndex: number;
   private readonly scratchVec = new Phaser.Math.Vector2(0, 0);
   private readonly profile: SpriteProfile;
 
@@ -123,6 +124,11 @@ export class HumanNPC extends Phaser.Physics.Arcade.Sprite {
     this.profile = prof;
     this.waypointPath = config.path;
     this.activePhases = new Set(config.activePhases);
+    const rawLingerIndex = config.lingerWaypointIndex ?? 1;
+    this.normalizedLingerIndex = Math.max(
+      0,
+      Math.min(rawLingerIndex, this.waypointPath.length - 1),
+    );
 
     scene.add.existing(this);
     scene.physics.add.existing(this);
@@ -133,9 +139,9 @@ export class HumanNPC extends Phaser.Physics.Arcade.Sprite {
       this.setScale(prof.scale);
     }
 
-    const body = this.body as Phaser.Physics.Arcade.Body;
-    body.setSize(prof.bodyW, prof.bodyH);
-    body.setOffset(
+    const body = this.body as Phaser.Physics.Arcade.Body | undefined;
+    body?.setSize(prof.bodyW, prof.bodyH);
+    body?.setOffset(
       (prof.frameW - prof.bodyW) / 2,
       prof.frameH - prof.bodyH,
     );
@@ -143,6 +149,7 @@ export class HumanNPC extends Phaser.Physics.Arcade.Sprite {
     this.createAnimations(scene);
     this.setVisible(false);
     this.setActive(false);
+    body?.setEnable(false);
 
     if (config.type === "feeder") {
       this.setTint(0x88ff88);
@@ -185,7 +192,7 @@ export class HumanNPC extends Phaser.Physics.Arcade.Sprite {
         this.humanType === "feeder" &&
         this.config.lingerSec &&
         this.config.lingerSec > 0 &&
-        this.currentWaypoint === (this.config.lingerWaypointIndex ?? 1)
+        this.currentWaypoint === this.normalizedLingerIndex
       ) {
         this.lingering = true;
         this.lingerTimer = this.config.lingerSec * 1000;
@@ -221,11 +228,18 @@ export class HumanNPC extends Phaser.Physics.Arcade.Sprite {
     this.isActive = true;
     this.setVisible(true);
     this.setActive(true);
+    const body = this.body as Phaser.Physics.Arcade.Body | undefined;
+    body?.setEnable(true);
     const start = this.waypointPath[0]!;
-    this.setPosition(start.x, start.y);
-    if (this.humanType === "feeder" && this.waypointPath.length > 1) {
-      const targetIdx = this.config.lingerWaypointIndex ?? 1;
-      this.currentWaypoint = Math.max(0, Math.min(targetIdx, this.waypointPath.length - 1));
+    if (body) {
+      body.reset(start.x, start.y);
+    } else {
+      this.setPosition(start.x, start.y);
+    }
+    if (this.waypointPath.length > 1) {
+      // Start at spawn waypoint 0 only when linger is explicitly configured there.
+      // Otherwise begin moving to the next waypoint after spawn.
+      this.currentWaypoint = this.normalizedLingerIndex === 0 ? 0 : 1;
     } else {
       this.currentWaypoint = 0;
     }
@@ -237,6 +251,8 @@ export class HumanNPC extends Phaser.Physics.Arcade.Sprite {
     this.setVisible(false);
     this.setActive(false);
     this.setVelocity(0);
+    const body = this.body as Phaser.Physics.Arcade.Body | undefined;
+    body?.setEnable(false);
   }
 
   private playWalkAnim(dir: Phaser.Math.Vector2): void {

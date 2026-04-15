@@ -267,7 +267,7 @@ export class GameScene extends Phaser.Scene {
         } else {
           this.resumeGame();
         }
-      } else if (!this.isPaused) {
+      } else if (!this.isPaused && !this.dialogue.isActive) {
         this.openJournal();
       }
       return;
