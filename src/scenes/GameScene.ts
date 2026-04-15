@@ -406,21 +406,16 @@ export class GameScene extends Phaser.Scene {
     const inShade = this.isUnderCanopy(this.player.x, this.player.y);
     const inShelter = this.isNearShelter(this.player.x, this.player.y);
 
-    if (this.dialogue.isActive) {
-      this.player.setVelocity(0);
-      this.stats.update(deltaSec, false, false, this.dayNight.isHeatActive, inShade, inShelter, false);
-    } else {
-      this.player.update(this.stats.canRun, delta);
-      this.stats.update(
-        deltaSec,
-        this.player.isMoving,
-        this.player.isRunning,
-        this.dayNight.isHeatActive,
-        inShade,
-        inShelter,
-        false,
-      );
-    }
+    this.player.update(this.stats.canRun, delta);
+    this.stats.update(
+      deltaSec,
+      this.player.isMoving,
+      this.player.isRunning,
+      this.dayNight.isHeatActive,
+      inShade,
+      inShelter,
+      false,
+    );
 
     this.foodSources.update(this.dayNight.currentPhase, time);
     this.guard.update(delta);
