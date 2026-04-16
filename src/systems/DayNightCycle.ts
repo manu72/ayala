@@ -2,7 +2,7 @@ import Phaser from "phaser";
 
 export type TimeOfDay = "dawn" | "day" | "evening" | "night";
 
-interface PhaseConfig {
+export interface DayNightPhaseConfig {
   color: number;
   alpha: number;
   durationMs: number;
@@ -10,7 +10,8 @@ interface PhaseConfig {
   startHour: number;
 }
 
-const PHASES: Record<TimeOfDay, PhaseConfig> = {
+/** Canonical phase table (durations, colours, transitions). Exported for tests and tooling. */
+export const DAY_NIGHT_PHASES: Record<TimeOfDay, DayNightPhaseConfig> = {
   dawn: { color: 0xffcc66, alpha: 0.05, durationMs: 90_000, next: "day", startHour: 6 },
   day: { color: 0xffffff, alpha: 0.08, durationMs: 120_000, next: "evening", startHour: 10 },
   evening: { color: 0xff8c00, alpha: 0.15, durationMs: 90_000, next: "night", startHour: 17 },
@@ -19,9 +20,9 @@ const PHASES: Record<TimeOfDay, PhaseConfig> = {
 
 const TRANSITION_MS = 8_000;
 
-const FULL_CYCLE_MS =
-  PHASES.dawn.durationMs + PHASES.day.durationMs +
-  PHASES.evening.durationMs + PHASES.night.durationMs;
+export const DAY_NIGHT_FULL_CYCLE_MS =
+  DAY_NIGHT_PHASES.dawn.durationMs + DAY_NIGHT_PHASES.day.durationMs +
+  DAY_NIGHT_PHASES.evening.durationMs + DAY_NIGHT_PHASES.night.durationMs;
 
 const PHASE_LABELS: Record<TimeOfDay, string> = {
   dawn: 'Dawn',
@@ -53,8 +54,8 @@ export class DayNightCycle extends Phaser.Events.EventEmitter {
       cam.height / 2,
       cam.width * 4,
       cam.height * 4,
-      PHASES.dawn.color,
-      PHASES.dawn.alpha,
+      DAY_NIGHT_PHASES.dawn.color,
+      DAY_NIGHT_PHASES.dawn.alpha,
     );
     this.overlay.setScrollFactor(0);
     this.overlay.setDepth(50);
@@ -64,17 +65,22 @@ export class DayNightCycle extends Phaser.Events.EventEmitter {
     return this.phase;
   }
 
+  /** True while the overlay colour is lerping between phases (cleared by `restore`). */
+  get isTransitioning(): boolean {
+    return this.transitioning;
+  }
+
   get isHeatActive(): boolean {
     return this.phase === "day";
   }
 
   get phaseProgress(): number {
-    return Math.min(this.phaseTimer / PHASES[this.phase].durationMs, 1);
+    return Math.min(this.phaseTimer / DAY_NIGHT_PHASES[this.phase].durationMs, 1);
   }
 
   /** Number of full day/night cycles completed (1-indexed: starts on Day 1). */
   get dayCount(): number {
-    return Math.floor(this.gameTimeMs / FULL_CYCLE_MS) + 1
+    return Math.floor(this.gameTimeMs / DAY_NIGHT_FULL_CYCLE_MS) + 1
   }
 
   get clockText(): string {
@@ -88,10 +94,10 @@ export class DayNightCycle extends Phaser.Events.EventEmitter {
 
     // Compute intra-phase progress from gameTimeMs
     const PHASE_ORDER: TimeOfDay[] = ['dawn', 'day', 'evening', 'night'];
-    const cycleOffset = gameTimeMs % FULL_CYCLE_MS;
+    const cycleOffset = gameTimeMs % DAY_NIGHT_FULL_CYCLE_MS;
     let accumulated = 0;
     for (const p of PHASE_ORDER) {
-      const dur = PHASES[p].durationMs;
+      const dur = DAY_NIGHT_PHASES[p].durationMs;
       if (p === phase) {
         this.phaseTimer = Math.max(0, cycleOffset - accumulated);
         break;
@@ -99,7 +105,7 @@ export class DayNightCycle extends Phaser.Events.EventEmitter {
       accumulated += dur;
     }
 
-    const cfg = PHASES[this.phase];
+    const cfg = DAY_NIGHT_PHASES[this.phase];
     this.overlay.setFillStyle(cfg.color, cfg.alpha);
   }
 
@@ -128,15 +134,15 @@ export class DayNightCycle extends Phaser.Events.EventEmitter {
     }
 
     this.phaseTimer += delta;
-    while (this.phaseTimer >= PHASES[this.phase].durationMs) {
-      this.phaseTimer -= PHASES[this.phase].durationMs;
+    while (this.phaseTimer >= DAY_NIGHT_PHASES[this.phase].durationMs) {
+      this.phaseTimer -= DAY_NIGHT_PHASES[this.phase].durationMs;
       this.cyclePhase();
     }
   }
 
   private cyclePhase(): void {
     const prev = this.phase;
-    this.phase = PHASES[this.phase].next;
+    this.phase = DAY_NIGHT_PHASES[this.phase].next;
     this.startTransition();
 
     if (this.phase === "dawn" && prev === "night") {
@@ -153,7 +159,7 @@ export class DayNightCycle extends Phaser.Events.EventEmitter {
     };
     this.fromAlpha = this.overlay.fillAlpha;
 
-    const target = PHASES[this.phase];
+    const target = DAY_NIGHT_PHASES[this.phase];
     this.toColor = {
       r: (target.color >> 16) & 0xff,
       g: (target.color >> 8) & 0xff,

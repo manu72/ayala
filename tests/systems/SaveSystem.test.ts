@@ -79,10 +79,18 @@ describe('isValidSave', () => {
     expect(isValidSave(data)).toBe(false)
   })
 
-  it('rejects missing playerPosition', () => {
+  it('rejects when playerPosition object is absent', () => {
     const data = validSaveData()
     delete (data as Record<string, unknown>).playerPosition
     expect(isValidSave(data)).toBe(false)
+  })
+
+  it('rejects when playerPosition omits x', () => {
+    expect(isValidSave(validSaveData({ playerPosition: { y: 200 } }))).toBe(false)
+  })
+
+  it('rejects when playerPosition omits y', () => {
+    expect(isValidSave(validSaveData({ playerPosition: { x: 100 } }))).toBe(false)
   })
 
   it('rejects playerPosition with non-numeric x', () => {

@@ -1,26 +1,58 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 
 /**
- * profileForType and the profile constants are pure data + a switch statement.
- * However, the module imports from BaseNPC which imports Phaser.
- * To avoid pulling in Phaser at test time, we re-test the switch logic
- * by importing the module (Vitest handles the dead-code Phaser import)
- * or by testing against the known profile keys.
- *
- * If the Phaser import causes issues, we can mock it. For now,
- * we test the function contract through a dynamic import with a vi.mock.
+ * profileForType and createSpriteProfileAnimations live in SpriteProfiles, which
+ * imports BaseNPC → Phaser. Mock Phaser before loading the module under test.
  */
-import { vi } from 'vitest'
-
-// Mock Phaser to avoid loading the full game engine in tests
 vi.mock('phaser', () => ({
   default: {
     Physics: { Arcade: { Sprite: class {} } },
   },
 }))
 
-// Now safe to import after mock
-const { profileForType } = await import('../../src/sprites/SpriteProfiles')
+import { BaseNPC } from '../../src/sprites/BaseNPC'
+
+const { profileForType, createSpriteProfileAnimations } = await import('../../src/sprites/SpriteProfiles')
+
+/** Minimal anim config captured from scene.anims.create (Phaser-compatible shape). */
+interface CapturedAnim {
+  key: string
+  frames: Array<{ key: string; frame: number }>
+  frameRate: number
+  repeat: number
+}
+
+function buildAnimScene() {
+  const store = new Map<string, CapturedAnim>()
+
+  const generateFrameNumbersImpl = (textureKey: string | number, cfg: { start: number; end: number }) => {
+    const tex = String(textureKey)
+    const frames: Array<{ key: string; frame: number }> = []
+    for (let i = cfg.start; i <= cfg.end; i++) frames.push({ key: tex, frame: i })
+    return frames
+  }
+  const generateFrameNumbers = vi.fn(generateFrameNumbersImpl)
+
+  const scene = {
+    anims: {
+      exists: (k: string) => store.has(k),
+      create: (config: CapturedAnim) => {
+        store.set(config.key, config)
+      },
+      generateFrameNumbers,
+    },
+  } as unknown as Phaser.Scene
+
+  return { scene, store, generateFrameNumbers }
+}
+
+function framesForRow(profileKey: string, row: number, cols: number, count: number) {
+  const { start, end } = BaseNPC.rowFrames(row, cols, count)
+  return Array.from({ length: end - start + 1 }, (_, i) => ({
+    key: profileKey,
+    frame: start + i,
+  }))
+}
 
 describe('profileForType', () => {
   const expectedKeys: Record<string, string> = {
@@ -96,5 +128,107 @@ describe('profileForType', () => {
   it('jogger uses row-based (no directionalKeys)', () => {
     const profile = profileForType('jogger')
     expect(profile.directionalKeys).toBeUndefined()
+  })
+})
+
+describe('createSpriteProfileAnimations', () => {
+  it('row-based (jogger): registers walk + idle keys and row-derived frame ranges', () => {
+    const { scene, store } = buildAnimScene()
+    const profile = profileForType('jogger')
+    createSpriteProfileAnimations(scene, profile)
+
+    const cols = profile.cols
+    const a = profile.anims
+
+    expect(new Set(store.keys())).toEqual(
+      new Set([
+        'jogger-walk-down',
+        'jogger-walk-left',
+        'jogger-walk-right',
+        'jogger-walk-up',
+        'jogger-idle',
+      ]),
+    )
+
+    expect(store.get('jogger-walk-down')?.frames).toEqual(framesForRow('jogger', a.walkDown.row, cols, a.walkDown.count))
+    expect(store.get('jogger-walk-left')?.frames).toEqual(framesForRow('jogger', a.walkLeft.row, cols, a.walkLeft.count))
+    expect(store.get('jogger-walk-right')?.frames).toEqual(framesForRow('jogger', a.walkRight.row, cols, a.walkRight.count))
+    expect(store.get('jogger-walk-up')?.frames).toEqual(framesForRow('jogger', a.walkUp.row, cols, a.walkUp.count))
+    expect(store.get('jogger-idle')?.frames).toEqual(framesForRow('jogger', a.idle.row, cols, a.idle.count))
+
+    for (const k of ['jogger-walk-down', 'jogger-walk-left', 'jogger-walk-right', 'jogger-walk-up'] as const) {
+      expect(store.get(k)?.frameRate).toBe(6)
+      expect(store.get(k)?.repeat).toBe(-1)
+    }
+    expect(store.get('jogger-idle')?.frameRate).toBe(3)
+    expect(store.get('jogger-idle')?.repeat).toBe(-1)
+  })
+
+  it('directional (dogwalker): registers keys per directionalKeys and idle', () => {
+    const { scene, store } = buildAnimScene()
+    const profile = profileForType('dogwalker')
+    const dk = profile.directionalKeys!
+    createSpriteProfileAnimations(scene, profile)
+
+    expect(new Set(store.keys())).toEqual(
+      new Set([
+        'dogwalker-walk-down',
+        'dogwalker-walk-left',
+        'dogwalker-walk-right',
+        'dogwalker-walk-up',
+        'dogwalker-idle',
+      ]),
+    )
+
+    const walkFrames = (tex: string, count: number) =>
+      Array.from({ length: count }, (_, i) => ({ key: tex, frame: i }))
+
+    expect(store.get('dogwalker-walk-down')?.frames).toEqual(walkFrames(dk.walkDown, profile.anims.walkDown.count))
+    expect(store.get('dogwalker-walk-left')?.frames).toEqual(walkFrames(dk.walkLeft, profile.anims.walkLeft.count))
+    expect(store.get('dogwalker-walk-right')?.frames).toEqual(walkFrames(dk.walkRight, profile.anims.walkRight.count))
+    expect(store.get('dogwalker-walk-up')?.frames).toEqual(walkFrames(dk.walkUp, profile.anims.walkUp.count))
+
+    const idleTex = dk.idle ?? dk.walkDown
+    expect(store.get('dogwalker-idle')?.frames).toEqual(walkFrames(idleTex, profile.anims.idle.count))
+  })
+
+  it('directional (camille): idle uses dedicated idle texture when set', () => {
+    const { scene, store } = buildAnimScene()
+    const profile = profileForType('camille')
+    createSpriteProfileAnimations(scene, profile)
+
+    expect(store.get('camille-idle')?.frames[0]?.key).toBe('cam_stand')
+    expect(store.get('camille-idle')?.frames).toEqual([{ key: 'cam_stand', frame: 0 }])
+    expect(store.get('camille-walk-down')?.frames[0]?.key).toBe('cam_walk_s')
+  })
+
+  it('directional (camille): registers crouch anims when keys and counts exist', () => {
+    const { scene, store } = buildAnimScene()
+    const profile = profileForType('camille')
+    createSpriteProfileAnimations(scene, profile)
+
+    expect(store.has('camille-crouch-left')).toBe(true)
+    expect(store.has('camille-crouch-right')).toBe(true)
+    expect(store.get('camille-crouch-left')?.repeat).toBe(0)
+    expect(store.get('camille-crouch-right')?.repeat).toBe(0)
+  })
+
+  it('duplicate call: early exit when idle exists; no extra creates or generateFrameNumbers', () => {
+    const { scene, store, generateFrameNumbers } = buildAnimScene()
+    const profile = profileForType('jogger')
+
+    expect(scene.anims.exists('jogger-idle')).toBe(false)
+    createSpriteProfileAnimations(scene, profile)
+    expect(scene.anims.exists('jogger-idle')).toBe(true)
+
+    const keysAfterFirst = [...store.keys()].sort()
+    const genCallsAfterFirst = generateFrameNumbers.mock.calls.length
+
+    createSpriteProfileAnimations(scene, profile)
+
+    expect(scene.anims.exists('jogger-idle')).toBe(true)
+    expect([...store.keys()].sort()).toEqual(keysAfterFirst)
+    expect(generateFrameNumbers.mock.calls.length).toBe(genCallsAfterFirst)
+    expect(store.get('jogger-walk-down')?.frames).toEqual(framesForRow('jogger', profile.anims.walkDown.row, profile.cols, profile.anims.walkDown.count))
   })
 })

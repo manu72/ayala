@@ -1,12 +1,37 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { EventEmitter } from 'node:events'
 
-/** Matches PHASES in DayNightCycle.ts */
-const DAWN_MS = 90_000
-const DAY_MS = 120_000
-const EVENING_MS = 90_000
-const NIGHT_MS = 90_000
-const FULL_CYCLE_MS = DAWN_MS + DAY_MS + EVENING_MS + NIGHT_MS
+vi.mock('phaser', () => {
+  class MockEventEmitter {
+    private readonly handlers: Record<string, Array<(...args: unknown[]) => void>> = {}
+    on(event: string, fn: (...args: unknown[]) => void): this {
+      (this.handlers[event] ??= []).push(fn)
+      return this
+    }
+    emit(event: string, ...args: unknown[]): boolean {
+      for (const fn of this.handlers[event] ?? []) fn(...args)
+      return true
+    }
+  }
+  return {
+    default: {
+      Events: {
+        EventEmitter: MockEventEmitter,
+      },
+      GameObjects: {},
+    },
+  }
+})
+
+import {
+  DayNightCycle,
+  DAY_NIGHT_FULL_CYCLE_MS,
+  DAY_NIGHT_PHASES,
+} from '../../src/systems/DayNightCycle'
+
+const DAWN_MS = DAY_NIGHT_PHASES.dawn.durationMs
+const DAY_MS = DAY_NIGHT_PHASES.day.durationMs
+const EVENING_MS = DAY_NIGHT_PHASES.evening.durationMs
+const NIGHT_MS = DAY_NIGHT_PHASES.night.durationMs
 
 function createOverlayMock() {
   let fillColor = 0
@@ -36,19 +61,6 @@ function createSceneMock(overlay: ReturnType<typeof createOverlayMock>) {
   }
 }
 
-vi.mock('phaser', () => {
-  return {
-    default: {
-      Events: {
-        EventEmitter,
-      },
-      GameObjects: {},
-    },
-  }
-})
-
-const { DayNightCycle } = await import('../../src/systems/DayNightCycle')
-
 describe('DayNightCycle', () => {
   let overlay: ReturnType<typeof createOverlayMock>
   let scene: ReturnType<typeof createSceneMock>
@@ -76,22 +88,29 @@ describe('DayNightCycle', () => {
       const cycle = new DayNightCycle(scene as never)
       cycle.restore('dawn', 0)
       expect(cycle.currentPhase).toBe('dawn')
-      expect(cycle.phaseTimer).toBe(0)
+      expect(cycle.phaseProgress).toBe(0)
     })
 
     it('sets phaseTimer near end of night within cycle', () => {
-      const gameTimeMs = FULL_CYCLE_MS - 5000
+      const gameTimeMs = DAY_NIGHT_FULL_CYCLE_MS - 5000
       const cycle = new DayNightCycle(scene as never)
       cycle.restore('night', gameTimeMs)
       expect(cycle.currentPhase).toBe('night')
       expect(cycle.phaseProgress).toBeCloseTo((NIGHT_MS - 5000) / NIGHT_MS, 5)
     })
 
-    it('clears transitioning flag', () => {
+    it('restore clears in-progress visual transition; phase advances on next update', () => {
       const cycle = new DayNightCycle(scene as never)
-      cycle.update(DAY_MS + 1000)
+      cycle.update(DAWN_MS + 1000)
+      expect(cycle.currentPhase).toBe('day')
+      expect(cycle.isTransitioning).toBe(true)
+
       cycle.restore('evening', 200_000)
+      expect(cycle.isTransitioning).toBe(false)
       expect(cycle.currentPhase).toBe('evening')
+
+      cycle.update(EVENING_MS)
+      expect(cycle.currentPhase).toBe('night')
     })
   })
 
@@ -104,14 +123,14 @@ describe('DayNightCycle', () => {
 
     it('increments after one full cycle', () => {
       const cycle = new DayNightCycle(scene as never)
-      cycle.restore('dawn', FULL_CYCLE_MS)
+      cycle.restore('dawn', DAY_NIGHT_FULL_CYCLE_MS)
       expect(cycle.dayCount).toBe(2)
     })
 
     it('reflects gameTimeMs after update', () => {
       const cycle = new DayNightCycle(scene as never)
       cycle.restore('dawn', 0)
-      cycle.update(FULL_CYCLE_MS)
+      cycle.update(DAY_NIGHT_FULL_CYCLE_MS)
       expect(cycle.dayCount).toBe(2)
     })
   })
