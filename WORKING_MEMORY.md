@@ -231,6 +231,7 @@ SmallDog.png, WhiteDog.png, BrownDog.png — randomly assigned to dog walkers
 - **Intro cinematic:** Cancel `delayedCall`/`tween` handles in `shutdown()`; `DayNightCycle.snapVisualToPhase` for night/dawn overlay only during the intro.
 - **Speaker pose:** `speakerPoseToAnimMode` maps tones to sit / walk_paused / rest — NPC sheets lack dedicated crouch/arch rows.
 - **`prefers-reduced-motion`:** `BootScene.init` sets registry `MOTION_REDUCED`; `HUDScene` / `EmoteSystem` / intro opening text respect it for decorative motion.
+- **Reduced-motion timer gotcha:** `tweens.killTweensOf()` does NOT cancel `time.delayedCall()`. When a reduced-motion path replaces a tween with a `delayedCall`-based fade-out, store the returned `TimerEvent` in a field and `remove(false)` it before scheduling a new one — otherwise a stale timer from a previous call can fire during the current display and hide the card/pulse prematurely. See `HUDScene.showChapterTitle` / `pulseEdge`.
 
 ---
 
