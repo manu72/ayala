@@ -1,8 +1,8 @@
 # WORKING_MEMORY
 
 > Persistent memory layer for AI-assisted development sessions.
-> Last Updated: 2026-04-14
-> Version: 0.1.3
+> Last Updated: 2026-04-15
+> Version: 0.1.4
 
 ---
 
@@ -11,7 +11,7 @@
 **Ayala** is a 2D top-down cat adventure game built with Phaser 3 + Vite + TypeScript. The player controls Mamma Cat, a dumped pet navigating the colony at Ayala Triangle Gardens in Makati, Manila.
 
 - **Branch:** `sit` (active development)
-- **Repo:** 65 commits, ~6300 LoC (22 TypeScript source files)
+- **Repo:** ~5400 LoC (27 TypeScript source files)
 - **Build:** `npx vite build` produces static files in `dist/`
 
 ---
@@ -24,7 +24,7 @@
 | 1.5 Visual Polish    | Complete    | Camera zoom, textured tiles, animations, overhead layer        |
 | 2. Core Mechanics    | Complete    | Stats, food/water, guard, save/load, rest, crouch, HUD         |
 | 3. Social & Story    | Complete    | Trust, emotes, chapters 1-3, named cats, humans, dogs, journal |
-| 4. Camille & Endgame | Not started | Chapters 4-6, snatchers, epilogue                              |
+| 4. Camille & Endgame | Complete    | DialogueService, Chs 4-6, snatchers, territory, epilogue, NG+  |
 | 5. Polish & Release  | Not started | Audio, PWA, playtesting, deployment                            |
 
 ---
@@ -35,11 +35,12 @@
 
 ```text
 BootScene -> StartScene -> GameScene + HUDScene (overlay) + JournalScene (overlay)
+                                    -> EpilogueScene (after Ch6)
 ```
 
 - **BootScene** (`src/scenes/BootScene.ts`): Loads all assets (tilesets, spritesheets)
 - **StartScene** (`src/scenes/StartScene.ts`): Title screen, New/Continue
-- **GameScene** (`src/scenes/GameScene.ts`): Main game loop, NPC management, input, chapters (~1143 lines)
+- **GameScene** (`src/scenes/GameScene.ts`): Main game loop, NPC management, input, chapters (~1275 lines)
 - **HUDScene** (`src/scenes/HUDScene.ts`): Stats bars, clock, rest progress, pause menu, narration, dialogue
 - **JournalScene** (`src/scenes/JournalScene.ts`): Colony journal overlay (J key or pause menu)
 
@@ -50,7 +51,7 @@ BootScene -> StartScene -> GameScene + HUDScene (overlay) + JournalScene (overla
 | `MammaCat.ts` | Player (WASD, run, crouch tap/hold, rest)                                                     |
 | `NPCCat.ts`   | Generic NPC cat with state machine, config-driven (animPrefix, scale, walkSpeed, hyperactive) |
 | `GuardNPC.ts` | Guard that patrols and chases player from food scraps                                         |
-| `HumanNPC.ts` | Waypoint-following humans (jogger/feeder/dogwalker), phase-active                             |
+| `HumanNPC.ts` | Waypoint humans with SpriteProfile system (jogger/feeder/dogwalker), phase-active             |
 | `DogNPC.ts`   | Follows dog-walker owner, barks/lunges at player                                              |
 
 ### Systems
@@ -59,13 +60,27 @@ BootScene -> StartScene -> GameScene + HUDScene (overlay) + JournalScene (overla
 | -------------------- | ----------------------------------------------------------------------------------- |
 | `TrustSystem.ts`     | Global + per-cat trust scores (0-100), proximity ticking, conversation rewards      |
 | `EmoteSystem.ts`     | Floating text emotes above entities (heart, alert, curious, sleep, hostile, danger) |
-| `ChapterSystem.ts`   | Chapter progression with trust/met-cat/day thresholds                               |
+| `ChapterSystem.ts`   | Chapter 1-6 progression with trust/territory/encounter thresholds                   |
 | `DayNightCycle.ts`   | 4-phase cycle (dawn/day/evening/night), emits `newDay` event                        |
 | `StatsSystem.ts`     | Hunger/thirst/energy with environment modifiers                                     |
 | `FoodSource.ts`      | Interactive food/water sources with cooldowns and persistence                       |
-| `SaveSystem.ts`      | localStorage save/load with validation                                              |
+| `SaveSystem.ts`      | localStorage save/load with validation + territory data                             |
 | `ThreatIndicator.ts` | Floating name + disposition symbol above NPCs                                       |
-| `DialogueSystem.ts`  | Bottom-screen dialogue box                                                          |
+| `DialogueSystem.ts`  | Bottom-screen dialogue UI (view layer)                                              |
+| `TerritorySystem.ts` | Territory claiming and benefits at The Shops                                        |
+
+### Services
+
+| File                   | Purpose                                                                    |
+| ---------------------- | -------------------------------------------------------------------------- |
+| `DialogueService.ts`   | Centralized dialogue interface: ScriptedDialogueService (Phase 5: AI swap) |
+| `ConversationStore.ts` | IndexedDB persistence for conversation history (Phase 5: AI context feed)  |
+
+### Data
+
+| File              | Purpose                                                      |
+| ----------------- | ------------------------------------------------------------ |
+| `cat-dialogue.ts` | All named cat dialogue as condition/response data structures |
 
 ### Key Config
 
@@ -76,16 +91,21 @@ BootScene -> StartScene -> GameScene + HUDScene (overlay) + JournalScene (overla
 
 ## Sprite Assets
 
-**Grid sheets (256x320, 8 cols x 10 rows, 32x32 frames):**
+**Cat grid sheets (256x320, 8 cols x 10 rows, 32x32 frames):**
 mammacat, blacky, tiger, jayco, fluffy
 
-**Ginger strips (64x64 frames, scaled 0.5 in-game):**
-ginger-WALK (15 frames), ginger-IDLE (10), ginger-RUN (10)
-
 **Guard (512x448, 8 cols x 7 rows, 64x64 frames):**
-guard.png (also used tinted for joggers/feeders/dogwalkers)
+guard.png — used for guard NPC and feeders (green tint placeholder)
 
-### Animation Row Mapping (Grid Sheets)
+**Dog sheets (4 cols x 9 rows, 32x32 frames):**
+SmallDog.png, WhiteDog.png, BrownDog.png — randomly assigned to dog walkers
+
+**Human NPC sheets (via SpriteProfile system):**
+
+- `girl.png` (jogger): 8 cols x 6 rows, 150x85 frames, scaled 0.5
+- `dogwalker.png`: 7 cols x 3 rows, 50x45 frames (side-facing rows only, reused for up/down)
+
+### Animation Row Mapping (Cat Grid Sheets)
 
 | Row | Index | Animation                           |
 | --- | ----- | ----------------------------------- |
@@ -99,24 +119,26 @@ guard.png (also used tinted for joggers/feeders/dogwalkers)
 ## Save System
 
 - Key: `ayala_save` in localStorage
-- Tracked registry keys: MET_BLACKY, TIGER_TALKS, JAYCO_TALKS, KNOWN_CATS, CHAPTER, CH1_RESTED, FLUFFY_TALKS, PEDIGREE_TALKS, MET_GINGER_A, MET_GINGER_B, JAYCO_JR_TALKS, JOURNAL_MET_DAYS
-- Also persists: player position, stats, timeOfDay, gameTimeMs, sourceStates, trust data
+- Phase 1-3 keys: MET_BLACKY, TIGER_TALKS, JAYCO_TALKS, KNOWN_CATS, CHAPTER, CH1_RESTED, FLUFFY_TALKS, PEDIGREE_TALKS, MET_GINGER_A, MET_GINGER_B, JAYCO_JR_TALKS, JOURNAL_MET_DAYS
+- Phase 4 keys: VISITED_ZONE_6, TERRITORY_CLAIMED, TERRITORY_DAY, CAMILLE_ENCOUNTER, CAMILLE_ENCOUNTER_DAY, COLONY_COUNT, DUMPING_EVENTS_SEEN, CATS_SNATCHED, GAME_COMPLETED, NEW_GAME_PLUS
+- Also persists: player position, stats, timeOfDay, gameTimeMs, sourceStates, trust data, territory data
+- Conversation history stored separately in IndexedDB (`ayala_conversations`)
 - Validation: `isValidSave()` checks structure, types, and ranges
 
 ---
 
 ## Named NPC Cats
 
-| Name     | Sprite                  | Zone           | Disposition             | Special                     |
-| -------- | ----------------------- | -------------- | ----------------------- | --------------------------- |
-| Blacky   | blacky                  | 5 (underpass)  | neutral                 | Orientation dialogue        |
-| Tiger    | tiger                   | 3 (central)    | territorial -> friendly | Multi-stage warmup          |
-| Jayco    | jayco                   | 6 (shops)      | friendly                | Food/guard tips             |
-| Jayco Jr | jayco (0.7 scale)       | 6 (near Jayco) | friendly                | Hyperactive kitten          |
-| Fluffy   | fluffy                  | 3 (central)    | neutral                 | Aloof, trust-gated dialogue |
-| Pedigree | fluffy                  | 2 (Nielson)    | neutral                 | Former pet, night warnings  |
-| Ginger   | ginger-idle (0.5 scale) | 4 (fountain)   | wary                    | Territorial pair            |
-| Ginger B | ginger-idle (0.5 scale) | 4 (fountain)   | wary                    | Silent twin                 |
+| Name     | Sprite               | Zone           | Disposition             | Special                     |
+| -------- | -------------------- | -------------- | ----------------------- | --------------------------- |
+| Blacky   | blacky               | 5 (underpass)  | neutral                 | Orientation dialogue        |
+| Tiger    | tiger                | 3 (central)    | territorial -> friendly | Multi-stage warmup          |
+| Jayco    | jayco                | 6 (shops)      | friendly                | Food/guard tips             |
+| Jayco Jr | jayco (0.7 scale)    | 6 (near Jayco) | friendly                | Hyperactive kitten          |
+| Fluffy   | fluffy               | 3 (central)    | neutral                 | Aloof, trust-gated dialogue |
+| Pedigree | fluffy               | 2 (Nielson)    | neutral                 | Former pet, night warnings  |
+| Ginger   | fluffy (orange tint) | 4 (fountain)   | wary                    | Territorial pair            |
+| Ginger B | fluffy (orange tint) | 4 (fountain)   | wary                    | Silent twin                 |
 
 12 background colony cats with unique IDs (`Colony Cat 1`..`12`), random sprites/dispositions.
 
@@ -156,7 +178,38 @@ guard.png (also used tinted for joggers/feeders/dogwalkers)
 
 ### Feeder Waypoint Behavior
 
-- Feeder linger logic must be constrained to the station waypoint index only. On activation, feeders should target waypoint 1 (the station) not waypoint 0 (spawn), to avoid immediately lingering at spawn.
+- Feeders use dynamic paths built from tilemap POIs (`poi_feeding_station_1`, `poi_feeding_station_2`) via `buildFeederConfigs()`. Paths are: entry -> station -> exit.
+- `normalizedLingerIndex` (clamped in constructor) determines the station waypoint. `activate()` sets `currentWaypoint` based on this index to avoid lingering at spawn.
+- `exitAfterLinger: true` causes `advanceWaypoint()` to call `deactivate()` after one trip instead of looping.
+- Arrival threshold is 20px (not 8px) to tolerate collision deflection near dense map objects.
+
+### Physics Body Lifecycle (HumanNPC)
+
+- Physics body must be **disabled** when the NPC is inactive/hidden. `activate()` calls `body?.setEnable(true)`, `deactivate()` calls `body?.setEnable(false)`, and the constructor starts with `body?.setEnable(false)`.
+- Use `body.reset(x, y)` (not `setPosition()`) on activation to fully sync the Arcade body's position, velocity, and acceleration.
+
+### Input Guards — Dialogue State
+
+- The J-key handler in `GameScene.update()` must check `!this.dialogue.isActive` before opening the journal, otherwise Space key presses silently advance dialogue in the background while the journal is open.
+- ESC key handling is centralized in `GameScene.update()` — it checks `JournalScene` first, then toggles pause. The journal and HUDScene do NOT register their own ESC listeners.
+
+### SpriteProfile System (HumanNPC)
+
+- `SpriteProfile` interface defines per-type sprite configuration: `key`, `cols`, `frameW`, `frameH`, `bodyW`, `bodyH`, `scale`, and `anims` row mappings.
+- Profiles: `GUARD_PROFILE`, `JOGGER_PROFILE`, `DOGWALKER_PROFILE`. Constructor selects profile by `humanType`.
+- `frameW` and `frameH` are separate to correctly calculate physics body offset for non-square frames (e.g. dogwalker 50x45).
+
+---
+
+### DialogueService Architecture
+
+- **View vs Service separation:** `DialogueSystem` (UI layer) shows text on screen. `DialogueService` (logic layer) decides WHAT to say based on game state. The service returns a `DialogueResponse` with lines, emote, narration, trustChange, and event fields. The scene processes side effects on completion.
+- **Backward compatibility:** Scripted dialogue conditions use a hybrid of `conversationHistory.length` (from IndexedDB) and `gameState.trustWithSpeaker` (from TrustSystem) to handle saves that predate the conversation store.
+- **Event-driven side effects:** Each `DialogueResponse.event` string (e.g. `"blacky_first"`, `"tiger_warmup"`) maps to specific side effects in `GameScene.processDialogueResponse()`: registry updates, trust awards, indicator reveals, disposition changes, auto-saves.
+
+### Scene Restart Data Passing
+
+- When restarting a scene (e.g. after snatcher capture), pass flags through the `data` parameter rather than using `delayedCall`, which won't survive the restart. The pattern is: `this.scene.restart({ loadSave: true, snatcherCapture: true })` and check in `create()`.
 
 ---
 
@@ -166,6 +219,9 @@ guard.png (also used tinted for joggers/feeders/dogwalkers)
 - **No audio:** Planned for Phase 5.
 - **No CI/CD pipeline.**
 - **Tilemap POI names are hardcoded:** Spawn points, food sources, shelter POIs use string names matched between Tiled JSON and GameScene. No validation that map contains expected POIs.
-- **GameScene is ~1143 lines:** Becoming a god object. Dialogue handlers, NPC spawning, and human/dog management could be extracted.
+- **GameScene is ~1700+ lines:** Growing further after Phase 4. Camille encounters, snatchers, colony dynamics, and territory could be extracted into dedicated systems.
 - **Colony cat random positions:** Not tied to map POIs; positions are hardcoded zone coordinates with random offsets. May clip into objects.
 - **Disposition type `"wary"` added in Phase 3:** Not yet used in NPC AI behavior weights (only affects emotes/narration/indicators).
+- **Camille/Manu/Kish use generic HumanNPC:** No dedicated sprites yet. They use the feeder profile/sprite. Custom sprites needed for visual distinction.
+- **Snatchers use jogger type with dark tint:** A dedicated snatcher sprite (silhouette) would improve visual impact.
+- **Dumping events fire probabilistically:** Could be more deterministic with a day-counter to avoid very long waits or double-fires.

@@ -14,6 +14,7 @@ export interface SaveData {
   variables: Record<string, unknown>
   sourceStates?: Array<{ type: SourceType; x: number; y: number; lastUsedAt: number }>
   trust?: TrustData
+  territory?: { claimed: boolean; claimedOnDay: number }
 }
 
 const CURRENT_VERSION = 1
@@ -22,6 +23,11 @@ const TRACKED_KEYS = [
   'MET_BLACKY', 'TIGER_TALKS', 'JAYCO_TALKS', 'KNOWN_CATS',
   'CHAPTER', 'CH1_RESTED', 'FLUFFY_TALKS', 'PEDIGREE_TALKS',
   'MET_GINGER_A', 'MET_GINGER_B', 'JAYCO_JR_TALKS', 'JOURNAL_MET_DAYS',
+  // Phase 4: territory, Camille encounters, snatchers, colony dynamics
+  'VISITED_ZONE_6', 'TERRITORY_CLAIMED', 'TERRITORY_DAY',
+  'CAMILLE_ENCOUNTER', 'CAMILLE_ENCOUNTER_DAY', 'ENCOUNTER_5_COMPLETE',
+  'COLONY_COUNT', 'DUMPING_EVENTS_SEEN', 'CATS_SNATCHED',
+  'GAME_COMPLETED', 'NEW_GAME_PLUS',
 ] as const
 
 const VALID_PHASES: ReadonlySet<string> = new Set(['dawn', 'day', 'evening', 'night'])
@@ -75,6 +81,7 @@ export const SaveSystem = {
     registry: Phaser.Data.DataManager,
     sourceStates?: Array<{ type: SourceType; x: number; y: number; lastUsedAt: number }>,
     trust?: TrustData,
+    territory?: { claimed: boolean; claimedOnDay: number },
   ): boolean {
     const variables: Record<string, unknown> = {}
     for (const key of TRACKED_KEYS) {
@@ -91,6 +98,7 @@ export const SaveSystem = {
       variables,
       sourceStates,
       trust,
+      territory,
     }
 
     try {

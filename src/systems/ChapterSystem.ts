@@ -1,11 +1,12 @@
 /**
  * Manages narrative chapter progression based on trust thresholds,
- * met-cat counts, and day survival. Chapters are triggered once and
- * persist across save/load via the registry.
+ * met-cat counts, day survival, territory, and encounter states.
+ * Chapters are triggered once and persist across save/load via the registry.
  */
 
 import type { TrustSystem } from "./TrustSystem";
 import type { DayNightCycle } from "./DayNightCycle";
+import type { TerritorySystem } from "./TerritorySystem";
 
 export interface ChapterDef {
   id: number;
@@ -15,11 +16,12 @@ export interface ChapterDef {
   narration: string[];
 }
 
-interface ChapterContext {
+export interface ChapterContext {
   trust: TrustSystem;
   dayNight: DayNightCycle;
   knownCats: Set<string>;
   registry: Phaser.Data.DataManager;
+  territory: TerritorySystem;
 }
 
 const CHAPTERS: ChapterDef[] = [
@@ -55,6 +57,38 @@ const CHAPTERS: ChapterDef[] = [
       "You know where the food is. You know who to avoid.",
       "But you don't have a place that's yours.",
     ],
+  },
+  {
+    id: 4,
+    conditions: (ctx) => {
+      const visitedShops = ctx.registry.get("VISITED_ZONE_6") as boolean | undefined;
+      return ctx.trust.global >= 80 && !!visitedShops;
+    },
+    narration: [
+      "The steps near the glass building. Warm air rises from below. The smell of food. Shelter from the rain.",
+      "This could be yours.",
+    ],
+  },
+  {
+    id: 5,
+    conditions: (ctx) => {
+      return (
+        ctx.trust.global >= 90 &&
+        ctx.territory.isClaimed &&
+        ctx.dayNight.dayCount >= 5
+      );
+    },
+    narration: [
+      "You have a home now. A place in the steps. But something is changing.",
+      "A new human has been visiting the gardens. She moves differently from the others.",
+    ],
+  },
+  {
+    id: 6,
+    conditions: (ctx) => {
+      return ctx.registry.get("ENCOUNTER_5_COMPLETE") === true;
+    },
+    narration: [],
   },
 ];
 

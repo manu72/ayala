@@ -14,7 +14,7 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 
 ## Project Status
 
-**Version 0.1.3** -- Phases 1 through 3 are complete. The game is a playable prototype with survival mechanics, social systems, and the opening story chapters.
+**Version 0.1.4** -- Phases 1 through 4 are complete. The game is playable from start to finish: survival mechanics, social systems, 6 story chapters, territory claiming, snatchers, and the full adoption story arc through to the epilogue.
 
 ### Development Roadmap
 
@@ -24,7 +24,7 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 | 1.5 Visual Polish   | Camera zoom, textured tiles, animated sprites, map expansion, dense trees | Complete    |
 | 2. Core Mechanics   | Hunger/thirst/energy stats, food/water sources, guard NPC, save/load, HUD | Complete    |
 | 3. Social & Story   | Named NPC cats, trust system, emotes, chapters 1-3, humans, dogs, journal | Complete    |
-| 4. Cam & Endgame    | Cam encounters, Chapters 4-6, snatchers, epilogue                         | Not started |
+| 4. Cam & Endgame    | Cam encounters, Chapters 4-6, snatchers, territory, epilogue, NG+         | Complete    |
 | 5. Polish & Release | Playtesting, audio, PWA/offline, deployment                               | Not started |
 
 ### What exists now
@@ -47,6 +47,15 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 - **HUD** with stat bars, game clock, rest progress ring, pause menu, and contextual narration
 - Camera zoom (2.5x) making Mamma Cat feel small in a large world
 - Tree canopies on the overhead layer that render above the player
+- **Story chapters 4-6** completing the full narrative arc from territory claiming through adoption
+- **Territory system** at The Shops / Pyramid Steps with safe sleep, food proximity, and a home-base heart indicator
+- **Camille encounter sequence** (5 encounters over multiple game days) building the human-cat relationship
+- **Snatchers** (night threat) with detection radius, crouching/cover evasion, and capture-reload mechanic
+- **Colony dynamics** with 3 dumping events and fluctuating background population
+- **Centralized DialogueService** routing all NPC dialogue through a service interface (designed for AI swap in Phase 5)
+- **IndexedDB conversation history** persisting every NPC interaction for future AI context
+- **Epilogue and end screen** with welfare information, links to CARA Philippines and @atgcats, and credits
+- **New Game+** (cozy mode) unlocked after completing the story -- replay with full trust and territory
 
 ## How to Play
 
@@ -62,7 +71,7 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 | Z (hold 2 seconds while stationary) | Rest / sleep -- restores energy over time                                |
 | Any movement key, Space, or Z       | Wake up from rest                                                        |
 | J                                   | Open colony journal                                                      |
-| Hold Tab                            | Look around -- camera zooms out to survey the area                       |
+| Tab (toggle)                        | Look around -- camera zooms out to survey the area, press again to return |
 | Escape                              | Pause menu (Save Game, Colony Journal, Resume, Quit to Title)            |
 
 ### Tips
@@ -133,6 +142,7 @@ ayala/
 │   ├── Phase2_Core_Mechanics_Brief.md  #   Phase 2 plan
 │   ├── P2_Controls_Update_Spec.md     #   Controls spec
 │   ├── Phase3_Social_Story_Brief.md   #   Phase 3 plan
+│   ├── Phase4_Camille_Endgame_Brief.md #   Phase 4 plan
 │   └── _generated/                     #   Tool-generated doc snapshots
 │
 ├── public/assets/                       # Static game assets (served as-is)
@@ -143,6 +153,11 @@ ayala/
 │   │   ├── jayco.png                  #     NPC cat
 │   │   ├── fluffy.png                 #     NPC cat (also used as placeholder)
 │   │   ├── guard.png                  #     Guard / human NPCs (64x64 frames)
+│   │   ├── girl.png                   #     Jogger spritesheet (150x85 frames)
+│   │   ├── dogwalker.png              #     Dog walker spritesheet (50x45 frames)
+│   │   ├── SmallDog.png               #     Dog spritesheet (32x32 frames)
+│   │   ├── BrownDog.png               #     Dog spritesheet (32x32 frames)
+│   │   ├── WhiteDog.png               #     Dog spritesheet (32x32 frames)
 │   │   ├── ginger-IDLE.png            #     Ginger cat strip (64x64 frames)
 │   │   ├── ginger-WALK.png            #     Ginger cat strip
 │   │   ├── ginger-RUN.png             #     Ginger cat strip
@@ -162,12 +177,18 @@ ayala/
 │   ├── config/
 │   │   ├── GameConfig.ts               #   Resolution, physics, scenes, scaling
 │   │   └── constants.ts                #   Shared constants
+│   ├── data/
+│   │   └── cat-dialogue.ts             #   Named cat dialogue scripts (condition/response data)
 │   ├── scenes/
 │   │   ├── BootScene.ts                #   Asset preloading
-│   │   ├── StartScene.ts               #   Title screen, new/continue
-│   │   ├── GameScene.ts                #   Main game loop
+│   │   ├── StartScene.ts               #   Title screen, new/continue/NG+
+│   │   ├── GameScene.ts                #   Main game loop (~1880 lines)
 │   │   ├── HUDScene.ts                 #   Overlay: stats, dialogue, pause, narration
-│   │   └── JournalScene.ts             #   Colony journal overlay
+│   │   ├── JournalScene.ts             #   Colony journal overlay
+│   │   └── EpilogueScene.ts            #   End-game sequence with credits and welfare links
+│   ├── services/
+│   │   ├── DialogueService.ts          #   Dialogue interface + ScriptedDialogueService
+│   │   └── ConversationStore.ts        #   IndexedDB conversation history persistence
 │   ├── sprites/
 │   │   ├── MammaCat.ts                 #   Player character
 │   │   ├── NPCCat.ts                  #   NPC cat (AI, config-driven)
@@ -182,14 +203,15 @@ ayala/
 │       ├── SaveSystem.ts               #   localStorage save/load
 │       ├── TrustSystem.ts              #   Trust and reputation
 │       ├── EmoteSystem.ts              #   Floating text emotes
-│       ├── ChapterSystem.ts            #   Story chapter progression
+│       ├── ChapterSystem.ts            #   Story chapter progression (Chapters 1-6)
+│       ├── TerritorySystem.ts          #   Territory claiming and benefits at The Shops
 │       └── ThreatIndicator.ts          #   NPC disposition indicators
 │
 ├── index.html                           # Vite entry page
 ├── package.json                         # npm manifest
 ├── tsconfig.json                        # TypeScript config (strict)
 ├── vite.config.ts                       # Vite config (relative base, dist output)
-└── VERSION                              # 0.1.3
+└── VERSION                              # 0.1.4
 ```
 
 ## Asset Generation
@@ -203,26 +225,30 @@ node scripts/generate-map.mjs       # Regenerates atg.json (reads tile-indices.j
 
 Both scripts use `pngjs` (dev dependency) and write to `public/assets/`. The generated files are committed to git so the game runs without needing to regenerate them.
 
-Cat spritesheets use a mix of 32x32 grid sheets (mammacat, blacky, tiger, jayco, fluffy) and 64x64 strip sheets (ginger cats). The guard spritesheet is reused with colour tints for human NPCs (joggers, feeders, dog walkers).
+Cat spritesheets use a mix of 32x32 grid sheets (mammacat, blacky, tiger, jayco, fluffy) and 64x64 strip sheets (ginger cats, though ginger cats currently use fluffy with an orange tint in-game). Human NPCs use per-type spritesheets: `girl.png` for joggers, `dogwalker.png` for dog walkers, and the guard spritesheet with a green tint for feeders. Dog walkers are accompanied by dog sprites (`SmallDog.png`, `BrownDog.png`, `WhiteDog.png`).
 
 ## Architecture
 
-The game uses Phaser 3's scene system with five scenes:
+The game uses Phaser 3's scene system with six scenes:
 
 1. **BootScene** preloads all assets (tileset image, tilemap JSON, spritesheets)
-2. **StartScene** shows the title screen with Continue (if save exists) and New Game options
+2. **StartScene** shows the title screen with Continue (if save exists), New Game, and New Game+ (if completed) options
 3. **GameScene** is the main gameplay loop:
    - Creates a 3-layer tilemap (ground, objects with collision, overhead canopy)
    - Spawns player, NPC cats, guard, human NPCs, and dogs
-   - Runs day/night cycle, stat decay, trust ticking, and chapter progression
+   - Runs day/night cycle, stat decay, trust ticking, and chapter progression (Chapters 1-6)
+   - Manages snatchers (night threat), colony dynamics, territory, and Camille encounter sequences
    - Handles keyboard input and proximity-based interaction
    - Camera follows player at 2.5x zoom with dead zone
 4. **HUDScene** runs as a parallel overlay, rendering stat bars, game clock, dialogue box, pause menu, rest progress, and contextual narration
-5. **JournalScene** is launched on demand (J key or pause menu) to display known cats and trust levels
+5. **JournalScene** is launched on demand (J key or pause menu) to display known cats, trust levels, and territory status
+6. **EpilogueScene** plays after Chapter 6 completion, showing an epilogue narrative, welfare links, and credits
 
 Scenes communicate via direct typed references (`scene.get("GameScene")`), Phaser's registry for story flags, and `DayNightCycle`'s event emitter for `newDay` events.
 
-State is persisted to `localStorage` via `SaveSystem`, which tracks player position, stats, time of day, food source states, trust data, and story flags. The save is validated on load with structure and range checks.
+Dialogue is routed through `DialogueService`, an interface-based service layer that selects responses from scripted dialogue data (`cat-dialogue.ts`). This is designed for a future swap to AI-generated dialogue in Phase 5. Conversation history is persisted in IndexedDB via `ConversationStore`.
+
+State is persisted to `localStorage` via `SaveSystem`, which tracks player position, stats, time of day, food source states, trust data, territory data, and story flags. The save is validated on load with structure and range checks.
 
 ## Game Design
 
@@ -242,9 +268,12 @@ Read the full document: [docs/Ayala_GDD_v0.1.md](docs/Ayala_GDD_v0.1.md)
 - No test suite
 - No CI/CD pipeline
 - Crouch has no dedicated animation yet (uses walk animation)
-- GameScene is growing large (~1143 lines) and could benefit from extraction of subsystems
+- GameScene is large (~1880 lines) and would benefit from extraction of subsystems (snatchers, colony dynamics, Camille encounters, territory)
 - Colony cat spawn positions are hardcoded, not tied to map POIs
 - The `"wary"` disposition affects indicators and narration but not yet NPC AI behaviour weights
+- Camille, Manu, and Kish use the feeder sprite profile with tinting -- no dedicated character sprites yet
+- Snatchers use the jogger type with a dark tint -- a dedicated silhouette sprite would improve visual impact
+- Dumping events fire probabilistically rather than on a deterministic schedule
 
 ## Developers
 
