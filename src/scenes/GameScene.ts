@@ -184,6 +184,7 @@ export class GameScene extends Phaser.Scene {
       "TERRITORY_DAY",
       "CAMILLE_ENCOUNTER",
       "CAMILLE_ENCOUNTER_DAY",
+      "ENCOUNTER_5_COMPLETE",
       "COLONY_COUNT",
       "DUMPING_EVENTS_SEEN",
       "CATS_SNATCHED",
@@ -348,6 +349,18 @@ export class GameScene extends Phaser.Scene {
       this.time.delayedCall(1000, () => {
         const hud = this.scene.get("HUDScene") as HUDScene | undefined;
         hud?.showNarration("You wake up gasping. A nightmare? No. A warning. Stay hidden at night.");
+      });
+    }
+
+    // Recovery: encounter 5 was started but narrative never completed (save/load mid-encounter)
+    if (
+      data?.loadSave &&
+      (this.registry.get("CAMILLE_ENCOUNTER") as number) >= 5 &&
+      this.registry.get("ENCOUNTER_5_COMPLETE") !== true
+    ) {
+      this.camilleEncounterActive = true;
+      this.time.delayedCall(2000, () => {
+        this.playCamilleEncounterNarrative(5);
       });
     }
   }
@@ -904,6 +917,7 @@ export class GameScene extends Phaser.Scene {
               "But the hand on the carrier is warm. And for the first time in a long time... you're not afraid.",
             ],
             () => {
+              this.registry.set("ENCOUNTER_5_COMPLETE", true);
               this.autoSave();
               this.startChapter6Sequence();
             },

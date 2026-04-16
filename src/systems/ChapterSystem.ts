@@ -86,8 +86,7 @@ const CHAPTERS: ChapterDef[] = [
   {
     id: 6,
     conditions: (ctx) => {
-      const encountersDone = (ctx.registry.get("CAMILLE_ENCOUNTER") as number) ?? 0;
-      return encountersDone >= 5;
+      return ctx.registry.get("ENCOUNTER_5_COMPLETE") === true;
     },
     narration: [],
   },
