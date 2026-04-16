@@ -26,7 +26,8 @@ The first 30 seconds of the game sets the tone for everything. Right now Mamma C
 This is a scripted sequence. Player has no control during it.
 
 **Sequence:**
-1. Game starts. Black screen. Narration text fades in: *"A car. A door. Hands."*
+
+1. Game starts. Black screen. Narration text fades in: _"A car. A door. Hands."_
 2. Fade from black to the Makati Ave sidewalk at night. Camera is positioned slightly above Mamma Cat's eventual spawn point.
 3. A car sprite drives into frame from the right (along Makati Ave). Use any simple car sprite — a basic rectangle with wheels works fine for v1.
 4. The car stops.
@@ -35,8 +36,8 @@ This is a scripted sequence. Player has no control during it.
 7. The car door closes (sprite swap back).
 8. The car drives away in the direction it came from, exits the frame.
 9. 2-second pause. Mamma Cat stays in her crouched pose. Camera stays on her.
-10. Narration fades in: *"The engine fades. The concrete is hot. Everything smells wrong."*
-11. Narration: *"You are alone."*
+10. Narration fades in: _"The engine fades. The concrete is hot. Everything smells wrong."_
+11. Narration: _"You are alone."_
 12. Player gains control. Mamma Cat's sprite shifts from crouched to idle.
 
 ### Implementation notes
@@ -70,7 +71,7 @@ When dialogue is triggered with an NPC cat:
    - Wary/hissing dialogue → crouched pose with ears flat, maybe a hiss emote (❗)
    - Hostile dialogue → arched back pose, puffed fur emote
    - Sleeping cat being woken → transition from sleep pose to alert idle
-4. **Mamma Cat also faces the NPC cat.** Lock her facing direction toward the NPC for the duration of dialogue.
+4. **Mamma Cat also faces the NPC cat.** But do NOT lock her movement. Mamma cat is free to move away during engagements.
 5. **Both cats stay locked in this engaged state until dialogue ends.** Only then do they return to their normal AI behavior.
 
 ### Tying dialogue tone to animation
@@ -79,8 +80,8 @@ The dialogue service returns a response with text. Add a required field to the r
 
 ```typescript
 interface DialogueResponse {
-  lines: string[]
-  speakerPose: 'friendly' | 'wary' | 'hostile' | 'sleeping' | 'curious' | 'submissive'
+  lines: string[];
+  speakerPose: "friendly" | "wary" | "hostile" | "sleeping" | "curious" | "submissive";
   // ... existing fields
 }
 ```
@@ -95,7 +96,6 @@ Dialogue can only be triggered when Mamma Cat is within ~48px of an NPC cat AND 
 
 - Allow the NPC cat to keep walking, grooming, or idling during dialogue
 - Show dialogue text if the NPC cat is off-screen or more than 48px away from Mamma Cat
-- Trigger dialogue through a proximity check alone — the player must press Space (tap) to initiate
 
 ---
 
@@ -108,6 +108,7 @@ There are two very different types of humans in the gardens. Their behavior shou
 These humans are NOT here for the cats. They're just using the park.
 
 **Behavior:**
+
 - Walk their predefined paths at their normal speeds
 - **Notice cats** when within ~48px: briefly turn their head toward the cat (sprite direction change), maybe slow down for 1-2 seconds, then continue
 - Do NOT stop or engage
@@ -129,7 +130,7 @@ These humans are in the gardens SPECIFICALLY for the cats. Their entire behavior
    - Turn to face the cat
    - Crouch (sprite pose change)
    - Pause for 3-5 seconds — they're greeting the cat
-   - Show a small text bubble above their head with a gentle greeting: *"Hi sweetie."* / *"Kamusta, pusa."* / *"There you are."* / *"Good girl."* (vary these per human)
+   - Show a small text bubble above their head with a gentle greeting: _"Hi sweetie."_ / _"Kamusta, pusa."_ / _"There you are."_ / _"Good girl."_ (vary these per human)
    - Show a ♥ emote floating briefly between the human and cat
    - Stand back up
    - Continue on their circuit
@@ -145,22 +146,25 @@ These humans are in the gardens SPECIFICALLY for the cats. Their entire behavior
 They follow Category B behavior, but with personalization:
 
 **Camille:**
+
 - Has the most thorough circuit — visits every cat
 - Spends longer at each crouch (5-7 seconds)
-- Her gentle greetings are personalized if she knows the cat: *"Blacky, you handsome boy."* / *"Tiger, not hissing today?"*
-- For unknown cats (including Mamma Cat before Encounter 2): *"And who are you, sweetheart?"*
+- Her gentle greetings are personalized if she knows the cat: _"Blacky, you handsome boy."_ / _"Tiger, not hissing today?"_
+- For unknown cats (including Mamma Cat before Encounter 2): _"And who are you, sweetheart?"_
 - During Encounters 1-5 with Mamma Cat, the encounter dialogue ONLY triggers if Camille is within ~64px of Mamma Cat AND can see her (not blocked by buildings). If Mamma Cat is not in Camille's line of sight, Camille simply completes her circuit and leaves.
 
 **Manu:**
+
 - Accompanies Camille from Encounter 3 onwards
 - Walks slightly behind her
 - Also crouches and greets cats, but less frequently (every 2-3 cats, not every one)
-- His greetings are quieter: *"Hey, little one."* / *"You're okay."*
+- His greetings are quieter: _"Hey, little one."_ / _"You're okay."_
 
 **Kish:**
+
 - Appears in Encounters 4 and 5 only
 - More animated — moves faster between cats, less patient
-- Her greetings are enthusiastic: *"OMG KITTY!"* / *"Hi hi hi!"*
+- Her greetings are enthusiastic: _"OMG KITTY!"_ / _"Hi hi hi!"_
 - Camille occasionally gestures for her to slow down (sprite animation of Camille raising a hand)
 
 ### Implementation notes
@@ -170,22 +174,22 @@ They follow Category B behavior, but with personalization:
 class CatPersonNPC {
   async runCircuit() {
     for (const waypoint of this.circuit) {
-      await this.walkTo(waypoint)
-      const nearbyCats = this.findCatsWithin(64)
+      await this.walkTo(waypoint);
+      const nearbyCats = this.findCatsWithin(64);
       for (const cat of nearbyCats) {
-        await this.greetCat(cat)
+        await this.greetCat(cat);
       }
     }
-    await this.exitGardens()
+    await this.exitGardens();
   }
-  
+
   async greetCat(cat: NPCCat) {
-    this.stopMoving()
-    this.faceToward(cat)
-    this.playAnimation('crouch')
-    this.showGreeting()  // text bubble + ♥ emote
-    await this.scene.delay(4000)
-    this.playAnimation('stand')
+    this.stopMoving();
+    this.faceToward(cat);
+    this.playAnimation("crouch");
+    this.showGreeting(); // text bubble + ♥ emote
+    await this.scene.delay(4000);
+    this.playAnimation("stand");
   }
 }
 ```
@@ -216,13 +220,14 @@ Currently: dialogue fires about a cat being dumped regardless of Mamma Cat's loc
 **Fix:** Dumping events only trigger when Mamma Cat is within ~300px of the Makati Ave edge (the road where dumping happens). The event is ARMED when the chapter/trust threshold is met, but the trigger only fires when Mamma Cat is in position.
 
 When Mamma Cat is in range AND the event is armed:
+
 1. A car sprite drives into view on Makati Ave road
 2. The car stops
 3. The door opens (sprite swap)
 4. A cat sprite appears on the sidewalk
 5. Door closes, car drives away
 6. The dumped cat sits frozen on the sidewalk
-7. ONLY NOW does narration appear: *"A car. A door. A cat. You remember."*
+7. ONLY NOW does narration appear: _"A car. A door. A cat. You remember."_
 8. The dumped cat eventually moves into the gardens
 
 **If Mamma Cat wanders away mid-event, the event still completes** — she's already witnessed the key moment. But the event doesn't start until she arrives at the sidewalk area.
@@ -232,9 +237,10 @@ When Mamma Cat is in range AND the event is armed:
 Currently: snatchers spawn at night and the player may or may not notice them.
 
 **Fix:** The FIRST snatcher sighting in the game is a scripted moment. It's armed at a specific point (Chapter 3 trigger). It waits until Mamma Cat is out and about at night. When conditions are met:
+
 1. A snatcher sprite walks into view from a garden path
 2. NPC cats near the snatcher visibly flee (emote: ❗, sprites run toward shelter)
-3. Only NOW does any narration fire: *"Something moves in the dark. The other cats run. You should too."*
+3. Only NOW does any narration fire: _"Something moves in the dark. The other cats run. You should too."_
 
 If Mamma Cat is sleeping at a safe spot during the first-snatcher window, the event waits for the next night.
 
@@ -256,8 +262,8 @@ If conditions aren't met, Camille simply continues her circuit and leaves. The e
 
 Every narration line must describe something Mamma Cat can currently perceive:
 
-- Good: *"Her hand smells like fish treats and soap."* → only fires when Camille's hand is actually visibly near Mamma Cat
-- Bad: *"A cat is being dumped on the far side of the park."* → Mamma Cat has no way to know this
+- Good: _"Her hand smells like fish treats and soap."_ → only fires when Camille's hand is actually visibly near Mamma Cat
+- Bad: _"A cat is being dumped on the far side of the park."_ → Mamma Cat has no way to know this
 
 If narration describes a sight, sound, or smell, the source of that sight/sound/smell must be within ~150px of Mamma Cat when the narration fires.
 
@@ -265,17 +271,17 @@ If narration describes a sight, sound, or smell, the source of that sight/sound/
 
 ```typescript
 interface StoryEvent {
-  id: string
-  triggerCondition: (state: GameState) => boolean   // is it time?
-  witnessCondition: (state: GameState) => boolean   // can Mamma Cat see it?
-  play: () => Promise<void>
+  id: string;
+  triggerCondition: (state: GameState) => boolean; // is it time?
+  witnessCondition: (state: GameState) => boolean; // can Mamma Cat see it?
+  play: () => Promise<void>;
 }
 
 function checkStoryEvents() {
   for (const event of armedEvents) {
     if (event.witnessCondition(gameState)) {
-      event.play()
-      disarmEvent(event)
+      event.play();
+      disarmEvent(event);
     }
   }
 }
@@ -297,14 +303,15 @@ Small touches that tie narrative to visuals:
 
 The player currently has no idea what chapter they're in or what to do next. Add a very subtle chapter indicator:
 
-- When a new chapter triggers, show a simple text card: *"Chapter 2: Newcomer"* — displayed for 3 seconds, then fades
-- In the pause menu (Escape), show the current chapter title and a one-line hint of the current goal: *"Chapter 3: Finding Her Place — Explore beyond the central gardens"*
+- When a new chapter triggers, show a simple text card: _"Chapter 2: Newcomer"_ — displayed for 3 seconds, then fades
+- In the pause menu (Escape), show the current chapter title and a one-line hint of the current goal: _"Chapter 3: Finding Her Place — Explore beyond the central gardens"_
 
 This is gentle guidance, not hand-holding. The player still has to figure out how to progress.
 
 ### Emote system consistency
 
 Make sure the emote system (♥ ❗ ❓ 💤) is used EVERYWHERE it applies:
+
 - Every cat that's sleeping shows 💤 periodically
 - Every friendly greeting shows ♥ on both cats
 - Every alert reaction shows ❗

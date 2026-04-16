@@ -17,6 +17,8 @@ import { ChapterSystem } from "../systems/ChapterSystem";
 import { TerritorySystem } from "../systems/TerritorySystem";
 import type { HUDScene } from "./HUDScene";
 import { REST_HOLD_MS } from "../config/constants";
+import { GP } from "../config/gameplayConstants";
+import { StoryKeys } from "../registry/storyKeys";
 import {
   ScriptedDialogueService,
   type DialogueService,
@@ -25,11 +27,14 @@ import {
 } from "../services/DialogueService";
 import { storeConversation, getRecentConversations } from "../services/ConversationStore";
 import { CAT_DIALOGUE_SCRIPTS, getRandomColonyLine } from "../data/cat-dialogue";
+import { resolveSnatcherSpawnAction } from "../systems/SnatcherSystem";
+import { hasLineOfSightTiles } from "../utils/lineOfSight";
 
-const INTERACTION_DISTANCE = 50;
-const LEARN_NAME_DISTANCE = 100;
-const TILE_SIZE = 32;
-const DEFAULT_ZOOM = 2.0; // changed from 2.5 16 Apr for testing only
+const INTERACTION_DISTANCE = GP.INTERACTION_DIST;
+const DIALOGUE_BREAK_DISTANCE = GP.DIALOGUE_BREAK_DIST;
+const LEARN_NAME_DISTANCE = GP.LEARN_NAME_DIST;
+const TILE_SIZE = GP.TILE_SIZE;
+const DEFAULT_ZOOM = 2.5;
 const PEEK_ZOOM = 0.8;
 const ZOOM_DURATION = 500;
 
@@ -50,6 +55,10 @@ export class GameScene extends Phaser.Scene {
   isPeeking = false;
   isPaused = false;
   cinematicActive = false;
+
+  /** Pending intro cinematic timers/tweens — cleared on scene shutdown to avoid callbacks after destroy. */
+  private introTimerEvents: Phaser.Time.TimerEvent[] = [];
+  private introCinematicTweens: Phaser.Tweens.Tween[] = [];
 
   private npcs: NPCEntry[] = [];
   private guard!: GuardNPC;
@@ -101,15 +110,79 @@ export class GameScene extends Phaser.Scene {
   private dumpingInProgress = false;
   private pendingCamilleEncounter = 0;
 
+  /** One scripted "Kish, slow down" beat per Camille evening spawn. */
+  private kishCamilleSlowDownShown = false;
+
+  /** Camille lines when she recognises a named colony cat (Phase 4.5). */
+  private readonly camillePersonalLines: Record<string, string[]> = {
+    Blacky: ["Blacky, you handsome boy.", "Hey, Blacky.", "There's my boy."],
+    Tiger: ["Tiger, not hissing today?", "Hi, Tiger.", "Easy, Tiger."],
+    Jayco: ["Jayco. Good to see you.", "Hey, Jayco."],
+    "Jayco Jr": ["Hey, little one.", "Jayco Jr — you're getting big."],
+    Fluffy: ["Fluffy. How's the fountain?", "Hi, Fluffy."],
+    Pedigree: ["Well, look at you.", "Hello, beautiful."],
+    Ginger: ["Ginger. Hey, sweetie.", "Hi, Ginger."],
+    "Ginger B": ["There you are, Ginger B.", "Hey, you."],
+  };
+
   /** Dialogue lives in HUDScene (1x zoom) so it's always visible. */
-  private get dialogue(): { isActive: boolean; show: (lines: string[], onComplete?: () => void) => void } {
+  private get dialogue(): {
+    isActive: boolean;
+    show: (lines: string[], onComplete?: () => void) => void;
+    dismiss: () => void;
+  } {
     const hud = this.scene.get("HUDScene") as HUDScene | undefined;
     if (hud?.dialogue) return hud.dialogue;
-    return { isActive: false, show: () => {} };
+    return { isActive: false, show: () => {}, dismiss: () => {} };
   }
 
   constructor() {
     super({ key: "GameScene" });
+  }
+
+  shutdown(): void {
+    this.clearIntroCinematicResources();
+    if (this.cinematicActive) {
+      this.cinematicActive = false;
+      const body = this.player?.body as Phaser.Physics.Arcade.Body | undefined;
+      body?.setEnable(true);
+      this.player?.setVisible(true);
+    }
+    if (this.engagedDialogueNPC) {
+      this.engagedDialogueNPC.disengageDialogue();
+      this.engagedDialogueNPC = null;
+    }
+    this.dialogue.dismiss();
+  }
+
+  /** Remove pending intro delayed calls and tweens (idempotent). */
+  private clearIntroCinematicResources(): void {
+    for (const ev of this.introTimerEvents) {
+      ev.remove(false);
+    }
+    this.introTimerEvents = [];
+    for (const tw of this.introCinematicTweens) {
+      tw.remove();
+    }
+    this.introCinematicTweens = [];
+  }
+
+  /**
+   * Queue a delayed call for the intro cinematic; tracked so `shutdown` can cancel it.
+   */
+  private queueIntroDelayed(delayMs: number, callback: () => void): Phaser.Time.TimerEvent {
+    const ev = this.time.delayedCall(delayMs, callback);
+    this.introTimerEvents.push(ev);
+    return ev;
+  }
+
+  /**
+   * Add a tween for the intro cinematic; tracked so `shutdown` can cancel it.
+   */
+  private queueIntroTween(config: Phaser.Types.Tweens.TweenBuilderConfig): Phaser.Tweens.Tween {
+    const tw = this.tweens.add(config);
+    this.introCinematicTweens.push(tw);
+    return tw;
   }
 
   create(data?: { loadSave?: boolean; newGamePlus?: boolean; snatcherCapture?: boolean }): void {
@@ -297,7 +370,10 @@ export class GameScene extends Phaser.Scene {
     this.cameras.main.setZoom(DEFAULT_ZOOM);
 
     const isNewGame = !data?.loadSave && !data?.newGamePlus && !data?.snatcherCapture;
-    const shouldPlayCinematic = isNewGame && localStorage.getItem("ayala_intro_seen") !== "1";
+    if (typeof localStorage !== "undefined" && localStorage.getItem("ayala_intro_seen") === "1") {
+      this.registry.set(StoryKeys.INTRO_SEEN, true);
+    }
+    const shouldPlayCinematic = isNewGame && this.registry.get(StoryKeys.INTRO_SEEN) !== true;
 
     if (!shouldPlayCinematic) {
       this.cameras.main.startFollow(this.player, true, 0.08, 0.08);
@@ -384,7 +460,9 @@ export class GameScene extends Phaser.Scene {
   // ──────────── Intro Cinematic ────────────
 
   private startIntroCinematic(spawnX: number, spawnY: number): void {
+    this.clearIntroCinematicResources();
     this.cinematicActive = true;
+    this.dayNight.snapVisualToPhase("night");
 
     this.player.setVisible(false);
     this.player.setVelocity(0, 0);
@@ -417,24 +495,30 @@ export class GameScene extends Phaser.Scene {
       .setDepth(301)
       .setAlpha(0);
 
-    this.tweens.add({
+    const motionReduced = this.registry.get("MOTION_REDUCED") === true;
+    const openFadeInMs = motionReduced ? 200 : 1500;
+    const overlayRevealDelayMs = motionReduced ? 600 : 3000;
+    const textFadeOutMs = motionReduced ? 200 : 500;
+    const overlayFadeMs = motionReduced ? 300 : 1500;
+
+    this.queueIntroTween({
       targets: openingText,
       alpha: 1,
-      duration: 1500,
+      duration: openFadeInMs,
       ease: "Linear",
     });
 
-    this.time.delayedCall(3000, () => {
-      this.tweens.add({
+    this.queueIntroDelayed(overlayRevealDelayMs, () => {
+      this.queueIntroTween({
         targets: openingText,
         alpha: 0,
-        duration: 500,
+        duration: textFadeOutMs,
         onComplete: () => openingText.destroy(),
       });
-      this.tweens.add({
+      this.queueIntroTween({
         targets: overlay,
         alpha: 0,
-        duration: 1500,
+        duration: overlayFadeMs,
         ease: "Linear",
         onComplete: () => overlay.destroy(),
       });
@@ -446,8 +530,8 @@ export class GameScene extends Phaser.Scene {
 
     const car = this.add.image(carOffscreenX, roadY, "car_closed").setDepth(4);
 
-    this.time.delayedCall(4500, () => {
-      this.tweens.add({
+    this.queueIntroDelayed(4500, () => {
+      this.queueIntroTween({
         targets: car,
         x: carStopX,
         duration: 2000,
@@ -455,22 +539,22 @@ export class GameScene extends Phaser.Scene {
       });
     });
 
-    this.time.delayedCall(7000, () => {
+    this.queueIntroDelayed(7000, () => {
       car.setTexture("car_open");
     });
 
-    this.time.delayedCall(7500, () => {
+    this.queueIntroDelayed(7500, () => {
       this.player.setPosition(carStopX - 20, roadY - 4);
       this.player.setVisible(true);
-      this.player.enterCatloaf();
+      this.player.enterForcedCrouchPose();
     });
 
-    this.time.delayedCall(8500, () => {
+    this.queueIntroDelayed(8500, () => {
       car.setTexture("car_closed");
     });
 
-    this.time.delayedCall(9000, () => {
-      this.tweens.add({
+    this.queueIntroDelayed(9000, () => {
+      this.queueIntroTween({
         targets: car,
         x: carOffscreenX + 200,
         duration: 2500,
@@ -479,25 +563,29 @@ export class GameScene extends Phaser.Scene {
       });
     });
 
-    this.time.delayedCall(13000, () => {
+    // Car exits ~11500ms; spec: 2s pause before first narration line
+    this.queueIntroDelayed(13500, () => {
       const hud = this.scene.get("HUDScene") as HUDScene | undefined;
       hud?.showNarration("The engine fades. The concrete is hot. Everything smells wrong.");
     });
 
-    this.time.delayedCall(16000, () => {
+    this.queueIntroDelayed(16800, () => {
       const hud = this.scene.get("HUDScene") as HUDScene | undefined;
       hud?.showNarration("You are alone.");
     });
 
-    this.time.delayedCall(18000, () => {
+    this.queueIntroDelayed(19200, () => {
       this.endIntroCinematic();
     });
   }
 
   private endIntroCinematic(): void {
     this.cinematicActive = false;
+    this.introTimerEvents = [];
+    this.introCinematicTweens = [];
 
-    this.player.exitCatloaf();
+    this.dayNight.snapVisualToPhase("dawn");
+    this.player.exitForcedCrouchPose();
     const playerBody = this.player.body as Phaser.Physics.Arcade.Body | undefined;
     playerBody?.setEnable(true);
 
@@ -509,7 +597,7 @@ export class GameScene extends Phaser.Scene {
     } catch {
       /* storage may be unavailable in some contexts */
     }
-    this.registry.set("INTRO_SEEN", true);
+    this.registry.set(StoryKeys.INTRO_SEEN, true);
   }
 
   private generateCarTextures(): void {
@@ -548,6 +636,16 @@ export class GameScene extends Phaser.Scene {
     if (this.engagedDialogueNPC && !this.dialogue.isActive) {
       this.engagedDialogueNPC.disengageDialogue();
       this.engagedDialogueNPC = null;
+    } else if (this.engagedDialogueNPC && this.dialogue.isActive) {
+      const cat = this.engagedDialogueNPC;
+      const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, cat.x, cat.y);
+      const broken =
+        dist > DIALOGUE_BREAK_DISTANCE || cat.state === "fleeing" || !cat.active;
+      if (broken) {
+        this.dialogue.dismiss();
+        cat.disengageDialogue();
+        this.engagedDialogueNPC = null;
+      }
     }
 
     // Escape must be checked before the pause gate so it can unpause.
@@ -881,7 +979,6 @@ export class GameScene extends Phaser.Scene {
     if (this.territory.isClaimed) return;
 
     const jaycoTrust = this.trust.getCatTrust("Jayco");
-    const hud = this.scene.get("HUDScene") as HUDScene | undefined;
 
     if (jaycoTrust >= 50 || this.trust.global >= 80) {
       this.time.delayedCall(3000, () => {
@@ -893,7 +990,11 @@ export class GameScene extends Phaser.Scene {
     } else {
       this.time.delayedCall(3000, () => {
         if (this.dialogue.isActive) return;
-        hud?.showNarration("Jayco watches you from the steps. You haven't earned his trust yet.");
+        const jayco = this.npcs.find((e) => e.cat.npcName === "Jayco")?.cat;
+        this.narrateIfPerceivable(
+          "Jayco watches you from the steps. You haven't earned his trust yet.",
+          jayco ? { x: jayco.x, y: jayco.y } : undefined,
+        );
       });
     }
   }
@@ -984,7 +1085,7 @@ export class GameScene extends Phaser.Scene {
       this.camilleNPC.x,
       this.camilleNPC.y,
     );
-    if (dist > 64) return;
+    if (dist > GP.CAMILLE_ENCOUNTER_DIST) return;
     if (!this.hasLineOfSight(this.player.x, this.player.y, this.camilleNPC.x, this.camilleNPC.y))
       return;
 
@@ -994,6 +1095,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private cleanupCamilleNPCs(): void {
+    this.kishCamilleSlowDownShown = false;
     for (const npc of [this.camilleNPC, this.manuNPC, this.kishNPC]) {
       if (!npc) continue;
       const idx = this.humans.indexOf(npc);
@@ -1017,13 +1119,17 @@ export class GameScene extends Phaser.Scene {
     const px = (obj: Phaser.Types.Tilemaps.TiledObject | null, fb: number) => obj?.x ?? fb;
     const py = (obj: Phaser.Types.Tilemaps.TiledObject | null, fb: number) => obj?.y ?? fb;
 
+    const station1 = poi("poi_feeding_station_1");
+    const station2 = poi("poi_feeding_station_2");
     const camilleCircuit: Array<{ x: number; y: number }> = [
       { x: spawnX, y: spawnY },
       { x: px(underpasses, 411), y: py(underpasses, 1083) },
       { x: px(poi("spawn_ginger"), 750), y: py(poi("spawn_ginger"), 1250) },
+      { x: px(station1, 1000), y: py(station1, 900) },
       { x: px(poi("spawn_tiger"), 1141), y: py(poi("spawn_tiger"), 632) },
       { x: px(poi("spawn_jayco"), 1427), y: py(poi("spawn_jayco"), 484) },
       { x: px(poi("spawn_fluffy"), 1500), y: py(poi("spawn_fluffy"), 900) },
+      { x: px(station2, 1600), y: py(station2, 1000) },
       { x: px(poi("spawn_pedigree"), 2500), y: py(poi("spawn_pedigree"), 1700) },
       { x: spawnX, y: spawnY },
     ];
@@ -1071,6 +1177,44 @@ export class GameScene extends Phaser.Scene {
     this.pendingCamilleEncounter = encounterNum;
   }
 
+  /**
+   * Delayed Camille beat: re-check proximity + LOS before dialogue (Phase 4.5).
+   * If conditions fail, re-arm {@link pendingCamilleEncounter} for the next 5s poll.
+   */
+  private scheduleCamilleEncounterDialogue(
+    delayMs: number,
+    encounterNum: number,
+    run: () => void,
+  ): void {
+    this.time.delayedCall(delayMs, () => {
+      if (!this.camilleNPC?.active) {
+        this.pendingCamilleEncounter = encounterNum;
+        return;
+      }
+      const dist = Phaser.Math.Distance.Between(
+        this.player.x,
+        this.player.y,
+        this.camilleNPC.x,
+        this.camilleNPC.y,
+      );
+      if (dist > GP.CAMILLE_ENCOUNTER_DIST) {
+        this.pendingCamilleEncounter = encounterNum;
+        return;
+      }
+      if (
+        !this.hasLineOfSight(this.player.x, this.player.y, this.camilleNPC.x, this.camilleNPC.y)
+      ) {
+        this.pendingCamilleEncounter = encounterNum;
+        return;
+      }
+      if (this.dialogue.isActive) {
+        this.pendingCamilleEncounter = encounterNum;
+        return;
+      }
+      run();
+    });
+  }
+
   private playCamilleEncounterNarrative(encounterNum: number): void {
     const hud = this.scene.get("HUDScene") as HUDScene | undefined;
     hud?.pulseEdge(0x332200, 0.2, 2000);
@@ -1085,8 +1229,7 @@ export class GameScene extends Phaser.Scene {
         break;
 
       case 2:
-        this.time.delayedCall(8000, () => {
-          if (this.dialogue.isActive) return;
+        this.scheduleCamilleEncounterDialogue(8000, 2, () => {
           this.registry.set("CAMILLE_ENCOUNTER", encounterNum);
           this.registry.set("CAMILLE_ENCOUNTER_DAY", this.dayNight.dayCount);
           this.camilleNPC?.playCrouchToward(this.player.x);
@@ -1104,8 +1247,7 @@ export class GameScene extends Phaser.Scene {
         break;
 
       case 3:
-        this.time.delayedCall(10000, () => {
-          if (this.dialogue.isActive) return;
+        this.scheduleCamilleEncounterDialogue(10000, 3, () => {
           this.registry.set("CAMILLE_ENCOUNTER", encounterNum);
           this.registry.set("CAMILLE_ENCOUNTER_DAY", this.dayNight.dayCount);
           this.camilleNPC?.playCrouchToward(this.player.x);
@@ -1125,8 +1267,7 @@ export class GameScene extends Phaser.Scene {
         break;
 
       case 4:
-        this.time.delayedCall(10000, () => {
-          if (this.dialogue.isActive) return;
+        this.scheduleCamilleEncounterDialogue(10000, 4, () => {
           this.registry.set("CAMILLE_ENCOUNTER", encounterNum);
           this.registry.set("CAMILLE_ENCOUNTER_DAY", this.dayNight.dayCount);
           this.camilleNPC?.playCrouchToward(this.player.x);
@@ -1137,6 +1278,7 @@ export class GameScene extends Phaser.Scene {
             ],
             () => {
               this.emotes.show(this, this.player, "heart");
+              if (this.camilleNPC) this.emotes.show(this, this.camilleNPC, "heart");
               hud?.showNarration("The small one is loud. But Camille keeps her still. She understands you.");
             },
           );
@@ -1144,8 +1286,7 @@ export class GameScene extends Phaser.Scene {
         break;
 
       case 5:
-        this.time.delayedCall(12000, () => {
-          if (this.dialogue.isActive) return;
+        this.scheduleCamilleEncounterDialogue(12000, 5, () => {
           this.registry.set("CAMILLE_ENCOUNTER", encounterNum);
           this.registry.set("CAMILLE_ENCOUNTER_DAY", this.dayNight.dayCount);
           this.dialogue.show(
@@ -1333,7 +1474,7 @@ export class GameScene extends Phaser.Scene {
       }
 
       // Body language emotes and contextual narration on approach
-      if (dist < 64) {
+      if (dist < GP.CAT_PERSON_GREET_DIST) {
         this.showBodyLanguage(cat, dist, hud);
       } else if (dist > LEARN_NAME_DISTANCE) {
         // Player moved away; allow narration again on re-approach
@@ -1649,9 +1790,16 @@ export class GameScene extends Phaser.Scene {
         const playerDist = Phaser.Math.Distance.Between(
           human.x, human.y, this.player.x, this.player.y,
         );
-        if (playerDist < 50) {
+        if (playerDist < GP.CAT_PERSON_PLAYER_GREET_DIST) {
+          let playerLine: string | undefined;
+          if (human.humanType === "camille") {
+            const enc = (this.registry.get("CAMILLE_ENCOUNTER") as number) ?? 0;
+            if (enc < 2) {
+              playerLine = "And who are you, sweetheart?";
+            }
+          }
           human.startGreeting(this.player.x, this.player.y);
-          this.showGreetingBubble(human);
+          this.showGreetingBubble(human, { line: playerLine });
           this.emotes.show(this, human, "heart");
           this.emotes.show(this, this.player, "heart");
           greeted = true;
@@ -1661,10 +1809,14 @@ export class GameScene extends Phaser.Scene {
           for (const { cat } of this.npcs) {
             if (cat.state === "fleeing") continue;
             const dist = Phaser.Math.Distance.Between(human.x, human.y, cat.x, cat.y);
-            if (dist < 64 && !human.hasGreeted(cat)) {
+            if (dist < GP.CAT_PERSON_GREET_DIST && !human.hasGreeted(cat)) {
+              if (human.humanType === "manu" && human.shouldDeferManuGreet()) {
+                human.markGreeted(cat);
+                continue;
+              }
               human.startGreeting(cat.x, cat.y);
               human.markGreeted(cat);
-              this.showGreetingBubble(human);
+              this.showGreetingBubble(human, { nearNpcCat: cat });
               this.emotes.show(this, human, "heart");
               if (cat.state !== "sleeping") this.emotes.show(this, cat, "heart");
               break;
@@ -1673,13 +1825,49 @@ export class GameScene extends Phaser.Scene {
         }
       }
 
+      if (
+        !this.kishCamilleSlowDownShown &&
+        this.camilleNPC &&
+        this.kishNPC &&
+        !this.kishNPC.isGreeting &&
+        Phaser.Math.Distance.Between(
+          this.kishNPC.x,
+          this.kishNPC.y,
+          this.camilleNPC.x,
+          this.camilleNPC.y,
+        ) < 80
+      ) {
+        this.kishCamilleSlowDownShown = true;
+        const bubble = this.add
+          .text(this.camilleNPC.x, this.camilleNPC.y - 44, "Kish, slow down.", {
+            fontFamily: "Arial, Helvetica, sans-serif",
+            fontSize: "10px",
+            color: "#ffffff",
+            stroke: "#000000",
+            strokeThickness: 2,
+            backgroundColor: "#00000066",
+            padding: { x: 4, y: 2 },
+          })
+          .setOrigin(0.5)
+          .setDepth(8);
+        this.tweens.add({
+          targets: bubble,
+          y: this.camilleNPC.y - 64,
+          alpha: 0,
+          delay: 2000,
+          duration: 800,
+          onComplete: () => bubble.destroy(),
+        });
+        this.emotes.show(this, this.camilleNPC, "curious");
+      }
+
       // Category A: passers-through glance at nearby cats (including Mamma Cat)
       if (human.humanType === "jogger" || human.humanType === "dogwalker") {
         let glanced = false;
         const playerDist = Phaser.Math.Distance.Between(
           human.x, human.y, this.player.x, this.player.y,
         );
-        if (playerDist < 48) {
+        if (playerDist < GP.GLANCE_DIST) {
           human.glanceAt(this.player.x, this.player.y);
           glanced = true;
         }
@@ -1687,7 +1875,7 @@ export class GameScene extends Phaser.Scene {
         if (!glanced) {
           for (const { cat } of this.npcs) {
             const dist = Phaser.Math.Distance.Between(human.x, human.y, cat.x, cat.y);
-            if (dist < 48) {
+            if (dist < GP.GLANCE_DIST) {
               if (human.humanType === "jogger") {
                 if (cat.state !== "sleeping" && cat.state !== "alert") {
                   cat.triggerAlert();
@@ -1718,7 +1906,7 @@ export class GameScene extends Phaser.Scene {
         for (const { cat } of this.npcs) {
           if (cat.state === "sleeping" || cat.state === "alert" || cat.state === "fleeing") continue;
           const dist = Phaser.Math.Distance.Between(snatcher.x, snatcher.y, cat.x, cat.y);
-          if (dist < 160) {
+          if (dist < GP.NPC_FLEE_SNATCHER_DIST) {
             cat.triggerFlee(snatcher.x, snatcher.y);
           }
         }
@@ -1735,9 +1923,21 @@ export class GameScene extends Phaser.Scene {
     feeder: ["Hi sweetie.", "Kamusta, pusa.", "There you are.", "Good kitty."],
   };
 
-  private showGreetingBubble(human: HumanNPC): void {
-    const lines = this.catPersonGreetings[human.humanType] ?? this.catPersonGreetings.feeder!;
-    const line = lines[Math.floor(Math.random() * lines.length)]!;
+  private showGreetingBubble(
+    human: HumanNPC,
+    opts?: { line?: string; nearNpcCat?: NPCCat },
+  ): void {
+    let line = opts?.line;
+    if (!line && opts?.nearNpcCat && human.humanType === "camille") {
+      const named = this.camillePersonalLines[opts.nearNpcCat.npcName];
+      if (named?.length) {
+        line = named[Math.floor(Math.random() * named.length)]!;
+      }
+    }
+    if (!line) {
+      const lines = this.catPersonGreetings[human.humanType] ?? this.catPersonGreetings.feeder!;
+      line = lines[Math.floor(Math.random() * lines.length)]!;
+    }
 
     const bubble = this.add
       .text(human.x, human.y - 30, line, {
@@ -1789,26 +1989,41 @@ export class GameScene extends Phaser.Scene {
 
   // ──────────── Environment ────────────
 
-  /** True when position is within ~300px of the Makati Ave road edge (east side). */
-  private isNearMakatiAve(worldX: number): boolean {
-    return worldX > 2400;
+  /** True when Mamma Cat is within radial distance of the Makati Ave road centreline. */
+  private isNearMakatiAve(worldX: number, worldY: number): boolean {
+    return (
+      Phaser.Math.Distance.Between(worldX, worldY, GP.MAKATI_AVE_CENTER_X, worldY) <=
+      GP.MAKATI_AVE_WITNESS_DIST
+    );
   }
 
   /** Approximate line-of-sight check by raymarching through collision tiles. */
   private hasLineOfSight(ax: number, ay: number, bx: number, by: number): boolean {
     if (!this.objectsLayer) return true;
-    const dx = bx - ax;
-    const dy = by - ay;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    const steps = Math.ceil(dist / TILE_SIZE);
-    for (let i = 1; i < steps; i++) {
-      const t = i / steps;
-      const tileX = Math.floor((ax + dx * t) / TILE_SIZE);
-      const tileY = Math.floor((ay + dy * t) / TILE_SIZE);
-      const tile = this.objectsLayer.getTileAt(tileX, tileY);
-      if (tile && tile.collides) return false;
+    return hasLineOfSightTiles(ax, ay, bx, by, TILE_SIZE, (wx, wy) => {
+      const tileX = Math.floor(wx / TILE_SIZE);
+      const tileY = Math.floor(wy / TILE_SIZE);
+      const tile = this.objectsLayer!.getTileAt(tileX, tileY);
+      return Boolean(tile?.collides);
+    });
+  }
+
+  /**
+   * Sensory narration: only if source is within range. Inner monologue: omit `source`.
+   */
+  private narrateIfPerceivable(
+    line: string,
+    source?: { x: number; y: number },
+    radius: number = GP.NARRATION_WITNESS_DIST,
+  ): void {
+    const hud = this.scene.get("HUDScene") as HUDScene | undefined;
+    if (!source) {
+      hud?.showNarration(line);
+      return;
     }
-    return true;
+    const d = Phaser.Math.Distance.Between(this.player.x, this.player.y, source.x, source.y);
+    if (d > radius) return;
+    hud?.showNarration(line);
   }
 
   isUnderCanopy(worldX: number, worldY: number): boolean {
@@ -1869,7 +2084,9 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
-    this.requestCatDialogue(cat);
+    void this.requestCatDialogue(cat).catch(() => {
+      /* Errors are logged and cleaned up inside requestCatDialogue */
+    });
   }
 
   /**
@@ -1932,8 +2149,7 @@ export class GameScene extends Phaser.Scene {
       }
 
       if (response.narration) {
-        const hud = this.scene.get("HUDScene") as HUDScene | undefined;
-        hud?.showNarration(response.narration);
+        this.narrateIfPerceivable(response.narration, { x: cat.x, y: cat.y });
       }
 
       this.dialogue.show(response.lines, () => {
@@ -1941,6 +2157,15 @@ export class GameScene extends Phaser.Scene {
         this.engagedDialogueNPC = null;
         this.processDialogueResponse(cat, name, trustBefore, response);
       });
+    } catch (err) {
+      console.error("[GameScene] requestCatDialogue failed:", err);
+      cat.disengageDialogue();
+      this.engagedDialogueNPC = null;
+      if (this.dialogue.isActive) {
+        this.dialogue.dismiss();
+      }
+      const hud = this.scene.get("HUDScene") as HUDScene | undefined;
+      hud?.showNarration("Words fail. The moment passes.");
     } finally {
       this.dialogueRequestInFlight = false;
     }
@@ -2025,21 +2250,30 @@ export class GameScene extends Phaser.Scene {
   // ──────────── Snatchers (Task 4) ────────────
 
   private checkSnatcherSpawn(): void {
-    if (this.dayNight.currentPhase !== "night") {
+    const action = resolveSnatcherSpawnAction({
+      isNight: this.dayNight.currentPhase === "night",
+      snatcherSpawnChecked: this.snatcherSpawnChecked,
+      firstSnatcherSeen: this.registry.get("FIRST_SNATCHER_SEEN") as boolean | undefined,
+      chapter: this.chapters.chapter,
+      isResting: this.player.isResting,
+      isNearShelter: this.isNearShelter(this.player.x, this.player.y),
+    });
+
+    if (action.type === "not_night") {
       this.snatcherSpawnChecked = false;
       this.despawnSnatchers();
       return;
     }
-    if (this.snatcherSpawnChecked) return;
-    this.snatcherSpawnChecked = true;
+    if (action.type === "already_checked") return;
+    if (action.type === "defer_first_sighting") return;
 
-    const firstSeen = this.registry.get("FIRST_SNATCHER_SEEN") as boolean | undefined;
-    if (!firstSeen && this.chapters.chapter >= 3) {
-      if (this.player.isResting && this.isNearShelter(this.player.x, this.player.y)) return;
+    if (action.type === "first_sighting") {
+      this.snatcherSpawnChecked = true;
       this.playFirstSnatcherSighting();
       return;
     }
 
+    this.snatcherSpawnChecked = true;
     if (Math.random() > 0.4) return;
     const snatcherCount = 1 + (Math.random() > 0.5 ? 1 : 0);
     for (let i = 0; i < snatcherCount; i++) {
@@ -2065,7 +2299,7 @@ export class GameScene extends Phaser.Scene {
       for (const { cat } of this.npcs) {
         if (cat.state === "sleeping") continue;
         const dist = Phaser.Math.Distance.Between(snatcher.x, snatcher.y, cat.x, cat.y);
-        if (dist < 200) {
+        if (dist < GP.SNATCHER_WITNESS_DIST) {
           this.emotes.show(this, cat, "alert");
           cat.triggerFlee(snatcher.x, snatcher.y);
         }
@@ -2114,7 +2348,13 @@ export class GameScene extends Phaser.Scene {
 
     if (!silent) {
       const hud = this.scene.get("HUDScene") as HUDScene | undefined;
-      hud?.showNarration("Something moves in the dark...");
+      const near =
+        Phaser.Math.Distance.Between(this.player.x, this.player.y, snatcher.x, snatcher.y) <=
+        GP.SNATCHER_WITNESS_DIST;
+      const los = this.hasLineOfSight(this.player.x, this.player.y, snatcher.x, snatcher.y);
+      if (near && los) {
+        hud?.showNarration("Something moves in the dark...");
+      }
     }
   }
 
@@ -2201,7 +2441,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     if (this.dumpingArmed > 0 && this.dumpingArmed === dumpingSeen + 1) {
-      if (this.isNearMakatiAve(this.player.x)) {
+      if (this.isNearMakatiAve(this.player.x, this.player.y)) {
         this.playDumpingSequence(this.dumpingArmed);
         this.dumpingArmed = 0;
       }

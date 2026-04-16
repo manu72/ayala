@@ -54,6 +54,11 @@ export class HumanNPC extends BaseNPC {
   private greetedCats = new WeakSet<object>();
   private glanceTimer = 0;
 
+  /** Manu greets only every 3rd eligible cat (Phase 4.5). */
+  private manuGreetWave = 0;
+  /** Simple bowl graphic while feeder lingers at a station. */
+  private feedingStationProp: Phaser.GameObjects.Graphics | null = null;
+
   private exiting = false;
   private exitTarget: { x: number; y: number } | null = null;
 
@@ -135,6 +140,16 @@ export class HumanNPC extends BaseNPC {
     this.greetedCats.add(target);
   }
 
+  /**
+   * For Manu only: returns true when this greeting should be skipped (quiet pass).
+   * Call before {@link markGreeted} / {@link startGreeting}.
+   */
+  shouldDeferManuGreet(): boolean {
+    if (this.humanType !== "manu") return false;
+    this.manuGreetWave++;
+    return this.manuGreetWave % 3 !== 0;
+  }
+
   resetGreeted(): void {
     this.greetedCats = new WeakSet<object>();
   }
@@ -183,9 +198,14 @@ export class HumanNPC extends BaseNPC {
 
     if (this.lingering) {
       this.setVelocity(0);
+      if (this.feedingStationProp) {
+        this.feedingStationProp.setPosition(this.x, this.y);
+      }
       this.lingerTimer -= delta;
       if (this.lingerTimer <= 0) {
         this.lingering = false;
+        this.feedingStationProp?.destroy();
+        this.feedingStationProp = null;
         this.advanceWaypoint();
       }
       return;
@@ -209,6 +229,16 @@ export class HumanNPC extends BaseNPC {
         this.lingerTimer = this.config.lingerSec * 1000;
         this.setVelocity(0);
         this.anims.play(`${key}-idle`, true);
+        if (!this.feedingStationProp) {
+          const g = this.scene.add.graphics();
+          g.fillStyle(0x6b4423, 0.95);
+          g.fillEllipse(0, 10, 18, 10);
+          g.lineStyle(1, 0x3d2817, 0.8);
+          g.strokeEllipse(0, 10, 18, 10);
+          g.setPosition(this.x, this.y);
+          g.setDepth(3);
+          this.feedingStationProp = g;
+        }
         return;
       }
       this.advanceWaypoint();
@@ -234,6 +264,7 @@ export class HumanNPC extends BaseNPC {
       }
       this.currentWaypoint = 0;
       this.greetedCats = new WeakSet<object>();
+      this.manuGreetWave = 0;
     } else {
       this.currentWaypoint = next;
     }
@@ -265,6 +296,8 @@ export class HumanNPC extends BaseNPC {
     this.isActive = false;
     this.exiting = false;
     this.exitTarget = null;
+    this.feedingStationProp?.destroy();
+    this.feedingStationProp = null;
     this.setVisible(false);
     this.setActive(false);
     this.setVelocity(0);

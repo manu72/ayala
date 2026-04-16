@@ -14,7 +14,7 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 
 ## Project Status
 
-**Version 0.1.5** -- Phases 1 through 4 are complete. The game is playable from start to finish: survival mechanics, social systems, 6 story chapters, territory claiming, snatchers, and the full adoption story arc through to the epilogue.
+**Version 0.1.6** -- Phases 1 through 4 and **Phase 4.5 (visual & narrative alignment)** are complete. The game is playable from start to finish: survival mechanics, social systems, 6 story chapters, territory claiming, snatchers, the full adoption story arc through to the epilogue, plus intro cinematic, grounded narration hooks, and human/cat engagement polish.
 
 ### Development Roadmap
 
@@ -25,6 +25,7 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 | 2. Core Mechanics   | Hunger/thirst/energy stats, food/water sources, guard NPC, save/load, HUD | Complete    |
 | 3. Social & Story   | Named NPC cats, trust system, emotes, chapters 1-3, humans, dogs, journal | Complete    |
 | 4. Cam & Endgame    | Cam encounters, Chapters 4-6, snatchers, territory, epilogue, NG+         | Complete    |
+| 4.5 Visual & Narrative | Intro cinematic, dialogue poses, cat-person circuits, witness-gated events, chapter cards | Complete    |
 | 5. Polish & Release | Playtesting, audio, PWA/offline, deployment                               | Not started |
 
 ### What exists now
@@ -56,6 +57,7 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 - **IndexedDB conversation history** persisting every NPC interaction for future AI context
 - **Epilogue and end screen** with welfare information, links to CARA Philippines and @atgcats, and credits
 - **New Game+** (cozy mode) unlocked after completing the story -- replay with full trust and territory
+- **Phase 4.5:** Opening abandonment cinematic; NPC dialogue engagement with `speakerPose`-driven animations; Category A/B human behaviour (glances vs circuits); witness-gated dumping and snatcher narration; Camille encounter re-validation on delayed dialogue; chapter title cards + pause-menu chapter hint; `prefers-reduced-motion` support for decorative HUD/emote/intro tweens; gameplay radii centralised in `src/config/gameplayConstants.ts`
 
 ## How to Play
 
@@ -183,7 +185,7 @@ ayala/
 │   ├── scenes/
 │   │   ├── BootScene.ts                #   Asset preloading
 │   │   ├── StartScene.ts               #   Title screen, new/continue/NG+
-│   │   ├── GameScene.ts                #   Main game loop (~1880 lines)
+│   │   ├── GameScene.ts                #   Main game loop (~2400+ lines)
 │   │   ├── HUDScene.ts                 #   Overlay: stats, dialogue, pause, narration
 │   │   ├── JournalScene.ts             #   Colony journal overlay
 │   │   └── EpilogueScene.ts            #   End-game sequence with credits and welfare links
@@ -221,7 +223,7 @@ ayala/
 │   ├── data/                           #   cat-dialogue script conditions
 │   └── sprites/                        #   BaseNPC helpers, SpriteProfiles
 ├── vitest.config.ts                     # Vitest configuration
-└── VERSION                              # 0.1.5
+└── VERSION                              # 0.1.6
 ```
 
 ## Asset Generation
@@ -276,7 +278,7 @@ Read the full document: [docs/Ayala_GDD_v0.1.md](docs/Ayala_GDD_v0.1.md)
 
 - No audio (planned Phase 5)
 - Crouch has no dedicated animation yet (uses walk animation)
-- GameScene is large (~1880 lines) and would benefit from extraction of subsystems (snatchers, colony dynamics, Camille encounters, territory)
+- GameScene is large (~2400+ lines) and would benefit from extraction of subsystems (snatchers, colony dynamics, Camille encounters, territory); `src/systems/SnatcherSystem.ts` re-exports spawn policy logic as a stepping stone
 - Colony cat spawn positions are hardcoded, not tied to map POIs
 - The `"wary"` disposition affects indicators and narration but not yet NPC AI behaviour weights
 - Camille, Manu, and Kish use the feeder sprite profile with tinting -- no dedicated character sprites yet

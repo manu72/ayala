@@ -29,6 +29,10 @@ const BARS: BarDef[] = [
 export class HUDScene extends Phaser.Scene {
   dialogue!: DialogueSystem;
 
+  private motionReduced(): boolean {
+    return this.registry.get("MOTION_REDUCED") === true;
+  }
+
   private fills: Phaser.GameObjects.Rectangle[] = [];
   private barLabels: Phaser.GameObjects.Text[] = [];
   private clockLabel!: Phaser.GameObjects.Text;
@@ -349,6 +353,12 @@ export class HUDScene extends Phaser.Scene {
     this.tweens.killTweensOf(this.chapterTitleCard);
     this.chapterTitleCard.setAlpha(0);
 
+    if (this.motionReduced()) {
+      this.chapterTitleCard.setAlpha(1);
+      this.time.delayedCall(3000, () => this.chapterTitleCard.setAlpha(0));
+      return;
+    }
+
     this.tweens.add({
       targets: this.chapterTitleCard,
       alpha: 1,
@@ -374,6 +384,13 @@ export class HUDScene extends Phaser.Scene {
 
     this.tweens.killTweensOf(this.edgePulseGraphics);
     this.edgePulseGraphics.setAlpha(0);
+
+    if (this.motionReduced()) {
+      this.edgePulseGraphics.setAlpha(intensity);
+      this.time.delayedCall(durationMs, () => this.edgePulseGraphics.setAlpha(0));
+      return;
+    }
+
     this.tweens.add({
       targets: this.edgePulseGraphics,
       alpha: intensity,

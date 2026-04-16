@@ -64,6 +64,11 @@ describe('ChapterSystem', () => {
       expect(chapters.chapter).toBe(1)
     })
 
+    it('exposes titleCard and hint for the current chapter', () => {
+      expect(chapters.titleCard).toBe('Chapter 1: Abandoned')
+      expect(chapters.hint).toContain('Find food')
+    })
+
     it('has no pending narration', () => {
       expect(chapters.consumeNarration()).toBeNull()
     })

@@ -1,8 +1,8 @@
 # WORKING_MEMORY
 
 > Persistent memory layer for AI-assisted development sessions.
-> Last Updated: 2026-04-16
-> Version: 0.1.5
+> Last Updated: 2026-04-17
+> Version: 0.1.6
 
 ---
 
@@ -25,6 +25,7 @@
 | 2. Core Mechanics    | Complete    | Stats, food/water, guard, save/load, rest, crouch, HUD         |
 | 3. Social & Story    | Complete    | Trust, emotes, chapters 1-3, named cats, humans, dogs, journal |
 | 4. Camille & Endgame | Complete    | DialogueService, Chs 4-6, snatchers, territory, epilogue, NG+  |
+| 4.5 Visual & Narrative | Complete  | Intro cinematic, dialogue poses, human circuits, witness gates, chapter cards, reduced-motion |
 | 5. Polish & Release  | Not started | Audio, PWA, playtesting, deployment                            |
 
 ---
@@ -40,7 +41,7 @@ BootScene -> StartScene -> GameScene + HUDScene (overlay) + JournalScene (overla
 
 - **BootScene** (`src/scenes/BootScene.ts`): Loads all assets (tilesets, spritesheets)
 - **StartScene** (`src/scenes/StartScene.ts`): Title screen, New/Continue
-- **GameScene** (`src/scenes/GameScene.ts`): Main game loop, NPC management, input, chapters (~1900 lines)
+- **GameScene** (`src/scenes/GameScene.ts`): Main game loop, NPC management, input, chapters (~2400+ lines)
 - **HUDScene** (`src/scenes/HUDScene.ts`): Stats bars, clock, rest progress, pause menu, narration, dialogue
 - **JournalScene** (`src/scenes/JournalScene.ts`): Colony journal overlay (J key or pause menu)
 
@@ -71,6 +72,7 @@ BootScene -> StartScene -> GameScene + HUDScene (overlay) + JournalScene (overla
 | `ThreatIndicator.ts` | Floating name + disposition symbol above NPCs                                       |
 | `DialogueSystem.ts`  | Bottom-screen dialogue UI (view layer)                                              |
 | `TerritorySystem.ts` | Territory claiming and benefits at The Shops                                        |
+| `SnatcherSystem.ts`  | Re-exports `resolveSnatcherSpawnAction` (facade until spawn/patrol code is extracted from GameScene) |
 
 ### Services
 
@@ -88,7 +90,9 @@ BootScene -> StartScene -> GameScene + HUDScene (overlay) + JournalScene (overla
 ### Key Config
 
 - `src/config/constants.ts`: Shared constants (REST_HOLD_MS)
+- `src/config/gameplayConstants.ts`: Interaction and narrative witness radii (`GP`), Phase 4.5
 - `src/config/GameConfig.ts`: Phaser config, scene list, resolution (816x624)
+- `src/registry/storyKeys.ts`: `StoryKeys` constants for registry (`INTRO_SEEN`, etc.)
 
 ---
 
@@ -123,7 +127,8 @@ SmallDog.png, WhiteDog.png, BrownDog.png — randomly assigned to dog walkers
 
 - Key: `ayala_save` in localStorage
 - Phase 1-3 keys: MET_BLACKY, TIGER_TALKS, JAYCO_TALKS, KNOWN_CATS, CHAPTER, CH1_RESTED, FLUFFY_TALKS, PEDIGREE_TALKS, MET_GINGER_A, MET_GINGER_B, JAYCO_JR_TALKS, JOURNAL_MET_DAYS
-- Phase 4 keys: VISITED_ZONE_6, TERRITORY_CLAIMED, TERRITORY_DAY, CAMILLE_ENCOUNTER, CAMILLE_ENCOUNTER_DAY, COLONY_COUNT, DUMPING_EVENTS_SEEN, CATS_SNATCHED, GAME_COMPLETED, NEW_GAME_PLUS
+- Phase 4 keys: VISITED_ZONE_6, TERRITORY_CLAIMED, TERRITORY_DAY, CAMILLE_ENCOUNTER, CAMILLE_ENCOUNTER_DAY, COLONY_COUNT, DUMPING_EVENTS_SEEN, CATS_SNATCHED, GAME_COMPLETED, NEW_GAME_PLUS, INTRO_SEEN, FIRST_SNATCHER_SEEN, ENCOUNTER_5_COMPLETE
+- Legacy: `localStorage["ayala_intro_seen"]` is migrated to registry `INTRO_SEEN` on load; both may be set on intro completion for older clients
 - Also persists: player position, stats, timeOfDay, gameTimeMs, sourceStates, trust data, territory data
 - Conversation history stored separately in IndexedDB (`ayala_conversations`)
 - Validation: `isValidSave()` checks structure, types, and ranges
@@ -220,6 +225,14 @@ SmallDog.png, WhiteDog.png, BrownDog.png — randomly assigned to dog walkers
 
 - When restarting a scene (e.g. after snatcher capture), pass flags through the `data` parameter rather than using `delayedCall`, which won't survive the restart. The pattern is: `this.scene.restart({ loadSave: true, snatcherCapture: true })` and check in `create()`.
 
+### Phase 4.5 (visual / narrative alignment)
+
+- **Snatcher first-sighting night:** `snatcherSpawnChecked` must not be set before the "resting at shelter" guard — use `resolveSnatcherSpawnAction()` (`src/utils/snatcherSpawnLogic.ts`) so a skipped poll can retry.
+- **Non-blocking dialogue:** If the player walks away, disengage the NPC (`DIALOGUE_BREAK_DIST`) and `dialogue.dismiss()` so `dialogueEngaged` cannot stick.
+- **Intro cinematic:** Cancel `delayedCall`/`tween` handles in `shutdown()`; `DayNightCycle.snapVisualToPhase` for night/dawn overlay only during the intro.
+- **Speaker pose:** `speakerPoseToAnimMode` maps tones to sit / walk_paused / rest — NPC sheets lack dedicated crouch/arch rows.
+- **`prefers-reduced-motion`:** `BootScene.init` sets registry `MOTION_REDUCED`; `HUDScene` / `EmoteSystem` / intro opening text respect it for decorative motion.
+
 ---
 
 ## Technical Debt
@@ -227,7 +240,7 @@ SmallDog.png, WhiteDog.png, BrownDog.png — randomly assigned to dog walkers
 - **Test coverage is partial:** Vitest unit tests cover pure systems (StatsSystem, TrustSystem, TerritorySystem, SaveSystem, ChapterSystem, DialogueService, cat-dialogue, BaseNPC helpers, SpriteProfiles). Phaser-coupled code (scenes, FoodSource, DayNightCycle visual layer) has no automated tests. CI runs tests before build.
 - **No audio:** Planned for Phase 5.
 - **Tilemap POI names are hardcoded:** Spawn points, food sources, shelter POIs use string names matched between Tiled JSON and GameScene. No validation that map contains expected POIs.
-- **GameScene is ~1700+ lines:** Growing further after Phase 4. Camille encounters, snatchers, colony dynamics, and territory could be extracted into dedicated systems.
+- **GameScene is ~2400+ lines:** Camille encounters, snatchers, colony dynamics, and territory should be extracted into dedicated systems; `SnatcherSystem.ts` is a thin re-export for spawn policy only.
 - **Colony cat random positions:** Not tied to map POIs; positions are hardcoded zone coordinates with random offsets. May clip into objects.
 - **Disposition type `"wary"` added in Phase 3:** Not yet used in NPC AI behavior weights (only affects emotes/narration/indicators).
 - **Camille/Manu/Kish use generic HumanNPC:** No dedicated sprites yet. They use the feeder profile/sprite. Custom sprites needed for visual distinction.

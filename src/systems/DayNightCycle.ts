@@ -89,6 +89,18 @@ export class DayNightCycle extends Phaser.Events.EventEmitter {
     return `${PHASE_LABELS[this.phase]}  Day ${this.dayCount}`;
   }
 
+  /**
+   * Snap overlay to a phase immediately (no transition). Used for intro cinematic
+   * night look; does not change `gameTimeMs`. Call again to restore after cinematic.
+   */
+  snapVisualToPhase(phase: TimeOfDay): void {
+    this.phase = phase;
+    this.phaseTimer = 0;
+    this.transitioning = false;
+    const cfg = DAY_NIGHT_PHASES[phase];
+    this.overlay.setFillStyle(cfg.color, cfg.alpha);
+  }
+
   restore(phase: TimeOfDay, gameTimeMs: number): void {
     this.phase = phase;
     this.gameTimeMs = gameTimeMs;

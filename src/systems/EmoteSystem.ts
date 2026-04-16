@@ -55,6 +55,19 @@ export class EmoteSystem {
       .setOrigin(0.5)
       .setDepth(100);
 
+    const reduced = scene.registry.get("MOTION_REDUCED") === true;
+    if (reduced) {
+      scene.tweens.add({
+        targets: text,
+        alpha: 0,
+        duration: 900,
+        delay: 200,
+        ease: "Linear",
+        onComplete: () => text.destroy(),
+      });
+      return;
+    }
+
     scene.tweens.add({
       targets: text,
       y: target.y - 44,
