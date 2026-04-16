@@ -789,7 +789,7 @@ export class GameScene extends Phaser.Scene {
     // Spawn Kish from Encounter 4 onwards
     if (encounterNum >= 4) {
       const kishConfig: HumanConfig = {
-        type: "feeder",
+        type: "kish",
         speed: 45,
         activePhases: ["evening"],
         path: [
@@ -799,7 +799,6 @@ export class GameScene extends Phaser.Scene {
         ],
       };
       this.kishNPC = new HumanNPC(this, kishConfig);
-      this.kishNPC.setScale(0.85);
       if (this.groundLayer) this.physics.add.collider(this.kishNPC, this.groundLayer);
       if (this.objectsLayer) this.physics.add.collider(this.kishNPC, this.objectsLayer);
       this.humans.push(this.kishNPC);

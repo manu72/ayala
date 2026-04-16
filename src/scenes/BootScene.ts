@@ -114,6 +114,21 @@ export class BootScene extends Phaser.Scene {
         frameHeight: 68,
       });
     }
+
+    // Kish spritesheets (68x68 frames, single-row strips, no crouch)
+    const kishSheets: Array<[string, string]> = [
+      ["kish_stand", "Kish_stand"], // capital K in filename
+      ["kish_walk_e", "kish_walk_east"],
+      ["kish_walk_w", "kish_walk_west"],
+      ["kish_walk_n", "kish_walk_north"],
+      ["kish_walk_s", "kish_walk_south"],
+    ];
+    for (const [key, file] of kishSheets) {
+      this.load.spritesheet(key, `assets/sprites/${file}.png`, {
+        frameWidth: 68,
+        frameHeight: 68,
+      });
+    }
   }
 
   create(): void {

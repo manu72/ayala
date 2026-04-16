@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 import type { TimeOfDay } from "../systems/DayNightCycle";
 
-export type HumanType = "jogger" | "feeder" | "dogwalker" | "camille" | "manu";
+export type HumanType = "jogger" | "feeder" | "dogwalker" | "camille" | "manu" | "kish";
 
 export interface HumanConfig {
   type: HumanType;
@@ -168,6 +168,31 @@ const MANU_PROFILE: SpriteProfile = {
   },
 };
 
+// Kish: 68x68 frames, child-sized (0.85× Camille → 0.7 * 0.85 ≈ 0.6). No crouch sheets.
+const KISH_PROFILE: SpriteProfile = {
+  key: "kish",
+  cols: 8,
+  frameW: 68,
+  frameH: 68,
+  bodyW: 20,
+  bodyH: 18,
+  scale: 0.6,
+  directionalKeys: {
+    walkDown: "kish_walk_s",
+    walkLeft: "kish_walk_w",
+    walkRight: "kish_walk_e",
+    walkUp: "kish_walk_n",
+    idle: "kish_stand",
+  },
+  anims: {
+    walkDown: { row: 0, count: 8 },
+    walkRight: { row: 0, count: 8 },
+    walkLeft: { row: 0, count: 8 },
+    walkUp: { row: 0, count: 8 },
+    idle: { row: 0, count: 1 },
+  },
+};
+
 function profileForType(type: HumanType): SpriteProfile {
   switch (type) {
     case "jogger":
@@ -179,6 +204,8 @@ function profileForType(type: HumanType): SpriteProfile {
       return CAMILLE_PROFILE;
     case "manu":
       return MANU_PROFILE;
+    case "kish":
+      return KISH_PROFILE;
     default:
       return GUARD_PROFILE;
   }
