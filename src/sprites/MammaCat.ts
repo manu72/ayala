@@ -62,6 +62,8 @@ const REST_SCALE = 0.4;
 const CATLOAF_SCALE = 0.4;
 const REST_BODY_OFFSET_X = 15;
 const REST_BODY_OFFSET_Y = 24;
+const CATLOAF_BODY_OFFSET_X = 15;
+const CATLOAF_BODY_OFFSET_Y = 24;
 
 const LABEL_OFFSET_Y = -12;
 
@@ -203,6 +205,8 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
     this.anims.stop();
     this.setTexture(MC_CATLOAF);
     this.setScale(CATLOAF_SCALE);
+    const body = this.body as Phaser.Physics.Arcade.Body;
+    body.setOffset(CATLOAF_BODY_OFFSET_X, CATLOAF_BODY_OFFSET_Y);
   }
 
   /** Exit catloaf back to normal standing pose. */
@@ -211,6 +215,8 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
     this.playerState = "normal";
     this.showStandFrame();
     this.setScale(NORMAL_SCALE);
+    const body = this.body as Phaser.Physics.Arcade.Body;
+    body.setOffset(BODY_OFFSET_X, BODY_OFFSET_Y);
   }
 
   update(canRun = true, delta = 0): void {

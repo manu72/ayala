@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import type { Disposition } from "../sprites/NPCCat";
+import type { Disposition } from "../sprites/types";
 
 interface IndicatorConfig {
   symbol: string;

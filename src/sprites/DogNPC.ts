@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { BaseNPC } from "./BaseNPC";
 import type { HumanNPC } from "./HumanNPC";
 import type { MammaCat } from "./MammaCat";
 import type { NPCCat } from "./NPCCat";
@@ -86,11 +87,8 @@ export class DogNPC extends Phaser.GameObjects.Sprite {
     }
 
     const prefix = speed > 3 ? "run" : "walk";
-    if (Math.abs(dx) > Math.abs(dy)) {
-      this.anims.play(`${this.spriteKey}-${prefix}-${dx < 0 ? "left" : "right"}`, true);
-    } else {
-      this.anims.play(`${this.spriteKey}-${prefix}-${dy < 0 ? "up" : "down"}`, true);
-    }
+    const d = BaseNPC.directionFromComponents(dx, dy);
+    this.anims.play(`${this.spriteKey}-${prefix}-${d}`, true);
   }
 
   private bark(
@@ -173,10 +171,7 @@ export class DogNPC extends Phaser.GameObjects.Sprite {
     const key = this.spriteKey;
     if (scene.anims.exists(`${key}-idle`)) return;
 
-    const row = (r: number, count = COLS) => ({
-      start: r * COLS,
-      end: r * COLS + count - 1,
-    });
+    const row = (r: number, count = COLS) => BaseNPC.rowFrames(r, COLS, count);
 
     scene.anims.create({
       key: `${key}-idle`,
