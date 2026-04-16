@@ -161,6 +161,7 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
   faceToward(worldX: number, worldY: number): void {
     const dx = worldX - this.x;
     const dy = worldY - this.y;
+    if (dx === 0 && dy === 0) return;
     const absDx = Math.abs(dx);
     const absDy = Math.abs(dy);
 

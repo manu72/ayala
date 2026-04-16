@@ -89,6 +89,7 @@ export class GameScene extends Phaser.Scene {
 
   /** NPC currently locked in dialogue with the player. */
   private engagedDialogueNPC: NPCCat | null = null;
+  private dialogueRequestInFlight = false;
 
   // Snatcher tracking
   private snatchers: HumanNPC[] = [];
@@ -97,6 +98,7 @@ export class GameScene extends Phaser.Scene {
   // Colony dynamics
   private colonyCount = 42;
   private dumpingArmed = 0;
+  private dumpingInProgress = false;
   private pendingCamilleEncounter = 0;
 
   /** Dialogue lives in HUDScene (1x zoom) so it's always visible. */
@@ -367,14 +369,15 @@ export class GameScene extends Phaser.Scene {
       });
     }
 
-    // Recovery: encounter 5 was started but narrative never completed (save/load mid-encounter)
+    // Recovery: encounter 5 was started but narrative never completed (save/load mid-encounter).
+    // Must call startCamilleEncounter to actually spawn Camille; just setting flags
+    // leaves pendingCamilleEncounter orphaned with no NPC to trigger proximity.
     if (
       data?.loadSave &&
       (this.registry.get("CAMILLE_ENCOUNTER") as number) >= 5 &&
       this.registry.get("ENCOUNTER_5_COMPLETE") !== true
     ) {
-      this.camilleEncounterActive = true;
-      this.pendingCamilleEncounter = 5;
+      this.time.delayedCall(500, () => this.startCamilleEncounter(5));
     }
   }
 
@@ -1623,7 +1626,7 @@ export class GameScene extends Phaser.Scene {
         speed: 38,
         activePhases: ["dawn", "evening"],
         lingerSec: 40,
-        lingerWaypointIndex: 7,
+        lingerWaypointIndex: feederCircuit.length - 1 - 7,
         exitAfterLinger: false,
         path: [...feederCircuit].reverse(),
       },
@@ -1874,62 +1877,73 @@ export class GameScene extends Phaser.Scene {
    * response events on completion. Conversation is stored in IndexedDB.
    */
   private async requestCatDialogue(cat: NPCCat): Promise<void> {
-    const name = cat.npcName;
-    const trustBefore = this.trust.getCatTrust(name);
+    if (this.dialogueRequestInFlight) return;
+    this.dialogueRequestInFlight = true;
 
-    const history = await getRecentConversations(name, 10);
-    const conversationHistory: ConversationEntry[] = history.map((r) => ({
-      timestamp: r.timestamp,
-      speaker: r.speaker,
-      text: r.lines.join(" "),
-    }));
+    try {
+      const name = cat.npcName;
+      const trustBefore = this.trust.getCatTrust(name);
 
-    const request = {
-      speaker: name,
-      speakerType: "cat" as const,
-      target: "Mamma Cat",
-      gameState: {
-        chapter: this.chapters.chapter,
-        timeOfDay: this.dayNight.currentPhase,
-        trustGlobal: this.trust.global,
-        trustWithSpeaker: trustBefore,
-        hunger: this.stats.hunger,
-        thirst: this.stats.thirst,
-        energy: this.stats.energy,
-        daysSurvived: this.dayNight.dayCount,
-        knownCats: Array.from(this.knownCats),
-        recentEvents: [] as string[],
-      },
-      conversationHistory,
-    };
+      const history = await getRecentConversations(name, 10);
+      const conversationHistory: ConversationEntry[] = history.map((r) => ({
+        timestamp: r.timestamp,
+        speaker: r.speaker,
+        text: r.lines.join(" "),
+      }));
 
-    const response = await this.dialogueService.getDialogue(request);
-
-    cat.engageDialogue(this.player.x, this.player.y);
-    this.player.faceToward(cat.x, cat.y);
-    this.engagedDialogueNPC = cat;
-
-    if (response.speakerPose) {
-      const poseEmote: Record<string, string> = {
-        friendly: "heart",
-        hostile: "hostile",
-        wary: "alert",
-        curious: "curious",
+      const request = {
+        speaker: name,
+        speakerType: "cat" as const,
+        target: "Mamma Cat",
+        gameState: {
+          chapter: this.chapters.chapter,
+          timeOfDay: this.dayNight.currentPhase,
+          trustGlobal: this.trust.global,
+          trustWithSpeaker: trustBefore,
+          hunger: this.stats.hunger,
+          thirst: this.stats.thirst,
+          energy: this.stats.energy,
+          daysSurvived: this.dayNight.dayCount,
+          knownCats: Array.from(this.knownCats),
+          recentEvents: [] as string[],
+        },
+        conversationHistory,
       };
-      const emoteKey = poseEmote[response.speakerPose];
-      if (emoteKey) this.emotes.show(this, cat, emoteKey as import("../systems/EmoteSystem").EmoteType);
-    }
 
-    if (response.narration) {
-      const hud = this.scene.get("HUDScene") as HUDScene | undefined;
-      hud?.showNarration(response.narration);
-    }
+      const response = await this.dialogueService.getDialogue(request);
 
-    this.dialogue.show(response.lines, () => {
-      cat.disengageDialogue();
-      this.engagedDialogueNPC = null;
-      this.processDialogueResponse(cat, name, trustBefore, response);
-    });
+      // Revalidate after async gap: cat may have fled or another dialogue opened.
+      if (this.dialogue.isActive || cat.state === "fleeing" || !cat.active) return;
+
+      cat.engageDialogue(this.player.x, this.player.y, response.speakerPose);
+      this.player.faceToward(cat.x, cat.y);
+      this.engagedDialogueNPC = cat;
+
+      if (response.speakerPose) {
+        const poseEmote: Record<import("../services/DialogueService").SpeakerPose, import("../systems/EmoteSystem").EmoteType> = {
+          friendly: "heart",
+          hostile: "hostile",
+          wary: "alert",
+          curious: "curious",
+          submissive: "curious",
+          sleeping: "sleep",
+        };
+        this.emotes.show(this, cat, poseEmote[response.speakerPose]);
+      }
+
+      if (response.narration) {
+        const hud = this.scene.get("HUDScene") as HUDScene | undefined;
+        hud?.showNarration(response.narration);
+      }
+
+      this.dialogue.show(response.lines, () => {
+        cat.disengageDialogue();
+        this.engagedDialogueNPC = null;
+        this.processDialogueResponse(cat, name, trustBefore, response);
+      });
+    } finally {
+      this.dialogueRequestInFlight = false;
+    }
   }
 
   /**
@@ -2039,7 +2053,7 @@ export class GameScene extends Phaser.Scene {
    */
   private playFirstSnatcherSighting(): void {
     this.registry.set("FIRST_SNATCHER_SEEN", true);
-    this.spawnSnatcher(0);
+    this.spawnSnatcher(0, true);
 
     const hud = this.scene.get("HUDScene") as HUDScene | undefined;
     hud?.pulseEdge(0x220000, 0.35, 3000);
@@ -2064,7 +2078,7 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  private spawnSnatcher(index: number): void {
+  private spawnSnatcher(index: number, silent = false): void {
     // Snatchers patrol garden paths
     const patrolPaths = [
       [
@@ -2098,9 +2112,10 @@ export class GameScene extends Phaser.Scene {
     this.snatchers.push(snatcher);
     this.humans.push(snatcher);
 
-    // Screen-edge darkening warning
-    const hud = this.scene.get("HUDScene") as HUDScene | undefined;
-    hud?.showNarration("Something moves in the dark...");
+    if (!silent) {
+      const hud = this.scene.get("HUDScene") as HUDScene | undefined;
+      hud?.showNarration("Something moves in the dark...");
+    }
   }
 
   private despawnSnatchers(): void {
@@ -2175,7 +2190,7 @@ export class GameScene extends Phaser.Scene {
    * The event only triggers when Mamma Cat is near the Makati Ave road.
    */
   private checkColonyDynamics(): void {
-    if (this.dialogue.isActive) return;
+    if (this.dialogue.isActive || this.dumpingInProgress) return;
     const dumpingSeen = (this.registry.get("DUMPING_EVENTS_SEEN") as number) ?? 0;
     const chapter = this.chapters.chapter;
 
@@ -2198,14 +2213,16 @@ export class GameScene extends Phaser.Scene {
    * car leaves, then narration fires because Mamma Cat witnessed it.
    */
   private playDumpingSequence(eventNum: number): void {
+    this.dumpingInProgress = true;
     this.registry.set("DUMPING_EVENTS_SEEN", eventNum);
     this.generateCarTextures();
 
     const hud = this.scene.get("HUDScene") as HUDScene | undefined;
     hud?.pulseEdge(0x221100, 0.3, 2500);
 
-    const roadX = this.player.x + 120;
-    const roadY = this.player.y + 40;
+    const MAKATI_AVE_X = 2800;
+    const roadX = MAKATI_AVE_X;
+    const roadY = Math.min(Math.max(this.player.y, 400), 1900);
     const carStartX = roadX + 400;
 
     const car = this.add.image(carStartX, roadY, "car_closed").setDepth(4);
@@ -2243,6 +2260,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private showDumpingNarration(eventNum: number): void {
+    this.dumpingInProgress = false;
     const hud = this.scene.get("HUDScene") as HUDScene | undefined;
     this.colonyCount++;
     this.registry.set("COLONY_COUNT", this.colonyCount);
