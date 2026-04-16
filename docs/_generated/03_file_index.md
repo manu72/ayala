@@ -8,7 +8,7 @@
 | --- | --- | --- | --- |
 | `main.ts` | Creates Phaser.Game with gameConfig | Active | Side-effect only |
 | `config/GameConfig.ts` | Phaser config: 816x624, Arcade physics, FIT scaling, scene list | Active | `gameConfig` |
-| `config/constants.ts` | Shared timing constant | Active | `REST_HOLD_MS` |
+| `config/gameplayConstants.ts` | Shared gameplay constants: interaction/witness radii and input-timing | Active | `GP`, `REST_HOLD_MS` |
 | `scenes/BootScene.ts` | Preloads tileset, tilemap, all sprite sheets | Active | `BootScene` |
 | `scenes/StartScene.ts` | Title screen with Continue/New Game, save detection | Active | `StartScene` |
 | `scenes/GameScene.ts` | Main game: tilemap, player, NPCs, guard, humans, dogs, food, trust, emotes, chapters, camera, input, save/load | Active | `GameScene` |

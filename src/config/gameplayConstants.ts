@@ -1,5 +1,7 @@
 /**
- * Single source for interaction radii and narrative witness distances (Phase 4.5 remediation).
+ * Single source for shared gameplay constants: interaction radii, narrative
+ * witness distances (Phase 4.5 remediation), and input-timing values used
+ * across scenes.
  */
 export const GP = {
   INTERACTION_DIST: 50,
@@ -18,3 +20,6 @@ export const GP = {
   CAMILLE_ENCOUNTER_DIST: 64,
   TILE_SIZE: 32,
 } as const;
+
+/** Duration (ms) the player must hold the rest key to enter resting state. */
+export const REST_HOLD_MS = 1000;

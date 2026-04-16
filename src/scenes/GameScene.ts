@@ -16,8 +16,7 @@ import { EmoteSystem, type EmoteType } from "../systems/EmoteSystem";
 import { ChapterSystem } from "../systems/ChapterSystem";
 import { TerritorySystem } from "../systems/TerritorySystem";
 import type { HUDScene } from "./HUDScene";
-import { REST_HOLD_MS } from "../config/constants";
-import { GP } from "../config/gameplayConstants";
+import { GP, REST_HOLD_MS } from "../config/gameplayConstants";
 import { StoryKeys, migrateLegacyIntroFlag } from "../registry/storyKeys";
 import {
   ScriptedDialogueService,

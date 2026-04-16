@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 import type { GameScene } from "./GameScene";
 import { DialogueSystem } from "../systems/DialogueSystem";
-import { REST_HOLD_MS } from "../config/constants";
+import { REST_HOLD_MS } from "../config/gameplayConstants";
 
 const PANEL_X = 8;
 const PANEL_Y = 8;

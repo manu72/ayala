@@ -89,8 +89,7 @@ BootScene -> StartScene -> GameScene + HUDScene (overlay) + JournalScene (overla
 
 ### Key Config
 
-- `src/config/constants.ts`: Shared constants (REST_HOLD_MS)
-- `src/config/gameplayConstants.ts`: Interaction and narrative witness radii (`GP`), Phase 4.5
+- `src/config/gameplayConstants.ts`: Single source of truth for shared gameplay constants — interaction and narrative witness radii (`GP`, Phase 4.5) plus input-timing values (`REST_HOLD_MS`)
 - `src/config/GameConfig.ts`: Phaser config, scene list, resolution (816x624)
 - `src/registry/storyKeys.ts`: `StoryKeys` constants for registry (`INTRO_SEEN`, etc.)
 
