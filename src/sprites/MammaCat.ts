@@ -44,19 +44,23 @@ const STAND_FRAME: Record<Direction8, number> = {
   se: 7,
 };
 
-// ── Physics body for 48x48 frames ──
+// ── Display scale: 48px frames rendered at 32px to match other cats ──
+// To revert to native 48x48 size: set NORMAL_SCALE = 1, BODY_OFFSET to (15, 26),
+// REST_SCALE = 1.5, REST_BODY_OFFSET to (10, 17), LABEL_OFFSET_Y = -26.
+const NORMAL_SCALE = 32 / 48;
+
+// ── Physics body (tuned for 48x48 frames displayed at NORMAL_SCALE) ──
 const BODY_W = 18;
 const BODY_H = 18;
-const BODY_OFFSET_X = 15;
-const BODY_OFFSET_Y = 26;
+const BODY_OFFSET_X = 11;
+const BODY_OFFSET_Y = 18;
 
-// Offset when using old 32x32 rest frames at 1.5× scale,
-// calculated to keep the body world-position identical.
-const REST_SCALE = 1.5;
-const REST_BODY_OFFSET_X = 10;
-const REST_BODY_OFFSET_Y = 17;
+// Rest uses old 32x32 frames at native size (no scaling needed at 32px display).
+const REST_SCALE = 1;
+const REST_BODY_OFFSET_X = 7;
+const REST_BODY_OFFSET_Y = 12;
 
-const LABEL_OFFSET_Y = -26;
+const LABEL_OFFSET_Y = -12;
 
 const CROUCH_WALK_FPS = 4;
 
@@ -108,6 +112,8 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
 
     this.setCollideWorldBounds(true);
     this.setDepth(3);
+
+    this.setScale(NORMAL_SCALE);
 
     const body = this.body as Phaser.Physics.Arcade.Body;
     body.setSize(BODY_W, BODY_H);
@@ -170,7 +176,7 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
     this.playerState = "waking";
     this.wakeTimer = WAKE_DELAY_MS;
 
-    this.setScale(1);
+    this.setScale(NORMAL_SCALE);
     const body = this.body as Phaser.Physics.Arcade.Body;
     body.setOffset(BODY_OFFSET_X, BODY_OFFSET_Y);
 
