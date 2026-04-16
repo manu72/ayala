@@ -603,6 +603,7 @@ export class GameScene extends Phaser.Scene {
 
   private checkChapterProgression(): void {
     if (this.dialogue.isActive) return;
+    if (this.camilleEncounterActive) return;
 
     const namedKnown = new Set([...this.knownCats].filter((name) => !name.startsWith("Colony Cat")));
     const triggered = this.chapters.check({
