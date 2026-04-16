@@ -23,10 +23,16 @@ export interface HumanConfig {
   exitAfterLinger?: boolean;
 }
 
+/** Park exit waypoints — humans walk here before disappearing. */
+const PARK_EXITS: ReadonlyArray<{ x: number; y: number }> = [
+  { x: 1500, y: 600 },   // Paseo de Roxas (northwest edge)
+  { x: 2850, y: 1200 },  // Makati Ave (east edge)
+];
+
 /**
  * A human NPC that follows a waypoint path during active time-of-day phases.
- * Invisible during inactive phases. Joggers move fast, feeders linger
- * at stations, dog walkers move at a leisurely pace.
+ * When their active phase ends, they walk to the nearest park exit before
+ * becoming invisible rather than vanishing in place.
  */
 export class HumanNPC extends BaseNPC {
   readonly humanType: HumanType;
@@ -46,6 +52,9 @@ export class HumanNPC extends BaseNPC {
   private greetingTimer = 0;
   private greetedCats = new WeakSet<object>();
   private glanceTimer = 0;
+
+  private exiting = false;
+  private exitTarget: { x: number; y: number } | null = null;
 
   constructor(scene: Phaser.Scene, config: HumanConfig) {
     const prof = profileForType(config.type);
@@ -140,15 +149,20 @@ export class HumanNPC extends BaseNPC {
 
   setPhase(phase: TimeOfDay): void {
     const shouldBeActive = this.activePhases.has(phase);
-    if (shouldBeActive && !this.isActive) {
+    if (shouldBeActive && !this.isActive && !this.exiting) {
       this.activate();
-    } else if (!shouldBeActive && this.isActive) {
-      this.deactivate();
+    } else if (!shouldBeActive && this.isActive && !this.exiting) {
+      this.startExiting();
     }
   }
 
   update(delta: number): void {
     if (!this.isActive) return;
+
+    if (this.exiting) {
+      this.updateExiting();
+      return;
+    }
 
     const key = this.profile.key;
 
@@ -214,10 +228,11 @@ export class HumanNPC extends BaseNPC {
     const next = this.currentWaypoint + 1;
     if (next >= this.waypointPath.length) {
       if (this.config.exitAfterLinger) {
-        this.deactivate();
+        this.startExiting();
         return;
       }
       this.currentWaypoint = 0;
+      this.greetedCats = new WeakSet<object>();
     } else {
       this.currentWaypoint = next;
     }
@@ -247,11 +262,53 @@ export class HumanNPC extends BaseNPC {
 
   private deactivate(): void {
     this.isActive = false;
+    this.exiting = false;
+    this.exitTarget = null;
     this.setVisible(false);
     this.setActive(false);
     this.setVelocity(0);
     const body = this.body as Phaser.Physics.Arcade.Body | undefined;
     body?.setEnable(false);
+  }
+
+  /**
+   * Begin walking to the nearest park exit. The human stays visible
+   * while exiting and only deactivates once they reach the exit point.
+   */
+  private startExiting(): void {
+    this.exiting = true;
+    this.greetingActive = false;
+    this.lingering = false;
+
+    let nearest = PARK_EXITS[0]!;
+    let bestDist = Phaser.Math.Distance.Between(this.x, this.y, nearest.x, nearest.y);
+    for (let i = 1; i < PARK_EXITS.length; i++) {
+      const exit = PARK_EXITS[i]!;
+      const d = Phaser.Math.Distance.Between(this.x, this.y, exit.x, exit.y);
+      if (d < bestDist) {
+        bestDist = d;
+        nearest = exit;
+      }
+    }
+    this.exitTarget = nearest;
+  }
+
+  private updateExiting(): void {
+    if (!this.exitTarget) {
+      this.deactivate();
+      return;
+    }
+
+    const dist = Phaser.Math.Distance.Between(this.x, this.y, this.exitTarget.x, this.exitTarget.y);
+    if (dist < 24) {
+      this.deactivate();
+      return;
+    }
+
+    const speed = this.config.speed * 1.2;
+    this.scratchVec.set(this.exitTarget.x - this.x, this.exitTarget.y - this.y).normalize();
+    this.setVelocity(this.scratchVec.x * speed, this.scratchVec.y * speed);
+    this.playWalkAnim(this.scratchVec);
   }
 
   /**

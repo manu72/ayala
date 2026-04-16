@@ -1639,33 +1639,61 @@ export class GameScene extends Phaser.Scene {
       if (!human.visible) continue;
 
       if (human.isCatPerson && !human.isGreeting) {
-        for (const { cat } of this.npcs) {
-          if (cat.state === "fleeing") continue;
-          const dist = Phaser.Math.Distance.Between(human.x, human.y, cat.x, cat.y);
-          if (dist < 64 && !human.hasGreeted(cat)) {
-            human.startGreeting(cat.x, cat.y);
-            human.markGreeted(cat);
-            this.showGreetingBubble(human);
-            this.emotes.show(this, human, "heart");
-            if (cat.state !== "sleeping") this.emotes.show(this, cat, "heart");
-            break;
+        let greeted = false;
+
+        // Greet Mamma Cat first (player) — always prioritised
+        const playerDist = Phaser.Math.Distance.Between(
+          human.x, human.y, this.player.x, this.player.y,
+        );
+        if (playerDist < 64 && !human.hasGreeted(this.player)) {
+          human.startGreeting(this.player.x, this.player.y);
+          human.markGreeted(this.player);
+          this.showGreetingBubble(human);
+          this.emotes.show(this, human, "heart");
+          this.emotes.show(this, this.player, "heart");
+          greeted = true;
+        }
+
+        if (!greeted) {
+          for (const { cat } of this.npcs) {
+            if (cat.state === "fleeing") continue;
+            const dist = Phaser.Math.Distance.Between(human.x, human.y, cat.x, cat.y);
+            if (dist < 64 && !human.hasGreeted(cat)) {
+              human.startGreeting(cat.x, cat.y);
+              human.markGreeted(cat);
+              this.showGreetingBubble(human);
+              this.emotes.show(this, human, "heart");
+              if (cat.state !== "sleeping") this.emotes.show(this, cat, "heart");
+              break;
+            }
           }
         }
       }
 
-      // Category A: passers-through glance at nearby cats
+      // Category A: passers-through glance at nearby cats (including Mamma Cat)
       if (human.humanType === "jogger" || human.humanType === "dogwalker") {
-        for (const { cat } of this.npcs) {
-          const dist = Phaser.Math.Distance.Between(human.x, human.y, cat.x, cat.y);
-          if (dist < 48) {
-            if (human.humanType === "jogger") {
-              if (cat.state !== "sleeping" && cat.state !== "alert") {
-                cat.triggerAlert();
-                this.emotes.show(this, cat, "alert");
+        let glanced = false;
+        const playerDist = Phaser.Math.Distance.Between(
+          human.x, human.y, this.player.x, this.player.y,
+        );
+        if (playerDist < 48) {
+          human.glanceAt(this.player.x, this.player.y);
+          glanced = true;
+        }
+
+        if (!glanced) {
+          for (const { cat } of this.npcs) {
+            const dist = Phaser.Math.Distance.Between(human.x, human.y, cat.x, cat.y);
+            if (dist < 48) {
+              if (human.humanType === "jogger") {
+                if (cat.state !== "sleeping" && cat.state !== "alert") {
+                  cat.triggerAlert();
+                  this.emotes.show(this, cat, "alert");
+                }
               }
+              human.glanceAt(cat.x, cat.y);
+              break;
             }
-            human.glanceAt(cat.x, cat.y);
-            break;
           }
         }
       }
