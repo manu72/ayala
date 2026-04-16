@@ -1593,8 +1593,8 @@ export class GameScene extends Phaser.Scene {
     const px = (obj: Phaser.Types.Tilemaps.TiledObject | null, fallback: number) => obj?.x ?? fallback;
     const py = (obj: Phaser.Types.Tilemaps.TiledObject | null, fallback: number) => obj?.y ?? fallback;
 
-    const entryX = px(blacky, 411) - 200;
-    const entryY = py(blacky, 1083) + 100;
+    const entryX = px(blacky, 411) - 50;
+    const entryY = py(blacky, 1083);
 
     const feederCircuit: Array<{ x: number; y: number }> = [
       { x: entryX, y: entryY },
@@ -1641,13 +1641,13 @@ export class GameScene extends Phaser.Scene {
       if (human.isCatPerson && !human.isGreeting) {
         let greeted = false;
 
-        // Greet Mamma Cat first (player) — always prioritised
+        // Always greet Mamma Cat when close — no "already greeted" gate.
+        // The isGreeting cooldown (4-6s) prevents frame-spam naturally.
         const playerDist = Phaser.Math.Distance.Between(
           human.x, human.y, this.player.x, this.player.y,
         );
-        if (playerDist < 64 && !human.hasGreeted(this.player)) {
+        if (playerDist < 50) {
           human.startGreeting(this.player.x, this.player.y);
-          human.markGreeted(this.player);
           this.showGreetingBubble(human);
           this.emotes.show(this, human, "heart");
           this.emotes.show(this, this.player, "heart");
@@ -2086,13 +2086,13 @@ export class GameScene extends Phaser.Scene {
 
     // Snatcher patrol speed must be slow and stealthy
     const config: HumanConfig = {
-      type: "jogger",
+      type: "snatcher",
       speed: 20,
       activePhases: ["night"],
       path,
     };
     const snatcher = new HumanNPC(this, config);
-    snatcher.setTint(0x111111);
+    snatcher.setTint(0x000000);
     if (this.groundLayer) this.physics.add.collider(snatcher, this.groundLayer);
     if (this.objectsLayer) this.physics.add.collider(snatcher, this.objectsLayer);
     this.snatchers.push(snatcher);

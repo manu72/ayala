@@ -12,24 +12,26 @@ export interface DayNightPhaseConfig {
 
 /** Canonical phase table (durations, colours, transitions). Exported for tests and tooling. */
 export const DAY_NIGHT_PHASES: Record<TimeOfDay, DayNightPhaseConfig> = {
-  dawn: { color: 0xffcc66, alpha: 0.05, durationMs: 90_000, next: "day", startHour: 6 },
+  dawn: { color: 0xffcc66, alpha: 0.05, durationMs: 120_000, next: "day", startHour: 6 },
   day: { color: 0xffffff, alpha: 0.08, durationMs: 120_000, next: "evening", startHour: 10 },
-  evening: { color: 0xff8c00, alpha: 0.15, durationMs: 90_000, next: "night", startHour: 17 },
-  night: { color: 0x000033, alpha: 0.45, durationMs: 90_000, next: "dawn", startHour: 21 },
+  evening: { color: 0xff8c00, alpha: 0.15, durationMs: 180_000, next: "night", startHour: 17 },
+  night: { color: 0x000033, alpha: 0.45, durationMs: 120_000, next: "dawn", startHour: 21 },
 };
 
 const TRANSITION_MS = 8_000;
 
 export const DAY_NIGHT_FULL_CYCLE_MS =
-  DAY_NIGHT_PHASES.dawn.durationMs + DAY_NIGHT_PHASES.day.durationMs +
-  DAY_NIGHT_PHASES.evening.durationMs + DAY_NIGHT_PHASES.night.durationMs;
+  DAY_NIGHT_PHASES.dawn.durationMs +
+  DAY_NIGHT_PHASES.day.durationMs +
+  DAY_NIGHT_PHASES.evening.durationMs +
+  DAY_NIGHT_PHASES.night.durationMs;
 
 const PHASE_LABELS: Record<TimeOfDay, string> = {
-  dawn: 'Dawn',
-  day: 'Daytime',
-  evening: 'Evening',
-  night: 'Night',
-}
+  dawn: "Dawn",
+  day: "Daytime",
+  evening: "Evening",
+  night: "Night",
+};
 
 export class DayNightCycle extends Phaser.Events.EventEmitter {
   private overlay: Phaser.GameObjects.Rectangle;
@@ -80,11 +82,11 @@ export class DayNightCycle extends Phaser.Events.EventEmitter {
 
   /** Number of full day/night cycles completed (1-indexed: starts on Day 1). */
   get dayCount(): number {
-    return Math.floor(this.gameTimeMs / DAY_NIGHT_FULL_CYCLE_MS) + 1
+    return Math.floor(this.gameTimeMs / DAY_NIGHT_FULL_CYCLE_MS) + 1;
   }
 
   get clockText(): string {
-    return `${PHASE_LABELS[this.phase]}  Day ${this.dayCount}`
+    return `${PHASE_LABELS[this.phase]}  Day ${this.dayCount}`;
   }
 
   restore(phase: TimeOfDay, gameTimeMs: number): void {
@@ -93,7 +95,7 @@ export class DayNightCycle extends Phaser.Events.EventEmitter {
     this.transitioning = false;
 
     // Compute intra-phase progress from gameTimeMs
-    const PHASE_ORDER: TimeOfDay[] = ['dawn', 'day', 'evening', 'night'];
+    const PHASE_ORDER: TimeOfDay[] = ["dawn", "day", "evening", "night"];
     const cycleOffset = gameTimeMs % DAY_NIGHT_FULL_CYCLE_MS;
     let accumulated = 0;
     for (const p of PHASE_ORDER) {

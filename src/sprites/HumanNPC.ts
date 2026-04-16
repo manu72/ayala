@@ -23,10 +23,11 @@ export interface HumanConfig {
   exitAfterLinger?: boolean;
 }
 
-/** Park exit waypoints — humans walk here before disappearing. */
+/** Park exit waypoints — on the road perimeter, avoiding interior obstacles. */
 const PARK_EXITS: ReadonlyArray<{ x: number; y: number }> = [
-  { x: 1500, y: 600 },   // Paseo de Roxas (northwest edge)
+  { x: 2400, y: 380 },   // Paseo de Roxas (northeast, past the escalator)
   { x: 2850, y: 1200 },  // Makati Ave (east edge)
+  { x: 700, y: 1500 },   // Ayala Ave (southwest edge)
 ];
 
 /**
