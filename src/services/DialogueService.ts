@@ -35,8 +35,11 @@ export interface ConversationEntry {
   text: string;
 }
 
+export type SpeakerPose = "friendly" | "wary" | "hostile" | "sleeping" | "curious" | "submissive";
+
 export interface DialogueResponse {
   lines: string[];
+  speakerPose?: SpeakerPose;
   emote?: string;
   narration?: string;
   trustChange?: number;

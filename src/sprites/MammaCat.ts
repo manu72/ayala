@@ -157,6 +157,22 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
       .setDepth(5);
   }
 
+  /** Face toward a world position (for dialogue engagement). */
+  faceToward(worldX: number, worldY: number): void {
+    const dx = worldX - this.x;
+    const dy = worldY - this.y;
+    const absDx = Math.abs(dx);
+    const absDy = Math.abs(dy);
+
+    if (absDx > absDy * 2) this.lastDir8 = dx > 0 ? "e" : "w";
+    else if (absDy > absDx * 2) this.lastDir8 = dy > 0 ? "s" : "n";
+    else if (dx > 0) this.lastDir8 = dy > 0 ? "se" : "ne";
+    else this.lastDir8 = dy > 0 ? "sw" : "nw";
+
+    this.lastHorizontal = dx >= 0 ? "e" : "w";
+    this.showStandFrame();
+  }
+
   /** Update the name label to show a heart when Mamma Cat has a home. */
   setHasTerritory(claimed: boolean): void {
     this.nameLabel.setText(claimed ? "\u2665 Mamma Cat" : "Mamma Cat");

@@ -49,6 +49,7 @@ export class GameScene extends Phaser.Scene {
   restHoldActive = false;
   isPeeking = false;
   isPaused = false;
+  cinematicActive = false;
 
   private npcs: NPCEntry[] = [];
   private guard!: GuardNPC;
@@ -70,7 +71,7 @@ export class GameScene extends Phaser.Scene {
   private collapseRecoveryTimer = 0;
   private collapseRecovering = false;
   private emotes!: EmoteSystem;
-  private chapters!: ChapterSystem;
+  chapters!: ChapterSystem;
   private chapterCheckTimer = 0;
   private humans: HumanNPC[] = [];
   private dogs: DogNPC[] = [];
@@ -86,12 +87,17 @@ export class GameScene extends Phaser.Scene {
   private camilleEncounterActive = false;
   private camilleRollDay = 0;
 
+  /** NPC currently locked in dialogue with the player. */
+  private engagedDialogueNPC: NPCCat | null = null;
+
   // Snatcher tracking
   private snatchers: HumanNPC[] = [];
   private snatcherSpawnChecked = false;
 
   // Colony dynamics
   private colonyCount = 42;
+  private dumpingArmed = 0;
+  private pendingCamilleEncounter = 0;
 
   /** Dialogue lives in HUDScene (1x zoom) so it's always visible. */
   private get dialogue(): { isActive: boolean; show: (lines: string[], onComplete?: () => void) => void } {
@@ -190,6 +196,8 @@ export class GameScene extends Phaser.Scene {
       "CATS_SNATCHED",
       "GAME_COMPLETED",
       "NEW_GAME_PLUS",
+      "INTRO_SEEN",
+      "FIRST_SNATCHER_SEEN",
     ]) {
       this.registry.remove(key);
     }
@@ -285,8 +293,14 @@ export class GameScene extends Phaser.Scene {
     this.cameras.main.setBounds(0, 0, this.map.widthInPixels, this.map.heightInPixels);
     this.physics.world.setBounds(0, 0, this.map.widthInPixels, this.map.heightInPixels);
     this.cameras.main.setZoom(DEFAULT_ZOOM);
-    this.cameras.main.startFollow(this.player, true, 0.08, 0.08);
-    this.cameras.main.setDeadzone(50, 50);
+
+    const isNewGame = !data?.loadSave && !data?.newGamePlus && !data?.snatcherCapture;
+    const shouldPlayCinematic = isNewGame && localStorage.getItem("ayala_intro_seen") !== "1";
+
+    if (!shouldPlayCinematic) {
+      this.cameras.main.startFollow(this.player, true, 0.08, 0.08);
+      this.cameras.main.setDeadzone(50, 50);
+    }
 
     this.dayNight.on("newDay", () => {
       this.trust.survivedDay();
@@ -333,8 +347,9 @@ export class GameScene extends Phaser.Scene {
       this.scene.launch("HUDScene");
     }
 
-    // Chapter 1 intro narration for new games
-    if (!data?.loadSave && !data?.newGamePlus) {
+    if (shouldPlayCinematic) {
+      this.startIntroCinematic(spawnX, spawnY);
+    } else if (isNewGame) {
       this.time.delayedCall(500, () => {
         const hud = this.scene.get("HUDScene") as HUDScene | undefined;
         const intro = this.chapters.getIntroNarration();
@@ -359,13 +374,179 @@ export class GameScene extends Phaser.Scene {
       this.registry.get("ENCOUNTER_5_COMPLETE") !== true
     ) {
       this.camilleEncounterActive = true;
-      this.time.delayedCall(2000, () => {
-        this.playCamilleEncounterNarrative(5);
-      });
+      this.pendingCamilleEncounter = 5;
     }
   }
 
+  // ──────────── Intro Cinematic ────────────
+
+  private startIntroCinematic(spawnX: number, spawnY: number): void {
+    this.cinematicActive = true;
+
+    this.player.setVisible(false);
+    this.player.setVelocity(0, 0);
+    const playerBody = this.player.body as Phaser.Physics.Arcade.Body | undefined;
+    playerBody?.setEnable(false);
+
+    this.cameras.main.centerOn(spawnX, spawnY);
+    this.generateCarTextures();
+
+    const screenW = this.cameras.main.width;
+    const screenH = this.cameras.main.height;
+
+    const overlay = this.add
+      .rectangle(screenW / 2, screenH / 2, screenW, screenH, 0x000000, 1)
+      .setScrollFactor(0)
+      .setDepth(300);
+
+    const narStyle: Phaser.Types.GameObjects.Text.TextStyle = {
+      fontFamily: "Arial, Helvetica, sans-serif",
+      fontSize: "16px",
+      fontStyle: "italic",
+      color: "#999999",
+      align: "center",
+    };
+
+    const openingText = this.add
+      .text(screenW / 2, screenH / 2, "A car. A door. Hands.", narStyle)
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(301)
+      .setAlpha(0);
+
+    this.tweens.add({
+      targets: openingText,
+      alpha: 1,
+      duration: 1500,
+      ease: "Linear",
+    });
+
+    this.time.delayedCall(3000, () => {
+      this.tweens.add({
+        targets: openingText,
+        alpha: 0,
+        duration: 500,
+        onComplete: () => openingText.destroy(),
+      });
+      this.tweens.add({
+        targets: overlay,
+        alpha: 0,
+        duration: 1500,
+        ease: "Linear",
+        onComplete: () => overlay.destroy(),
+      });
+    });
+
+    const roadY = spawnY + 32;
+    const carOffscreenX = spawnX + 400;
+    const carStopX = spawnX + 24;
+
+    const car = this.add.image(carOffscreenX, roadY, "car_closed").setDepth(4);
+
+    this.time.delayedCall(4500, () => {
+      this.tweens.add({
+        targets: car,
+        x: carStopX,
+        duration: 2000,
+        ease: "Cubic.easeOut",
+      });
+    });
+
+    this.time.delayedCall(7000, () => {
+      car.setTexture("car_open");
+    });
+
+    this.time.delayedCall(7500, () => {
+      this.player.setPosition(carStopX - 20, roadY - 4);
+      this.player.setVisible(true);
+      this.player.enterCatloaf();
+    });
+
+    this.time.delayedCall(8500, () => {
+      car.setTexture("car_closed");
+    });
+
+    this.time.delayedCall(9000, () => {
+      this.tweens.add({
+        targets: car,
+        x: carOffscreenX + 200,
+        duration: 2500,
+        ease: "Cubic.easeIn",
+        onComplete: () => car.destroy(),
+      });
+    });
+
+    this.time.delayedCall(13000, () => {
+      const hud = this.scene.get("HUDScene") as HUDScene | undefined;
+      hud?.showNarration("The engine fades. The concrete is hot. Everything smells wrong.");
+    });
+
+    this.time.delayedCall(16000, () => {
+      const hud = this.scene.get("HUDScene") as HUDScene | undefined;
+      hud?.showNarration("You are alone.");
+    });
+
+    this.time.delayedCall(18000, () => {
+      this.endIntroCinematic();
+    });
+  }
+
+  private endIntroCinematic(): void {
+    this.cinematicActive = false;
+
+    this.player.exitCatloaf();
+    const playerBody = this.player.body as Phaser.Physics.Arcade.Body | undefined;
+    playerBody?.setEnable(true);
+
+    this.cameras.main.startFollow(this.player, true, 0.08, 0.08);
+    this.cameras.main.setDeadzone(50, 50);
+
+    try {
+      localStorage.setItem("ayala_intro_seen", "1");
+    } catch {
+      /* storage may be unavailable in some contexts */
+    }
+    this.registry.set("INTRO_SEEN", true);
+  }
+
+  private generateCarTextures(): void {
+    if (this.textures.exists("car_closed")) return;
+
+    const g = this.make.graphics({ x: 0, y: 0 });
+
+    g.fillStyle(0x2a2a3a);
+    g.fillRoundedRect(0, 2, 48, 20, 3);
+    g.fillStyle(0x111111);
+    g.fillCircle(10, 24, 4);
+    g.fillCircle(38, 24, 4);
+    g.fillStyle(0x445566);
+    g.fillRect(28, 4, 12, 8);
+    g.generateTexture("car_closed", 48, 28);
+
+    g.clear();
+    g.fillStyle(0x2a2a3a);
+    g.fillRoundedRect(0, 2, 48, 20, 3);
+    g.fillStyle(0x111111);
+    g.fillCircle(10, 24, 4);
+    g.fillCircle(38, 24, 4);
+    g.fillStyle(0x445566);
+    g.fillRect(28, 4, 12, 8);
+    g.fillStyle(0x2a2a3a);
+    g.fillRect(22, 10, 2, 12);
+    g.generateTexture("car_open", 48, 28);
+
+    g.destroy();
+  }
+
   update(time: number, delta: number): void {
+    if (this.cinematicActive) return;
+
+    // Release NPC from dialogue engagement if dialogue was dismissed
+    if (this.engagedDialogueNPC && !this.dialogue.isActive) {
+      this.engagedDialogueNPC.disengageDialogue();
+      this.engagedDialogueNPC = null;
+    }
+
     // Escape must be checked before the pause gate so it can unpause.
     // When the journal is open, ESC closes it (same pattern as J key).
     if (this.escapeKey && Phaser.Input.Keyboard.JustDown(this.escapeKey)) {
@@ -568,6 +749,7 @@ export class GameScene extends Phaser.Scene {
       this.checkChapterProgression();
       this.recheckTerritoryEligibility();
       this.checkCamilleEncounter();
+      this.checkCamilleProximity();
       this.checkSnatcherSpawn();
       this.checkColonyDynamics();
       this.checkTerritoryBenefits();
@@ -655,6 +837,9 @@ export class GameScene extends Phaser.Scene {
       territory: this.territory,
     });
     if (triggered) {
+      const hud = this.scene.get("HUDScene") as HUDScene | undefined;
+      hud?.showChapterTitle(this.chapters.titleCard);
+
       const narration = this.chapters.consumeNarration();
       if (narration && narration.length > 0) {
         this.dialogue.show(narration, () => {
@@ -662,7 +847,6 @@ export class GameScene extends Phaser.Scene {
         });
       }
 
-      // Chapter-specific triggers
       const ch = this.chapters.chapter;
       if (ch === 4) {
         this.onChapter4Start();
@@ -782,6 +966,30 @@ export class GameScene extends Phaser.Scene {
     this.startCamilleEncounter(currentEncounter + 1);
   }
 
+  /**
+   * Check if Mamma Cat is close enough to Camille (and has line-of-sight)
+   * to trigger the pending encounter narrative.
+   */
+  private checkCamilleProximity(): void {
+    if (this.pendingCamilleEncounter === 0) return;
+    if (!this.camilleNPC?.visible) return;
+    if (this.dialogue.isActive) return;
+
+    const dist = Phaser.Math.Distance.Between(
+      this.player.x,
+      this.player.y,
+      this.camilleNPC.x,
+      this.camilleNPC.y,
+    );
+    if (dist > 64) return;
+    if (!this.hasLineOfSight(this.player.x, this.player.y, this.camilleNPC.x, this.camilleNPC.y))
+      return;
+
+    const encounterNum = this.pendingCamilleEncounter;
+    this.pendingCamilleEncounter = 0;
+    this.playCamilleEncounterNarrative(encounterNum);
+  }
+
   private cleanupCamilleNPCs(): void {
     for (const npc of [this.camilleNPC, this.manuNPC, this.kishNPC]) {
       if (!npc) continue;
@@ -798,25 +1006,30 @@ export class GameScene extends Phaser.Scene {
     this.cleanupCamilleNPCs();
     this.camilleEncounterActive = true;
 
-    // Spawn Camille from the underpass area
-    const underpasses = this.map.findObject("spawns", (o) => o.name === "spawn_blacky");
+    const poi = (name: string) => this.map.findObject("spawns", (o) => o.name === name);
+    const underpasses = poi("spawn_blacky");
     const spawnX = (underpasses?.x ?? 411) - 50;
     const spawnY = underpasses?.y ?? 1083;
 
-    // Target: The Shops area
-    const shopsPOI = this.map.findObject("spawns", (o) => o.name === "poi_pyramid_steps");
-    const targetX = shopsPOI?.x ?? 2200;
-    const targetY = shopsPOI?.y ?? 500;
+    const px = (obj: Phaser.Types.Tilemaps.TiledObject | null, fb: number) => obj?.x ?? fb;
+    const py = (obj: Phaser.Types.Tilemaps.TiledObject | null, fb: number) => obj?.y ?? fb;
+
+    const camilleCircuit: Array<{ x: number; y: number }> = [
+      { x: spawnX, y: spawnY },
+      { x: px(underpasses, 411), y: py(underpasses, 1083) },
+      { x: px(poi("spawn_ginger"), 750), y: py(poi("spawn_ginger"), 1250) },
+      { x: px(poi("spawn_tiger"), 1141), y: py(poi("spawn_tiger"), 632) },
+      { x: px(poi("spawn_jayco"), 1427), y: py(poi("spawn_jayco"), 484) },
+      { x: px(poi("spawn_fluffy"), 1500), y: py(poi("spawn_fluffy"), 900) },
+      { x: px(poi("spawn_pedigree"), 2500), y: py(poi("spawn_pedigree"), 1700) },
+      { x: spawnX, y: spawnY },
+    ];
 
     const camilleConfig: HumanConfig = {
       type: "camille",
       speed: 35,
       activePhases: ["evening"],
-      path: [
-        { x: spawnX, y: spawnY },
-        { x: 1200, y: 900 },
-        { x: targetX, y: targetY },
-      ],
+      path: camilleCircuit,
     };
 
     this.camilleNPC = new HumanNPC(this, camilleConfig);
@@ -824,17 +1037,13 @@ export class GameScene extends Phaser.Scene {
     if (this.objectsLayer) this.physics.add.collider(this.camilleNPC, this.objectsLayer);
     this.humans.push(this.camilleNPC);
 
-    // Spawn Manu from Encounter 3 onwards
     if (encounterNum >= 3) {
+      const manuCircuit = camilleCircuit.map((wp) => ({ x: wp.x + 30, y: wp.y + 20 }));
       const manuConfig: HumanConfig = {
         type: "manu",
         speed: 35,
         activePhases: ["evening"],
-        path: [
-          { x: spawnX + 30, y: spawnY + 20 },
-          { x: 1200 + 30, y: 900 + 20 },
-          { x: targetX + 30, y: targetY + 20 },
-        ],
+        path: manuCircuit,
       };
       this.manuNPC = new HumanNPC(this, manuConfig);
       if (this.groundLayer) this.physics.add.collider(this.manuNPC, this.groundLayer);
@@ -842,17 +1051,13 @@ export class GameScene extends Phaser.Scene {
       this.humans.push(this.manuNPC);
     }
 
-    // Spawn Kish from Encounter 4 onwards
     if (encounterNum >= 4) {
+      const kishCircuit = camilleCircuit.map((wp) => ({ x: wp.x - 20, y: wp.y + 30 }));
       const kishConfig: HumanConfig = {
         type: "kish",
-        speed: 45,
+        speed: 50,
         activePhases: ["evening"],
-        path: [
-          { x: spawnX - 20, y: spawnY + 30 },
-          { x: 1200 - 20, y: 900 + 30 },
-          { x: targetX - 20, y: targetY + 30 },
-        ],
+        path: kishCircuit,
       };
       this.kishNPC = new HumanNPC(this, kishConfig);
       if (this.groundLayer) this.physics.add.collider(this.kishNPC, this.groundLayer);
@@ -860,14 +1065,12 @@ export class GameScene extends Phaser.Scene {
       this.humans.push(this.kishNPC);
     }
 
-    // Schedule the encounter narrative
-    this.time.delayedCall(5000, () => {
-      this.playCamilleEncounterNarrative(encounterNum);
-    });
+    this.pendingCamilleEncounter = encounterNum;
   }
 
   private playCamilleEncounterNarrative(encounterNum: number): void {
     const hud = this.scene.get("HUDScene") as HUDScene | undefined;
+    hud?.pulseEdge(0x332200, 0.2, 2000);
 
     switch (encounterNum) {
       case 1:
@@ -1140,9 +1343,10 @@ export class GameScene extends Phaser.Scene {
     const catTrust = this.trust.getCatTrust(cat.npcName);
     const effectiveDisposition = catTrust >= 50 ? "friendly" : cat.disposition;
 
-    // Show emote on the NPC
     if (cat.state === "sleeping") {
       this.emotes.show(this, cat, "sleep");
+    } else if (cat.state === "alert" || cat.state === "fleeing") {
+      this.emotes.show(this, cat, "alert");
     } else if (effectiveDisposition === "friendly") {
       this.emotes.show(this, cat, "heart");
       this.emotes.show(this, this.player, "heart");
@@ -1372,45 +1576,58 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * Build feeder configs with paths anchored to actual map POI positions.
-   * Each feeder walks from an approach point to the feeding station,
-   * lingers there, then walks back out (one trip, no looping).
+   * Build feeder configs with circuit paths through cat areas.
+   * Each feeder walks a circuit visiting cat locations, greeting each cat,
+   * lingering at a feeding station, then exiting.
    */
   private buildFeederConfigs(): HumanConfig[] {
-    const stationDefs: Array<{
-      poi: string;
-      approachOffset: { dx: number; dy: number };
-    }> = [
-      { poi: "poi_feeding_station_1", approachOffset: { dx: -200, dy: 200 } },
-      { poi: "poi_feeding_station_2", approachOffset: { dx: 200, dy: -200 } },
-      { poi: "poi_feeding_station_3", approachOffset: { dx: -200, dy: -150 } },
+    const poi = (name: string) => this.map.findObject("spawns", (o) => o.name === name);
+    const blacky = poi("spawn_blacky");
+    const ginger = poi("spawn_ginger");
+    const station1 = poi("poi_feeding_station_1");
+    const station2 = poi("poi_feeding_station_2");
+    const tiger = poi("spawn_tiger");
+    const jayco = poi("spawn_jayco");
+    const fluffy = poi("spawn_fluffy");
+
+    const px = (obj: Phaser.Types.Tilemaps.TiledObject | null, fallback: number) => obj?.x ?? fallback;
+    const py = (obj: Phaser.Types.Tilemaps.TiledObject | null, fallback: number) => obj?.y ?? fallback;
+
+    const entryX = px(blacky, 411) - 200;
+    const entryY = py(blacky, 1083) + 100;
+
+    const feederCircuit: Array<{ x: number; y: number }> = [
+      { x: entryX, y: entryY },
+      { x: px(blacky, 411), y: py(blacky, 1083) },
+      { x: px(ginger, 750), y: py(ginger, 1250) },
+      { x: px(station1, 1000), y: py(station1, 900) },
+      { x: px(tiger, 1141), y: py(tiger, 632) },
+      { x: px(jayco, 1427), y: py(jayco, 484) },
+      { x: px(fluffy, 1500), y: py(fluffy, 900) },
+      { x: px(station2, 1600), y: py(station2, 1000) },
+      { x: entryX, y: entryY },
     ];
 
-    const configs: HumanConfig[] = [];
-    for (const def of stationDefs) {
-      const obj = this.map.findObject("spawns", (o) => o.name === def.poi);
-      if (!obj) continue;
-
-      const stationX = obj.x ?? 0;
-      const stationY = obj.y ?? 0;
-      const entryX = stationX + def.approachOffset.dx;
-      const entryY = stationY + def.approachOffset.dy;
-
-      configs.push({
+    return [
+      {
         type: "feeder",
         speed: 40,
         activePhases: ["dawn", "evening"],
         lingerSec: 45,
-        lingerWaypointIndex: 1,
-        exitAfterLinger: true,
-        path: [
-          { x: entryX, y: entryY },
-          { x: stationX, y: stationY },
-          { x: entryX, y: entryY },
-        ],
-      });
-    }
-    return configs;
+        lingerWaypointIndex: 3,
+        exitAfterLinger: false,
+        path: feederCircuit,
+      },
+      {
+        type: "feeder",
+        speed: 38,
+        activePhases: ["dawn", "evening"],
+        lingerSec: 40,
+        lingerWaypointIndex: 7,
+        exitAfterLinger: false,
+        path: [...feederCircuit].reverse(),
+      },
+    ];
   }
 
   private updateHumans(delta: number): void {
@@ -1419,15 +1636,36 @@ export class GameScene extends Phaser.Scene {
       human.setPhase(this.dayNight.currentPhase);
       human.update(delta);
 
-      // Joggers passing near NPC cats trigger alert
-      if (human.humanType === "jogger" && human.visible) {
+      if (!human.visible) continue;
+
+      if (human.isCatPerson && !human.isGreeting) {
         for (const { cat } of this.npcs) {
-          if (
-            cat.state !== "sleeping" &&
-            cat.state !== "alert" &&
-            Phaser.Math.Distance.Between(human.x, human.y, cat.x, cat.y) < 64
-          ) {
-            cat.triggerAlert();
+          if (cat.state === "fleeing") continue;
+          const dist = Phaser.Math.Distance.Between(human.x, human.y, cat.x, cat.y);
+          if (dist < 64 && !human.hasGreeted(cat)) {
+            human.startGreeting(cat.x, cat.y);
+            human.markGreeted(cat);
+            this.showGreetingBubble(human);
+            this.emotes.show(this, human, "heart");
+            if (cat.state !== "sleeping") this.emotes.show(this, cat, "heart");
+            break;
+          }
+        }
+      }
+
+      // Category A: passers-through glance at nearby cats
+      if (human.humanType === "jogger" || human.humanType === "dogwalker") {
+        for (const { cat } of this.npcs) {
+          const dist = Phaser.Math.Distance.Between(human.x, human.y, cat.x, cat.y);
+          if (dist < 48) {
+            if (human.humanType === "jogger") {
+              if (cat.state !== "sleeping" && cat.state !== "alert") {
+                cat.triggerAlert();
+                this.emotes.show(this, cat, "alert");
+              }
+            }
+            human.glanceAt(cat.x, cat.y);
+            break;
           }
         }
       }
@@ -1457,6 +1695,42 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  // ──────────── Cat Person Greetings ────────────
+
+  private readonly catPersonGreetings: Record<string, string[]> = {
+    camille: ["Hi sweetie.", "Kamusta, pusa.", "There you are.", "Good girl.", "Hello, beautiful."],
+    manu: ["Hey, little one.", "You're okay.", "Hi there."],
+    kish: ["OMG KITTY!", "Hi hi hi!", "Look at you!", "SO CUTE!"],
+    feeder: ["Hi sweetie.", "Kamusta, pusa.", "There you are.", "Good kitty."],
+  };
+
+  private showGreetingBubble(human: HumanNPC): void {
+    const lines = this.catPersonGreetings[human.humanType] ?? this.catPersonGreetings.feeder!;
+    const line = lines[Math.floor(Math.random() * lines.length)]!;
+
+    const bubble = this.add
+      .text(human.x, human.y - 30, line, {
+        fontFamily: "Arial, Helvetica, sans-serif",
+        fontSize: "10px",
+        color: "#ffffff",
+        stroke: "#000000",
+        strokeThickness: 2,
+        backgroundColor: "#00000066",
+        padding: { x: 4, y: 2 },
+      })
+      .setOrigin(0.5)
+      .setDepth(8);
+
+    this.tweens.add({
+      targets: bubble,
+      y: human.y - 50,
+      alpha: 0,
+      delay: 2500,
+      duration: 1000,
+      onComplete: () => bubble.destroy(),
+    });
+  }
+
   // ──────────── Food Sources ────────────
 
   private placeFoodSources(): void {
@@ -1483,6 +1757,28 @@ export class GameScene extends Phaser.Scene {
   }
 
   // ──────────── Environment ────────────
+
+  /** True when position is within ~300px of the Makati Ave road edge (east side). */
+  private isNearMakatiAve(worldX: number): boolean {
+    return worldX > 2400;
+  }
+
+  /** Approximate line-of-sight check by raymarching through collision tiles. */
+  private hasLineOfSight(ax: number, ay: number, bx: number, by: number): boolean {
+    if (!this.objectsLayer) return true;
+    const dx = bx - ax;
+    const dy = by - ay;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const steps = Math.ceil(dist / TILE_SIZE);
+    for (let i = 1; i < steps; i++) {
+      const t = i / steps;
+      const tileX = Math.floor((ax + dx * t) / TILE_SIZE);
+      const tileY = Math.floor((ay + dy * t) / TILE_SIZE);
+      const tile = this.objectsLayer.getTileAt(tileX, tileY);
+      if (tile && tile.collides) return false;
+    }
+    return true;
+  }
 
   isUnderCanopy(worldX: number, worldY: number): boolean {
     if (!this.overheadLayer) return false;
@@ -1581,12 +1877,29 @@ export class GameScene extends Phaser.Scene {
 
     const response = await this.dialogueService.getDialogue(request);
 
+    cat.engageDialogue(this.player.x, this.player.y);
+    this.player.faceToward(cat.x, cat.y);
+    this.engagedDialogueNPC = cat;
+
+    if (response.speakerPose) {
+      const poseEmote: Record<string, string> = {
+        friendly: "heart",
+        hostile: "hostile",
+        wary: "alert",
+        curious: "curious",
+      };
+      const emoteKey = poseEmote[response.speakerPose];
+      if (emoteKey) this.emotes.show(this, cat, emoteKey as import("../systems/EmoteSystem").EmoteType);
+    }
+
     if (response.narration) {
       const hud = this.scene.get("HUDScene") as HUDScene | undefined;
       hud?.showNarration(response.narration);
     }
 
     this.dialogue.show(response.lines, () => {
+      cat.disengageDialogue();
+      this.engagedDialogueNPC = null;
       this.processDialogueResponse(cat, name, trustBefore, response);
     });
   }
@@ -1678,13 +1991,49 @@ export class GameScene extends Phaser.Scene {
     if (this.snatcherSpawnChecked) return;
     this.snatcherSpawnChecked = true;
 
-    // 40% chance per night
-    if (Math.random() > 0.4) return;
+    const firstSeen = this.registry.get("FIRST_SNATCHER_SEEN") as boolean | undefined;
+    if (!firstSeen && this.chapters.chapter >= 3) {
+      if (this.player.isResting && this.isNearShelter(this.player.x, this.player.y)) return;
+      this.playFirstSnatcherSighting();
+      return;
+    }
 
+    if (Math.random() > 0.4) return;
     const snatcherCount = 1 + (Math.random() > 0.5 ? 1 : 0);
     for (let i = 0; i < snatcherCount; i++) {
       this.spawnSnatcher(i);
     }
+  }
+
+  /**
+   * The first snatcher sighting is scripted: a snatcher walks into view,
+   * nearby NPC cats flee visibly, then narration fires.
+   */
+  private playFirstSnatcherSighting(): void {
+    this.registry.set("FIRST_SNATCHER_SEEN", true);
+    this.spawnSnatcher(0);
+
+    const hud = this.scene.get("HUDScene") as HUDScene | undefined;
+    hud?.pulseEdge(0x220000, 0.35, 3000);
+
+    const snatcher = this.snatchers[0];
+    if (!snatcher) return;
+
+    this.time.delayedCall(2000, () => {
+      for (const { cat } of this.npcs) {
+        if (cat.state === "sleeping") continue;
+        const dist = Phaser.Math.Distance.Between(snatcher.x, snatcher.y, cat.x, cat.y);
+        if (dist < 200) {
+          this.emotes.show(this, cat, "alert");
+          cat.triggerFlee(snatcher.x, snatcher.y);
+        }
+      }
+
+      this.time.delayedCall(1000, () => {
+        const hud = this.scene.get("HUDScene") as HUDScene | undefined;
+        hud?.showNarration("Something moves in the dark. The other cats run. You should too.");
+      });
+    });
   }
 
   private spawnSnatcher(index: number): void {
@@ -1794,80 +2143,110 @@ export class GameScene extends Phaser.Scene {
   // ──────────── Colony Dynamics (Task 5) ────────────
 
   /**
-   * Check for colony population changes and dumping events.
-   * Colony count fluctuates to make the world feel alive.
+   * Arm dumping events based on chapter thresholds.
+   * The event only triggers when Mamma Cat is near the Makati Ave road.
    */
   private checkColonyDynamics(): void {
+    if (this.dialogue.isActive) return;
     const dumpingSeen = (this.registry.get("DUMPING_EVENTS_SEEN") as number) ?? 0;
     const chapter = this.chapters.chapter;
 
-    // Dumping Event 1: during Chapter 2-3
-    if (dumpingSeen === 0 && chapter >= 2 && chapter <= 3 && this.dayNight.currentPhase === "night") {
-      if (Math.random() < 0.1) {
-        this.triggerDumpingEvent(1);
-      }
+    if (this.dumpingArmed === 0) {
+      if (dumpingSeen === 0 && chapter >= 2) this.dumpingArmed = 1;
+      else if (dumpingSeen === 1 && chapter >= 3) this.dumpingArmed = 2;
+      else if (dumpingSeen === 2 && chapter >= 4) this.dumpingArmed = 3;
     }
-    // Dumping Event 2: during Chapter 3-4
-    else if (dumpingSeen === 1 && chapter >= 3 && chapter <= 4 && this.dayNight.currentPhase === "evening") {
-      if (Math.random() < 0.08) {
-        this.triggerDumpingEvent(2);
-      }
-    }
-    // Dumping Event 3: during Chapter 4-5
-    else if (dumpingSeen === 2 && chapter >= 4 && chapter <= 5 && this.dayNight.currentPhase === "dawn") {
-      if (Math.random() < 0.08) {
-        this.triggerDumpingEvent(3);
+
+    if (this.dumpingArmed > 0 && this.dumpingArmed === dumpingSeen + 1) {
+      if (this.isNearMakatiAve(this.player.x)) {
+        this.playDumpingSequence(this.dumpingArmed);
+        this.dumpingArmed = 0;
       }
     }
   }
 
-  private triggerDumpingEvent(eventNum: number): void {
+  /**
+   * Play a visible dumping event: car drives up, door opens, cat placed,
+   * car leaves, then narration fires because Mamma Cat witnessed it.
+   */
+  private playDumpingSequence(eventNum: number): void {
     this.registry.set("DUMPING_EVENTS_SEEN", eventNum);
+    this.generateCarTextures();
+
     const hud = this.scene.get("HUDScene") as HUDScene | undefined;
+    hud?.pulseEdge(0x221100, 0.3, 2500);
+
+    const roadX = this.player.x + 120;
+    const roadY = this.player.y + 40;
+    const carStartX = roadX + 400;
+
+    const car = this.add.image(carStartX, roadY, "car_closed").setDepth(4);
+
+    this.tweens.add({
+      targets: car,
+      x: roadX,
+      duration: 2000,
+      ease: "Cubic.easeOut",
+      onComplete: () => {
+        car.setTexture("car_open");
+        this.time.delayedCall(500, () => {
+          const dumpedCat = this.addBackgroundCat(roadX - 20, roadY - 4);
+          if (dumpedCat) dumpedCat.setAlpha(0.9);
+
+          this.time.delayedCall(500, () => {
+            car.setTexture("car_closed");
+            this.time.delayedCall(300, () => {
+              this.tweens.add({
+                targets: car,
+                x: carStartX + 200,
+                duration: 2500,
+                ease: "Cubic.easeIn",
+                onComplete: () => car.destroy(),
+              });
+
+              this.time.delayedCall(1500, () => {
+                this.showDumpingNarration(eventNum);
+              });
+            });
+          });
+        });
+      },
+    });
+  }
+
+  private showDumpingNarration(eventNum: number): void {
+    const hud = this.scene.get("HUDScene") as HUDScene | undefined;
+    this.colonyCount++;
+    this.registry.set("COLONY_COUNT", this.colonyCount);
 
     switch (eventNum) {
       case 1:
         this.dialogue.show(["A car. A door. A cat.", "You remember."], () => {
-          this.colonyCount++;
-          this.registry.set("COLONY_COUNT", this.colonyCount);
           hud?.showNarration("A new cat has appeared in the gardens.");
-          this.addBackgroundCat();
         });
         break;
-
       case 2:
-        this.dialogue.show(
-          [
-            "This one wasn't thrown away. This one was... left.",
-            "With love, and grief, and no choice.",
-            "You sit beside her. You don't speak. There's nothing to say.",
-          ],
-          () => {
-            this.colonyCount++;
-            this.registry.set("COLONY_COUNT", this.colonyCount);
-            this.addBackgroundCat();
-          },
-        );
+        this.dialogue.show([
+          "This one wasn't thrown away. This one was... left.",
+          "With love, and grief, and no choice.",
+          "You sit beside her. You don't speak. There's nothing to say.",
+        ]);
         break;
-
       case 3:
-        this.dialogue.show(["Another one. How many of us started this way?"], () => {
-          this.colonyCount++;
-          this.registry.set("COLONY_COUNT", this.colonyCount);
-          this.addBackgroundCat();
-        });
+        this.dialogue.show(["Another one. How many of us started this way?"]);
         break;
     }
   }
 
   /**
-   * Spawn an additional background colony cat after a dumping event.
+   * Spawn an additional background colony cat.
+   * Optional position for dumping event placement near the road.
    */
-  private addBackgroundCat(): void {
+  private addBackgroundCat(atX?: number, atY?: number): NPCCat {
     const sprites = ["mammacat", "blacky", "tiger", "jayco", "fluffy"];
     const sprite = sprites[Math.floor(Math.random() * sprites.length)]!;
-    const x = 600 + Math.random() * 200;
-    const y = 1100 + Math.random() * 200;
+    const x = atX ?? 600 + Math.random() * 200;
+    const y = atY ?? 1100 + Math.random() * 200;
 
     const cat = new NPCCat(this, {
       name: `Colony Cat ${this.npcs.length + 1}`,
@@ -1881,6 +2260,7 @@ export class GameScene extends Phaser.Scene {
     if (this.objectsLayer) this.physics.add.collider(cat, this.objectsLayer);
     const indicator = new ThreatIndicator(this, cat, "???", "wary", false);
     this.npcs.push({ cat, indicator });
+    return cat;
   }
 
   // ──────────── Territory Benefits ────────────

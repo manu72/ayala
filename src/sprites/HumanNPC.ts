@@ -42,6 +42,11 @@ export class HumanNPC extends BaseNPC {
   private readonly scratchVec = new Phaser.Math.Vector2(0, 0);
   private readonly profile: SpriteProfile;
 
+  private greetingActive = false;
+  private greetingTimer = 0;
+  private greetedCats = new WeakSet<object>();
+  private glanceTimer = 0;
+
   constructor(scene: Phaser.Scene, config: HumanConfig) {
     const prof = profileForType(config.type);
     const start = config.path[0]!;
@@ -78,6 +83,61 @@ export class HumanNPC extends BaseNPC {
     // To restore the old green tint: this.setTint(0x88ff88);
   }
 
+  get isGreeting(): boolean {
+    return this.greetingActive;
+  }
+
+  get isCatPerson(): boolean {
+    return (
+      this.humanType === "feeder" ||
+      this.humanType === "camille" ||
+      this.humanType === "manu" ||
+      this.humanType === "kish"
+    );
+  }
+
+  startGreeting(targetX: number, targetY: number): void {
+    this.greetingActive = true;
+    this.setVelocity(0);
+
+    const facingRight = targetX >= this.x;
+    const crouchAnim = `${this.profile.key}-crouch-${facingRight ? "right" : "left"}`;
+    if (this.scene.anims.exists(crouchAnim)) {
+      this.anims.play(crouchAnim, true);
+    } else {
+      const dir = this.directionFromVector(
+        this.scratchVec.set(targetX - this.x, targetY - this.y),
+      );
+      this.anims.play(`${this.profile.key}-walk-${dir}`, true);
+      this.anims.pause();
+    }
+
+    const durationMs =
+      this.humanType === "camille" ? 6000 : this.humanType === "kish" ? 3000 : 4000;
+    this.greetingTimer = durationMs;
+  }
+
+  hasGreeted(target: object): boolean {
+    return this.greetedCats.has(target);
+  }
+
+  markGreeted(target: object): void {
+    this.greetedCats.add(target);
+  }
+
+  resetGreeted(): void {
+    this.greetedCats = new WeakSet<object>();
+  }
+
+  glanceAt(targetX: number, targetY: number): void {
+    if (this.glanceTimer > 0) return;
+    this.glanceTimer = 1500;
+    const dir = this.directionFromVector(
+      this.scratchVec.set(targetX - this.x, targetY - this.y),
+    );
+    this.anims.play(`${this.profile.key}-walk-${dir}`, true);
+  }
+
   setPhase(phase: TimeOfDay): void {
     const shouldBeActive = this.activePhases.has(phase);
     if (shouldBeActive && !this.isActive) {
@@ -91,6 +151,20 @@ export class HumanNPC extends BaseNPC {
     if (!this.isActive) return;
 
     const key = this.profile.key;
+
+    if (this.greetingActive) {
+      this.setVelocity(0);
+      this.greetingTimer -= delta;
+      if (this.greetingTimer <= 0) {
+        this.greetingActive = false;
+        this.anims.play(`${key}-idle`, true);
+      }
+      return;
+    }
+
+    if (this.glanceTimer > 0) {
+      this.glanceTimer -= delta;
+    }
 
     if (this.lingering) {
       this.setVelocity(0);
@@ -124,12 +198,15 @@ export class HumanNPC extends BaseNPC {
       }
       this.advanceWaypoint();
     } else {
+      const speedMod = this.glanceTimer > 0 ? 0.3 : 1;
       this.scratchVec.set(target.x - this.x, target.y - this.y).normalize();
       this.setVelocity(
-        this.scratchVec.x * this.config.speed,
-        this.scratchVec.y * this.config.speed,
+        this.scratchVec.x * this.config.speed * speedMod,
+        this.scratchVec.y * this.config.speed * speedMod,
       );
-      this.playWalkAnim(this.scratchVec);
+      if (this.glanceTimer <= 0) {
+        this.playWalkAnim(this.scratchVec);
+      }
     }
   }
 
