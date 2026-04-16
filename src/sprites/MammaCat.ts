@@ -17,6 +17,7 @@ const MC_SIT_IDLE_W = "mc_sit_idle_w";
 const MC_STAND_IDLE_E = "mc_stand_idle_e";
 const MC_STAND_IDLE_W = "mc_stand_idle_w";
 const MC_SLEEP = "mc_sleep";
+const MC_CATLOAF = "mc_catloaf";
 
 // ── Animation keys ──
 const ANIM_WALK_E = "mc-walk-e";
@@ -58,6 +59,7 @@ const BODY_OFFSET_Y = 18;
 // To revert to old mammacat.png sleep: set REST_SCALE = 1, offsets to (7, 12),
 // reload MC_OLD = "mammacat" and restore the ANIM_REST animation in createAnimations.
 const REST_SCALE = 0.4;
+const CATLOAF_SCALE = 0.4;
 const REST_BODY_OFFSET_X = 15;
 const REST_BODY_OFFSET_Y = 24;
 
@@ -65,7 +67,7 @@ const LABEL_OFFSET_Y = -12;
 
 const CROUCH_WALK_FPS = 4;
 
-export type PlayerState = "normal" | "crouching" | "resting" | "waking";
+export type PlayerState = "normal" | "crouching" | "catloaf" | "resting" | "waking";
 
 export class MammaCat extends Phaser.Physics.Arcade.Sprite {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
@@ -99,6 +101,10 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
 
   get isResting(): boolean {
     return this.playerState === "resting";
+  }
+
+  get isCatloaf(): boolean {
+    return this.playerState === "catloaf";
   }
 
   get isMoving(): boolean {
@@ -186,6 +192,27 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
     this.showStandFrame();
   }
 
+  /** Enter catloaf (alert rest): stationary, shows catloaf sprite, game continues. */
+  enterCatloaf(): void {
+    if (this.playerState === "catloaf" || this.playerState === "resting" || this.playerState === "waking") return;
+    this.playerState = "catloaf";
+    this.crouchLatched = false;
+    this.crouchKeyDownTime = 0;
+    this.crouchHoldActive = false;
+    this.setVelocity(0);
+    this.anims.stop();
+    this.setTexture(MC_CATLOAF);
+    this.setScale(CATLOAF_SCALE);
+  }
+
+  /** Exit catloaf back to normal standing pose. */
+  exitCatloaf(): void {
+    if (this.playerState !== "catloaf") return;
+    this.playerState = "normal";
+    this.showStandFrame();
+    this.setScale(NORMAL_SCALE);
+  }
+
   update(canRun = true, delta = 0): void {
     if (!this.cursors) return;
 
@@ -200,6 +227,12 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
     }
 
     if (this.playerState === "resting") {
+      this.setVelocity(0);
+      this.nameLabel.setPosition(this.x, this.y + LABEL_OFFSET_Y);
+      return;
+    }
+
+    if (this.playerState === "catloaf") {
       this.setVelocity(0);
       this.nameLabel.setPosition(this.x, this.y + LABEL_OFFSET_Y);
       return;
