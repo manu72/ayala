@@ -185,6 +185,12 @@ export class GameScene extends Phaser.Scene {
   }
 
   create(data?: { loadSave?: boolean; newGamePlus?: boolean; snatcherCapture?: boolean }): void {
+    // Phaser 3 auto-calls init/preload/create/update but NOT shutdown; our
+    // cleanup (intro timers/tweens, engaged NPC, dialogue) only runs if we
+    // subscribe to the scene-lifecycle "shutdown" event explicitly. `once` is
+    // correct here because a new create() will re-subscribe on scene restart.
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.shutdown, this);
+
     this.npcs = [];
     this.humans = [];
     this.dogs = [];
@@ -1129,7 +1135,7 @@ export class GameScene extends Phaser.Scene {
     const camilleCircuit: Array<{ x: number; y: number }> = [
       { x: spawnX, y: spawnY },
       { x: px(underpasses, 411), y: py(underpasses, 1083) },
-      { x: px(poi("spawn_ginger"), 750), y: py(poi("spawn_ginger"), 1250) },
+      { x: px(poi("spawn_ginger"), 774), y: py(poi("spawn_ginger"), 1378) },
       { x: px(station1, 1000), y: py(station1, 900) },
       { x: px(poi("spawn_tiger"), 1141), y: py(poi("spawn_tiger"), 632) },
       { x: px(poi("spawn_jayco"), 1427), y: py(poi("spawn_jayco"), 484) },
@@ -1580,9 +1586,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   private spawnGingerTwins(): void {
-    const ginger = this.spawnNPC("Ginger", "fluffy", "spawn_ginger", "wary", 200, 750, 1250);
+    const ginger = this.spawnNPC("Ginger", "fluffy", "spawn_ginger", "wary", 200, 774, 1378);
     ginger.setTint(0xffaa44);
-    const gingerB = this.spawnNPC("Ginger B", "fluffy", "spawn_ginger", "wary", 200, 750, 1250, {
+    const gingerB = this.spawnNPC("Ginger B", "fluffy", "spawn_ginger", "wary", 200, 774, 1378, {
       offsetX: 60,
     });
     gingerB.setTint(0xffaa44);
@@ -1748,7 +1754,7 @@ export class GameScene extends Phaser.Scene {
     const feederCircuit: Array<{ x: number; y: number }> = [
       { x: entryX, y: entryY },
       { x: px(blacky, 411), y: py(blacky, 1083) },
-      { x: px(ginger, 750), y: py(ginger, 1250) },
+      { x: px(ginger, 774), y: py(ginger, 1378) },
       { x: px(station1, 1000), y: py(station1, 900) },
       { x: px(tiger, 1141), y: py(tiger, 632) },
       { x: px(jayco, 1427), y: py(jayco, 484) },
@@ -2134,8 +2140,14 @@ export class GameScene extends Phaser.Scene {
 
       const response = await this.dialogueService.getDialogue(request);
 
-      // Revalidate after async gap: cat may have fled or another dialogue opened.
+      // Revalidate after async gap: cat may have fled or another dialogue opened,
+      // the player may have walked out of range, or line-of-sight may have
+      // been lost (e.g. they slipped behind an obstacle). Failing any of these
+      // checks means engaging would feel teleport-y, so we bail quietly.
       if (this.dialogue.isActive || cat.state === "fleeing" || !cat.active) return;
+      const distToCat = Phaser.Math.Distance.Between(this.player.x, this.player.y, cat.x, cat.y);
+      if (distToCat > DIALOGUE_BREAK_DISTANCE) return;
+      if (!this.hasLineOfSight(this.player.x, this.player.y, cat.x, cat.y)) return;
 
       cat.engageDialogue(this.player.x, this.player.y, response.speakerPose);
       this.player.faceToward(cat.x, cat.y);
@@ -2165,9 +2177,15 @@ export class GameScene extends Phaser.Scene {
     } catch (err) {
       console.error("[GameScene] requestCatDialogue failed:", err);
       cat.disengageDialogue();
-      this.engagedDialogueNPC = null;
-      if (this.dialogue.isActive) {
-        this.dialogue.dismiss();
+      // Only clear engagement + dismiss the dialogue if WE own it. The error may
+      // have fired before engageDialogue (no dialogue to dismiss), or a concurrent
+      // UI path could be showing something unrelated; tearing that down would be
+      // a bug.
+      if (this.engagedDialogueNPC === cat) {
+        this.engagedDialogueNPC = null;
+        if (this.dialogue.isActive) {
+          this.dialogue.dismiss();
+        }
       }
       const hud = this.scene.get("HUDScene") as HUDScene | undefined;
       hud?.showNarration("Words fail. The moment passes.");
@@ -2311,6 +2329,15 @@ export class GameScene extends Phaser.Scene {
       }
 
       this.time.delayedCall(1000, () => {
+        // Gate narration by the same proximity + LOS check used elsewhere for
+        // snatcher sightings (see spawnSnatcher). Without it, the player gets
+        // a "you see the cats run" line for an event they cannot perceive.
+        if (!snatcher.active) return;
+        const near =
+          Phaser.Math.Distance.Between(this.player.x, this.player.y, snatcher.x, snatcher.y) <=
+          GP.SNATCHER_WITNESS_DIST;
+        const los = this.hasLineOfSight(this.player.x, this.player.y, snatcher.x, snatcher.y);
+        if (!near || !los) return;
         const hud = this.scene.get("HUDScene") as HUDScene | undefined;
         hud?.showNarration("Something moves in the dark. The other cats run. You should too.");
       });

@@ -27,10 +27,20 @@ function buildRecord(overrides: Partial<ConversationRecord> = {}): ConversationR
 }
 
 describe('ConversationStore — IndexedDB happy path', () => {
+  // Capture the process-global IDB installed by fake-indexeddb/auto so that
+  // swapping it for a fresh factory per-test does not leak into later
+  // describe() blocks (notably the "silent fallback" suite).
+  const originalIndexedDB = globalThis.indexedDB
+
   beforeEach(async () => {
     // Reset to a fresh in-memory DB between tests to avoid leakage across specs.
     globalThis.indexedDB = new IDBFactory()
     await clearAllConversations()
+  })
+
+  afterEach(async () => {
+    await clearAllConversations()
+    globalThis.indexedDB = originalIndexedDB
   })
 
   it('storeConversation persists a record retrievable via getRecentConversations', async () => {

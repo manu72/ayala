@@ -46,6 +46,11 @@ vi.mock('phaser', () => {
       if (this._sprite) {
         this._sprite.x = x
         this._sprite.y = y
+        // Phaser Arcade body.reset() zeroes velocity/acceleration. Mirror that
+        // so simulatePhysics() (which integrates the sprite's captured _vx/_vy)
+        // does not carry stale motion across a reset.
+        this._sprite._vx = 0
+        this._sprite._vy = 0
       }
     }
   }
@@ -453,11 +458,17 @@ describe('HumanNPC.setPhase — activation / exit transitions', () => {
   it('same active phase twice is idempotent (no re-activation)', () => {
     const { npc } = makeHuman({ type: 'jogger', activePhases: ['day'] })
     npc.setPhase('day')
-    // Force a detectable side-effect: set a sentinel velocity spy then re-call.
-    const setVelocity = vi.spyOn(npc, 'setVelocity')
+    // activate() teleports the NPC to path[0] via body.reset(). Spy on reset
+    // rather than setVelocity (which activate does not call) so we actually
+    // observe re-activation if it were (incorrectly) triggered again.
+    const body = (npc as unknown as { body: { reset: (x: number, y: number) => void } }).body
+    const resetSpy = vi.spyOn(body, 'reset')
+    const xBefore = npc.x
+    const yBefore = npc.y
     npc.setPhase('day')
-    // activate() resets velocity via body.reset only; no velocity call here.
-    expect(setVelocity).not.toHaveBeenCalled()
+    expect(resetSpy).not.toHaveBeenCalled()
+    expect(npc.x).toBe(xBefore)
+    expect(npc.y).toBe(yBefore)
   })
 
   it('starts exiting (not immediate deactivate) when leaving the active phase', () => {

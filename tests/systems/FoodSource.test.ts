@@ -156,16 +156,17 @@ describe('FoodSourceManager.tryInteract — range gating', () => {
 })
 
 describe('FoodSourceManager.tryInteract — activePhases gating', () => {
-  it.each<[SourceType, Parameters<FoodSourceManager['tryInteract']>[3], boolean]>([
-    ['feeding_station', 'dawn', true],
-    ['feeding_station', 'day', false],
-    ['feeding_station', 'evening', true],
-    ['feeding_station', 'night', false],
-    ['restaurant_scraps', 'evening', true],
-    ['restaurant_scraps', 'day', false],
-    ['restaurant_scraps', 'dawn', false],
-    ['restaurant_scraps', 'night', false],
-  ])('%s is %s during phase=%s', (type, phase, expected) => {
+  // Tuple order matches the title placeholders: "<type> is <expected> during phase=<phase>".
+  it.each<[SourceType, boolean, Parameters<FoodSourceManager['tryInteract']>[3]]>([
+    ['feeding_station', true, 'dawn'],
+    ['feeding_station', false, 'day'],
+    ['feeding_station', true, 'evening'],
+    ['feeding_station', false, 'night'],
+    ['restaurant_scraps', true, 'evening'],
+    ['restaurant_scraps', false, 'day'],
+    ['restaurant_scraps', false, 'dawn'],
+    ['restaurant_scraps', false, 'night'],
+  ])('%s is %s during phase=%s', (type, expected, phase) => {
     const { manager, stats } = buildManager([[type, 100, 100]])
     expect(manager.tryInteract(100, 100, stats, phase, 0)).toBe(expected)
   })
@@ -345,16 +346,18 @@ describe('FoodSourceManager — addSource initial availability', () => {
 describe('FoodSourceManager — harness sanity', () => {
   let manager: FoodSourceManager
   let stats: StatsSystem
+  let tweens: TweenConfig[]
 
   beforeEach(() => {
-    ;({ manager, stats } = buildManager([['fountain', 0, 0]]))
+    ;({ manager, stats, tweens } = buildManager([['fountain', 0, 0]]))
   })
 
-  it('starts with a fresh empty tween list', () => {
+  it('starts with a fresh empty tween list and schedules a floating-text tween on interaction', () => {
     stats.thirst = 0
+    expect(tweens).toHaveLength(0)
     manager.tryInteract(0, 0, stats, 'day', 0)
-    // Each successful interaction schedules one floating-text tween.
-    // Validated indirectly here; the scene mock is reset per test via beforeEach.
     expect(stats.thirst).toBe(50)
+    // Each successful interaction schedules exactly one floating-text tween.
+    expect(tweens).toHaveLength(1)
   })
 })

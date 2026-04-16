@@ -224,6 +224,10 @@ SmallDog.png, WhiteDog.png, BrownDog.png — randomly assigned to dog walkers
 
 - When restarting a scene (e.g. after snatcher capture), pass flags through the `data` parameter rather than using `delayedCall`, which won't survive the restart. The pattern is: `this.scene.restart({ loadSave: true, snatcherCapture: true })` and check in `create()`.
 
+### Scene Lifecycle — shutdown is NOT auto-wired
+
+- Phaser 3 auto-invokes `init/preload/create/update` on your Scene subclass, but **not** `shutdown`. `Systems.shutdown()` only emits the `'shutdown'` event. If your Scene's `shutdown()` does cleanup (cancelling intro timers/tweens, disengaging NPCs, dismissing dialogue, removing listeners), register it explicitly in `create()` with `this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.shutdown, this)`. Use `once` (not `on`) so a subsequent `create()` on scene restart re-subscribes cleanly.
+
 ### Phase 4.5 (visual / narrative alignment)
 
 - **Snatcher first-sighting night:** `snatcherSpawnChecked` must not be set before the "resting at shelter" guard — use `resolveSnatcherSpawnAction()` (`src/utils/snatcherSpawnLogic.ts`) so a skipped poll can retry.
