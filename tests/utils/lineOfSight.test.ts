@@ -17,4 +17,26 @@ describe("hasLineOfSightTiles", () => {
   it("returns true for very short segments", () => {
     expect(hasLineOfSightTiles(0, 0, 10, 0, tileSize, () => false)).toBe(true);
   });
+
+  describe("tileSize precondition", () => {
+    const blocked = () => false;
+
+    it("throws RangeError when tileSize is 0 (would hang the raymarch loop)", () => {
+      expect(() => hasLineOfSightTiles(0, 0, 100, 0, 0, blocked)).toThrow(RangeError);
+    });
+
+    it("throws RangeError when tileSize is negative", () => {
+      expect(() => hasLineOfSightTiles(0, 0, 100, 0, -16, blocked)).toThrow(RangeError);
+    });
+
+    it("throws RangeError when tileSize is NaN", () => {
+      expect(() => hasLineOfSightTiles(0, 0, 100, 0, Number.NaN, blocked)).toThrow(RangeError);
+    });
+
+    it("throws RangeError when tileSize is Infinity", () => {
+      expect(() => hasLineOfSightTiles(0, 0, 100, 0, Number.POSITIVE_INFINITY, blocked)).toThrow(
+        RangeError,
+      );
+    });
+  });
 });
