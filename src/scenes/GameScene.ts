@@ -84,6 +84,7 @@ export class GameScene extends Phaser.Scene {
   private manuNPC: HumanNPC | null = null;
   private kishNPC: HumanNPC | null = null;
   private camilleEncounterActive = false;
+  private camilleRollDay = 0;
 
   // Snatcher tracking
   private snatchers: HumanNPC[] = [];
@@ -159,6 +160,7 @@ export class GameScene extends Phaser.Scene {
     this.manuNPC = null;
     this.kishNPC = null;
     this.camilleEncounterActive = false;
+    this.camilleRollDay = 0;
     this.snatchers = [];
     this.snatcherSpawnChecked = false;
     this.colonyCount = 42;
@@ -731,13 +733,30 @@ export class GameScene extends Phaser.Scene {
     const lastDay = (this.registry.get("CAMILLE_ENCOUNTER_DAY") as number) ?? 0;
     if (lastDay >= this.dayNight.dayCount) return;
 
+    // Roll once per evening, not every periodic check
+    if (this.camilleRollDay >= this.dayNight.dayCount) return;
+    this.camilleRollDay = this.dayNight.dayCount;
+
     // 60% chance per eligible evening (100% for first encounter)
     if (currentEncounter > 0 && Math.random() > 0.6) return;
 
     this.startCamilleEncounter(currentEncounter + 1);
   }
 
+  private cleanupCamilleNPCs(): void {
+    for (const npc of [this.camilleNPC, this.manuNPC, this.kishNPC]) {
+      if (!npc) continue;
+      const idx = this.humans.indexOf(npc);
+      if (idx !== -1) this.humans.splice(idx, 1);
+      npc.destroy();
+    }
+    this.camilleNPC = null;
+    this.manuNPC = null;
+    this.kishNPC = null;
+  }
+
   private startCamilleEncounter(encounterNum: number): void {
+    this.cleanupCamilleNPCs();
     this.camilleEncounterActive = true;
     this.registry.set("CAMILLE_ENCOUNTER", encounterNum);
     this.registry.set("CAMILLE_ENCOUNTER_DAY", this.dayNight.dayCount);
@@ -1530,6 +1549,21 @@ export class GameScene extends Phaser.Scene {
    * changes, conversation storage, and auto-saves.
    */
   private processDialogueResponse(cat: NPCCat, catName: string, trustBefore: number, response: DialogueResponse): void {
+    if (response.emote) {
+      this.emotes.show(this, cat, response.emote as EmoteType);
+    }
+
+    // Persist to IndexedDB for Phase 5 AI context
+    storeConversation({
+      speaker: catName,
+      timestamp: this.dayNight.totalGameTimeMs,
+      gameDay: this.dayNight.dayCount,
+      lines: response.lines,
+      trustBefore,
+      trustAfter: this.trust.getCatTrust(catName),
+      chapter: this.chapters.chapter,
+    });
+
     const event = response.event;
     if (!event) return;
 
@@ -1543,7 +1577,6 @@ export class GameScene extends Phaser.Scene {
       this.awardReturnConversation(catName);
     }
 
-    // Cat-specific event handling for registry and disposition changes
     switch (event) {
       case "blacky_first":
         this.registry.set("MET_BLACKY", true);
@@ -1581,24 +1614,9 @@ export class GameScene extends Phaser.Scene {
         break;
     }
 
-    if (response.emote) {
-      this.emotes.show(this, cat, response.emote as EmoteType);
-    }
-
     if (isFirst) {
       this.autoSave();
     }
-
-    // Persist to IndexedDB for Phase 5 AI context
-    storeConversation({
-      speaker: catName,
-      timestamp: this.dayNight.totalGameTimeMs,
-      gameDay: this.dayNight.dayCount,
-      lines: response.lines,
-      trustBefore,
-      trustAfter: this.trust.getCatTrust(catName),
-      chapter: this.chapters.chapter,
-    });
   }
 
   // ──────────── Snatchers (Task 4) ────────────
