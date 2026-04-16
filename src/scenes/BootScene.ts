@@ -60,11 +60,26 @@ export class BootScene extends Phaser.Scene {
       frameHeight: 85,
     });
 
-    // Dog walker human spritesheet: 7 cols x 3 rows of 50x45 frames
+    // Legacy dog walker sheet (7 cols x 3 rows, 50x45) — kept for revert.
+    // To revert: restore DOGWALKER_PROFILE in HumanNPC.ts to use key "dogwalker".
     this.load.spritesheet("dogwalker", "assets/sprites/dogwalker.png", {
       frameWidth: 50,
       frameHeight: 45,
     });
+
+    // Female dog walker directional spritesheets (48x48 frames, single-row strips)
+    const dwSheets: Array<[string, string]> = [
+      ["dw_e", "female_dogwalker_east"],
+      ["dw_w", "female_dowwalker_west"], // filename has typo ("dowwalker")
+      ["dw_n", "female_dogwalker_north"],
+      ["dw_s", "female_dogwalker_south"],
+    ];
+    for (const [key, file] of dwSheets) {
+      this.load.spritesheet(key, `assets/sprites/${file}.png`, {
+        frameWidth: 48,
+        frameHeight: 48,
+      });
+    }
   }
 
   create(): void {

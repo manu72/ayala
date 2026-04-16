@@ -25,6 +25,17 @@ interface SpriteProfile {
   bodyH: number;
   /** Display scale (defaults to 1). */
   scale?: number;
+  /**
+   * Per-direction texture keys for multi-sheet sprites.
+   * When set, each direction loads frames from its own spritesheet
+   * instead of using row offsets within a single sheet.
+   */
+  directionalKeys?: {
+    walkDown: string;
+    walkLeft: string;
+    walkRight: string;
+    walkUp: string;
+  };
   anims: {
     walkDown: { row: number; count: number };
     walkLeft: { row: number; count: number };
@@ -50,20 +61,26 @@ const GUARD_PROFILE: SpriteProfile = {
   },
 };
 
+// To revert to old dogwalker.png: remove directionalKeys, set cols:7,
+// frameW:50, frameH:45, and restore the old row-based anims (rows 0/2).
 const DOGWALKER_PROFILE: SpriteProfile = {
   key: "dogwalker",
-  cols: 7,
-  frameW: 50,
-  frameH: 45,
+  cols: 8,
+  frameW: 48,
+  frameH: 48,
   bodyW: 18,
   bodyH: 16,
-  // `dogwalker.png` provides only side-facing walk rows (0 and 2),
-  // so vertical movement intentionally reuses those frames.
+  directionalKeys: {
+    walkDown: "dw_s",
+    walkLeft: "dw_w",
+    walkRight: "dw_e",
+    walkUp: "dw_n",
+  },
   anims: {
-    walkRight: { row: 0, count: 7 },
-    walkDown: { row: 0, count: 7 },
-    walkLeft: { row: 2, count: 7 },
-    walkUp: { row: 2, count: 7 },
+    walkDown: { row: 0, count: 8 },
+    walkRight: { row: 0, count: 8 },
+    walkLeft: { row: 0, count: 8 },
+    walkUp: { row: 0, count: 8 },
     idle: { row: 0, count: 1 },
   },
 };
@@ -119,7 +136,8 @@ export class HumanNPC extends Phaser.Physics.Arcade.Sprite {
   constructor(scene: Phaser.Scene, config: HumanConfig) {
     const prof = profileForType(config.type);
     const start = config.path[0]!;
-    super(scene, start.x, start.y, prof.key);
+    const textureKey = prof.directionalKeys?.walkDown ?? prof.key;
+    super(scene, start.x, start.y, textureKey);
     this.humanType = config.type;
     this.config = config;
     this.profile = prof;
@@ -266,9 +284,45 @@ export class HumanNPC extends Phaser.Physics.Arcade.Sprite {
   }
 
   private createAnimations(scene: Phaser.Scene): void {
-    const { key, cols, anims: a } = this.profile;
+    const { key, cols, anims: a, directionalKeys: dk } = this.profile;
     if (scene.anims.exists(`${key}-idle`)) return;
 
+    if (dk) {
+      // Multi-sheet: each direction has its own texture (single-row strips)
+      scene.anims.create({
+        key: `${key}-walk-down`,
+        frames: scene.anims.generateFrameNumbers(dk.walkDown, { start: 0, end: a.walkDown.count - 1 }),
+        frameRate: 6,
+        repeat: -1,
+      });
+      scene.anims.create({
+        key: `${key}-walk-left`,
+        frames: scene.anims.generateFrameNumbers(dk.walkLeft, { start: 0, end: a.walkLeft.count - 1 }),
+        frameRate: 6,
+        repeat: -1,
+      });
+      scene.anims.create({
+        key: `${key}-walk-right`,
+        frames: scene.anims.generateFrameNumbers(dk.walkRight, { start: 0, end: a.walkRight.count - 1 }),
+        frameRate: 6,
+        repeat: -1,
+      });
+      scene.anims.create({
+        key: `${key}-walk-up`,
+        frames: scene.anims.generateFrameNumbers(dk.walkUp, { start: 0, end: a.walkUp.count - 1 }),
+        frameRate: 6,
+        repeat: -1,
+      });
+      scene.anims.create({
+        key: `${key}-idle`,
+        frames: scene.anims.generateFrameNumbers(dk.walkDown, { start: 0, end: 0 }),
+        frameRate: 3,
+        repeat: -1,
+      });
+      return;
+    }
+
+    // Single-sheet: row-based frame extraction
     const row = (r: number, count: number) => ({
       start: r * cols,
       end: r * cols + count - 1,
