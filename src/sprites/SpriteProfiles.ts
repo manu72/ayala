@@ -220,8 +220,10 @@ export function profileForType(type: HumanType): SpriteProfile {
       return MANU_PROFILE;
     case "kish":
       return KISH_PROFILE;
-    default:
-      return GUARD_PROFILE;
+    default: {
+      const _exhaustive: never = type;
+      throw new Error(`Unhandled HumanType: ${_exhaustive}`);
+    }
   }
 }
 

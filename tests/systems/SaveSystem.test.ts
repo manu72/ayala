@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest'
-import { isValidSave } from '../../src/systems/SaveSystem'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { isValidSave, SaveSystem } from '../../src/systems/SaveSystem'
 
 function validSaveData(overrides: Record<string, unknown> = {}) {
   return {
@@ -120,5 +120,90 @@ describe('isValidSave', () => {
   it('rejects sourceStates entry with null element', () => {
     const data = validSaveData({ sourceStates: [null] })
     expect(isValidSave(data)).toBe(false)
+  })
+})
+
+describe('SaveSystem.save / load / hasSave / clear', () => {
+  let store: Record<string, string>
+
+  beforeEach(() => {
+    store = {}
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => (key in store ? store[key]! : null),
+      setItem: (key: string, value: string) => {
+        store[key] = value
+      },
+      removeItem: (key: string) => {
+        delete store[key]
+      },
+    })
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  function stubRegistry(data: Record<string, unknown>) {
+    return {
+      get: (key: string) => data[key],
+    } as unknown as Phaser.Data.DataManager
+  }
+
+  it('round-trips core fields and tracked variables', () => {
+    const stats = { hunger: 70, thirst: 65, energy: 80 }
+    const registry = stubRegistry({ CHAPTER: 3, MET_BLACKY: true })
+    const trust = { global: 40, cats: { Blacky: 25 } }
+    const territory = { claimed: true, claimedOnDay: 4 }
+
+    expect(
+      SaveSystem.save(100, 200, stats, 'evening', 500_000, registry, undefined, trust, territory),
+    ).toBe(true)
+
+    const loaded = SaveSystem.load()
+    expect(loaded).not.toBeNull()
+    expect(loaded!.playerPosition).toEqual({ x: 100, y: 200 })
+    expect(loaded!.stats).toEqual(stats)
+    expect(loaded!.timeOfDay).toBe('evening')
+    expect(loaded!.gameTimeMs).toBe(500_000)
+    expect(loaded!.variables.CHAPTER).toBe(3)
+    expect(loaded!.variables.MET_BLACKY).toBe(true)
+    expect(loaded!.trust).toEqual(trust)
+    expect(loaded!.territory).toEqual(territory)
+  })
+
+  it('hasSave is false before save and true after', () => {
+    expect(SaveSystem.hasSave()).toBe(false)
+    SaveSystem.save(0, 0, { hunger: 1, thirst: 1, energy: 1 }, 'dawn', 0, stubRegistry({}))
+    expect(SaveSystem.hasSave()).toBe(true)
+  })
+
+  it('clear removes persisted data', () => {
+    SaveSystem.save(1, 2, { hunger: 50, thirst: 50, energy: 50 }, 'day', 1, stubRegistry({}))
+    expect(SaveSystem.hasSave()).toBe(true)
+    SaveSystem.clear()
+    expect(SaveSystem.hasSave()).toBe(false)
+    expect(SaveSystem.load()).toBeNull()
+  })
+
+  it('load returns null for invalid JSON', () => {
+    store['ayala_save'] = '{ not json'
+    expect(SaveSystem.load()).toBeNull()
+  })
+
+  it('load returns null when validation fails', () => {
+    store['ayala_save'] = JSON.stringify({ version: 1, incomplete: true })
+    expect(SaveSystem.load()).toBeNull()
+  })
+
+  it('save returns false when setItem throws', () => {
+    vi.stubGlobal('localStorage', {
+      getItem: () => null,
+      setItem: () => {
+        throw new Error('quota')
+      },
+      removeItem: vi.fn(),
+    })
+    const ok = SaveSystem.save(0, 0, { hunger: 1, thirst: 1, energy: 1 }, 'dawn', 0, stubRegistry({}))
+    expect(ok).toBe(false)
   })
 })

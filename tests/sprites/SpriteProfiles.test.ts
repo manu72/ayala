@@ -20,7 +20,7 @@ vi.mock('phaser', () => ({
 }))
 
 // Now safe to import after mock
-const { profileForType, GUARD_PROFILE } = await import('../../src/sprites/SpriteProfiles')
+const { profileForType } = await import('../../src/sprites/SpriteProfiles')
 
 describe('profileForType', () => {
   const expectedKeys: Record<string, string> = {
@@ -39,10 +39,10 @@ describe('profileForType', () => {
     })
   }
 
-  it('returns GUARD_PROFILE as default for unknown type', () => {
-    const profile = profileForType('unknown' as Parameters<typeof profileForType>[0])
-    expect(profile).toBe(GUARD_PROFILE)
-    expect(profile.key).toBe('guard')
+  it('throws for unhandled HumanType (exhaustive switch)', () => {
+    expect(() =>
+      profileForType('unknown' as Parameters<typeof profileForType>[0]),
+    ).toThrow(/Unhandled HumanType: unknown/)
   })
 
   it('all profiles have required shape fields', () => {
