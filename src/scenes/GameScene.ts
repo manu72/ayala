@@ -23,10 +23,7 @@ import {
   type DialogueResponse,
   type ConversationEntry,
 } from "../services/DialogueService";
-import {
-  storeConversation,
-  getRecentConversations,
-} from "../services/ConversationStore";
+import { storeConversation, getRecentConversations } from "../services/ConversationStore";
 import { CAT_DIALOGUE_SCRIPTS, getRandomColonyLine } from "../data/cat-dialogue";
 
 const INTERACTION_DISTANCE = 50;
@@ -215,13 +212,14 @@ export class GameScene extends Phaser.Scene {
         if (typeof save.variables.COLONY_COUNT === "number") {
           this.colonyCount = save.variables.COLONY_COUNT as number;
         }
-        if (this.territory.isClaimed) {
-          this.player.setHasTerritory(true);
-        }
       }
     }
 
     this.player = new MammaCat(this, spawnX, spawnY);
+
+    if (this.territory.isClaimed) {
+      this.player.setHasTerritory(true);
+    }
 
     if (this.groundLayer) {
       this.physics.add.collider(this.player, this.groundLayer);
@@ -310,10 +308,7 @@ export class GameScene extends Phaser.Scene {
       this.territory.claim(1);
 
       // Reveal and befriend all named cats
-      for (const name of [
-        "Blacky", "Tiger", "Jayco", "Jayco Jr",
-        "Fluffy", "Pedigree", "Ginger", "Ginger B",
-      ]) {
+      for (const name of ["Blacky", "Tiger", "Jayco", "Jayco Jr", "Fluffy", "Pedigree", "Ginger", "Ginger B"]) {
         this.addKnownCat(name);
         this.trust.firstConversation(name);
         this.trust.returnConversation(name);
@@ -662,21 +657,14 @@ export class GameScene extends Phaser.Scene {
     if (jaycoTrust >= 50 || this.trust.global >= 80) {
       this.time.delayedCall(3000, () => {
         if (this.dialogue.isActive) return;
-        this.dialogue.show(
-          [
-            '"You want to stay? ...There\'s room. The steps are wide enough for all of us."',
-          ],
-          () => {
-            this.claimTerritory();
-          },
-        );
+        this.dialogue.show(['"You want to stay? ...There\'s room. The steps are wide enough for all of us."'], () => {
+          this.claimTerritory();
+        });
       });
     } else {
       this.time.delayedCall(3000, () => {
         if (this.dialogue.isActive) return;
-        hud?.showNarration(
-          "Jayco watches you from the steps. You haven't earned his trust yet.",
-        );
+        hud?.showNarration("Jayco watches you from the steps. You haven't earned his trust yet.");
       });
     }
   }
@@ -689,8 +677,7 @@ export class GameScene extends Phaser.Scene {
     if (this.chapters.chapter !== 4) return;
     if (this.territory.isClaimed) return;
     if (this.dialogue.isActive) return;
-    if (!this.isInTerritory(this.player.x, this.player.y) &&
-        !(this.player.x > 2100 && this.player.y < 700)) return;
+    if (!this.isInTerritory(this.player.x, this.player.y) && !(this.player.x > 2100 && this.player.y < 700)) return;
 
     const jaycoTrust = this.trust.getCatTrust("Jayco");
     if (jaycoTrust >= 50 || this.trust.global >= 80) {
@@ -705,15 +692,10 @@ export class GameScene extends Phaser.Scene {
     this.player.setHasTerritory(true);
 
     const hud = this.scene.get("HUDScene") as HUDScene | undefined;
-    this.dialogue.show(
-      [
-        "For the first time since the car door slammed, you have a place. Your place.",
-      ],
-      () => {
-        hud?.showNarration("Territory established: The Shops pyramid steps");
-        this.autoSave();
-      },
-    );
+    this.dialogue.show(["For the first time since the car door slammed, you have a place. Your place."], () => {
+      hud?.showNarration("Territory established: The Shops pyramid steps");
+      this.autoSave();
+    });
   }
 
   /**
@@ -1199,11 +1181,11 @@ export class GameScene extends Phaser.Scene {
 
     // Scatter across distinct zones matching the new ATG map layout
     const zones = [
-      { cx: 1400, cy: 800, radius: 250 },   // Central Gardens north
-      { cx: 1600, cy: 1100, radius: 300 },   // Central Gardens south
-      { cx: 900, cy: 1000, radius: 200 },    // Western gardens / fountain area
-      { cx: 2200, cy: 600, radius: 200 },    // Eastern gardens near Shops
-      { cx: 2400, cy: 1500, radius: 200 },   // Southeast / Blackbird approach
+      { cx: 1400, cy: 800, radius: 250 }, // Central Gardens north
+      { cx: 1600, cy: 1100, radius: 300 }, // Central Gardens south
+      { cx: 900, cy: 1000, radius: 200 }, // Western gardens / fountain area
+      { cx: 2200, cy: 600, radius: 200 }, // Eastern gardens near Shops
+      { cx: 2400, cy: 1500, radius: 200 }, // Southeast / Blackbird approach
     ];
 
     const count = 12;
@@ -1543,12 +1525,7 @@ export class GameScene extends Phaser.Scene {
    * trust awards, registry updates, indicator reveals, disposition
    * changes, conversation storage, and auto-saves.
    */
-  private processDialogueResponse(
-    cat: NPCCat,
-    catName: string,
-    trustBefore: number,
-    response: DialogueResponse,
-  ): void {
+  private processDialogueResponse(cat: NPCCat, catName: string, trustBefore: number, response: DialogueResponse): void {
     const event = response.event;
     if (!event) return;
 
@@ -1660,9 +1637,10 @@ export class GameScene extends Phaser.Scene {
     ];
     const path = patrolPaths[index % patrolPaths.length]!;
 
+    // Snatcher patrol speed must be slow and stealthy
     const config: HumanConfig = {
       type: "jogger",
-      speed: 40,
+      speed: 20,
       activePhases: ["night"],
       path,
     };
@@ -1697,12 +1675,7 @@ export class GameScene extends Phaser.Scene {
 
     for (const snatcher of this.snatchers) {
       if (!snatcher.visible) continue;
-      const dist = Phaser.Math.Distance.Between(
-        this.player.x,
-        this.player.y,
-        snatcher.x,
-        snatcher.y,
-      );
+      const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, snatcher.x, snatcher.y);
 
       // Detection radius: 128px normal, 32px if crouching near cover
       let detectionRadius = 128;
@@ -1722,11 +1695,8 @@ export class GameScene extends Phaser.Scene {
       if (dist < detectionRadius) {
         // Snatcher detected the player — move toward them
         const angle = Phaser.Math.Angle.Between(snatcher.x, snatcher.y, this.player.x, this.player.y);
-        const chaseSpeed = 60;
-        snatcher.setVelocity(
-          Math.cos(angle) * chaseSpeed,
-          Math.sin(angle) * chaseSpeed,
-        );
+        const chaseSpeed = 35;
+        snatcher.setVelocity(Math.cos(angle) * chaseSpeed, Math.sin(angle) * chaseSpeed);
 
         if (dist < 16) {
           this.handleSnatcherCapture();
@@ -1739,21 +1709,15 @@ export class GameScene extends Phaser.Scene {
   private handleSnatcherCapture(): void {
     this.cameras.main.fade(100, 0, 0, 0, false, (_cam: Phaser.Cameras.Scene2D.Camera, progress: number) => {
       if (progress >= 1) {
-        this.dialogue.show(
-          [
-            "Hands. Darkness. You can't move. You can't breathe.",
-            "...",
-          ],
-          () => {
-            const hasSave = SaveSystem.load() !== null;
-            if (hasSave) {
-              this.cameras.main.resetFX();
-              this.scene.restart({ loadSave: true, snatcherCapture: true });
-            } else {
-              this.cameras.main.resetFX();
-            }
-          },
-        );
+        this.dialogue.show(["Hands. Darkness. You can't move. You can't breathe.", "..."], () => {
+          const hasSave = SaveSystem.load() !== null;
+          if (hasSave) {
+            this.cameras.main.resetFX();
+            this.scene.restart({ loadSave: true, snatcherCapture: true });
+          } else {
+            this.cameras.main.resetFX();
+          }
+        });
       }
     });
   }
@@ -1794,18 +1758,12 @@ export class GameScene extends Phaser.Scene {
 
     switch (eventNum) {
       case 1:
-        this.dialogue.show(
-          [
-            "A car. A door. A cat.",
-            "You remember.",
-          ],
-          () => {
-            this.colonyCount++;
-            this.registry.set("COLONY_COUNT", this.colonyCount);
-            hud?.showNarration("A new cat has appeared in the gardens.");
-            this.addBackgroundCat();
-          },
-        );
+        this.dialogue.show(["A car. A door. A cat.", "You remember."], () => {
+          this.colonyCount++;
+          this.registry.set("COLONY_COUNT", this.colonyCount);
+          hud?.showNarration("A new cat has appeared in the gardens.");
+          this.addBackgroundCat();
+        });
         break;
 
       case 2:
@@ -1824,16 +1782,11 @@ export class GameScene extends Phaser.Scene {
         break;
 
       case 3:
-        this.dialogue.show(
-          [
-            "Another one. How many of us started this way?",
-          ],
-          () => {
-            this.colonyCount++;
-            this.registry.set("COLONY_COUNT", this.colonyCount);
-            this.addBackgroundCat();
-          },
-        );
+        this.dialogue.show(["Another one. How many of us started this way?"], () => {
+          this.colonyCount++;
+          this.registry.set("COLONY_COUNT", this.colonyCount);
+          this.addBackgroundCat();
+        });
         break;
     }
   }

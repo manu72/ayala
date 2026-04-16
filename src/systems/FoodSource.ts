@@ -222,7 +222,7 @@ export class FoodSourceManager {
     }));
   }
 
-  /** Rebuild sources from saved state (positions + cooldown timestamps). */
+  /** Rebuild sources from saved state (positions only; cooldowns reset to available). */
   restoreFromStates(states: Array<{ type: SourceType; x: number; y: number; lastUsedAt: number }>): void {
     for (const s of this.sources) {
       s.marker.destroy();
@@ -232,10 +232,6 @@ export class FoodSourceManager {
 
     for (const state of states) {
       this.addSource(state.type, state.x, state.y);
-      const src = this.sources[this.sources.length - 1];
-      if (src) {
-        src.lastUsedAt = Number.isFinite(state.lastUsedAt) ? state.lastUsedAt : -DEFS[state.type].cooldownMs;
-      }
     }
   }
 }
