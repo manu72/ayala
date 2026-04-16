@@ -29,7 +29,7 @@ import { CAT_DIALOGUE_SCRIPTS, getRandomColonyLine } from "../data/cat-dialogue"
 const INTERACTION_DISTANCE = 50;
 const LEARN_NAME_DISTANCE = 100;
 const TILE_SIZE = 32;
-const DEFAULT_ZOOM = 2.5;
+const DEFAULT_ZOOM = 2.0; // changed from 2.5 16 Apr for testing only
 const PEEK_ZOOM = 0.8;
 const ZOOM_DURATION = 500;
 

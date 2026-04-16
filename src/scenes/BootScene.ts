@@ -20,6 +20,25 @@ export class BootScene extends Phaser.Scene {
       });
     }
 
+    // MammaCat dedicated spritesheets (48x48 frames, single-row strips)
+    const mcSheets: Array<[string, string]> = [
+      ["mc_stand8", "mammacat_stand_8directions"],
+      ["mc_walk_e", "mammacat_walk_east"],
+      ["mc_walk_w", "mammacat_walk_west"],
+      ["mc_run_e", "mammacat_run_east"],
+      ["mc_run_w", "mammacat_run_west"],
+      ["mc_sit_idle_e", "mammacat_seated_idle_east"],
+      ["mc_sit_idle_w", "mammacat_seated_idle_west"],
+      ["mc_stand_idle_e", "mammacat_standing_idle_east"],
+      ["mc_stand_idle_w", "mammacat_standing_idle_west"],
+    ];
+    for (const [key, file] of mcSheets) {
+      this.load.spritesheet(key, `assets/sprites/${file}.png`, {
+        frameWidth: 48,
+        frameHeight: 48,
+      });
+    }
+
     // Guard spritesheet: 8 cols x 7 rows of 64x64 frames
     this.load.spritesheet("guard", "assets/sprites/guard.png", {
       frameWidth: 64,

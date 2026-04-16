@@ -6,8 +6,59 @@ const CROUCH_SPEED = 48;
 const WAKE_DELAY_MS = 500;
 const CROUCH_TAP_THRESHOLD_MS = 180;
 
-const SPRITE_KEY = "mammacat";
-const COLS = 8;
+// ── Asset keys (match BootScene loaders) ──
+const MC_STAND8 = "mc_stand8";
+const MC_WALK_E = "mc_walk_e";
+const MC_WALK_W = "mc_walk_w";
+const MC_RUN_E = "mc_run_e";
+const MC_RUN_W = "mc_run_w";
+const MC_SIT_IDLE_E = "mc_sit_idle_e";
+const MC_SIT_IDLE_W = "mc_sit_idle_w";
+const MC_STAND_IDLE_E = "mc_stand_idle_e";
+const MC_STAND_IDLE_W = "mc_stand_idle_w";
+const MC_OLD = "mammacat";
+
+// ── Animation keys ──
+const ANIM_WALK_E = "mc-walk-e";
+const ANIM_WALK_W = "mc-walk-w";
+const ANIM_RUN_E = "mc-run-e";
+const ANIM_RUN_W = "mc-run-w";
+const ANIM_SIT_IDLE_E = "mc-sit-idle-e";
+const ANIM_SIT_IDLE_W = "mc-sit-idle-w";
+const ANIM_STAND_IDLE_E = "mc-stand-idle-e";
+const ANIM_STAND_IDLE_W = "mc-stand-idle-w";
+const ANIM_REST = "mc-rest";
+
+// ── 8-direction stand frame indices (S, SW, W, NW, N, NE, E, SE) ──
+type Direction8 = "s" | "sw" | "w" | "nw" | "n" | "ne" | "e" | "se";
+type Horizontal = "e" | "w";
+
+const STAND_FRAME: Record<Direction8, number> = {
+  s: 0,
+  sw: 1,
+  w: 2,
+  nw: 3,
+  n: 4,
+  ne: 5,
+  e: 6,
+  se: 7,
+};
+
+// ── Physics body for 48x48 frames ──
+const BODY_W = 18;
+const BODY_H = 18;
+const BODY_OFFSET_X = 15;
+const BODY_OFFSET_Y = 26;
+
+// Offset when using old 32x32 rest frames at 1.5× scale,
+// calculated to keep the body world-position identical.
+const REST_SCALE = 1.5;
+const REST_BODY_OFFSET_X = 10;
+const REST_BODY_OFFSET_Y = 17;
+
+const LABEL_OFFSET_Y = -26;
+
+const CROUCH_WALK_FPS = 4;
 
 export type PlayerState = "normal" | "crouching" | "resting" | "waking";
 
@@ -26,7 +77,10 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
   speedMultiplier = 1.0;
   isRunning = false;
   playerState: PlayerState = "normal";
-  private lastDirection: "down" | "left" | "right" | "up" = "down";
+
+  private lastDir8: Direction8 = "s";
+  private lastHorizontal: Horizontal = "e";
+
   private crouchLatched = false;
   private crouchKeyDownTime = 0;
   private crouchHoldActive = false;
@@ -47,7 +101,7 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
   }
 
   constructor(scene: Phaser.Scene, x: number, y: number) {
-    super(scene, x, y, SPRITE_KEY);
+    super(scene, x, y, MC_STAND8, STAND_FRAME.s);
 
     scene.add.existing(this);
     scene.physics.add.existing(this);
@@ -56,8 +110,8 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
     this.setDepth(3);
 
     const body = this.body as Phaser.Physics.Arcade.Body;
-    body.setSize(18, 18);
-    body.setOffset(7, 12);
+    body.setSize(BODY_W, BODY_H);
+    body.setOffset(BODY_OFFSET_X, BODY_OFFSET_Y);
 
     this.createAnimations(scene);
 
@@ -76,7 +130,7 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
     }
 
     this.nameLabel = scene.add
-      .text(x, y - 12, "Mamma Cat", {
+      .text(x, y + LABEL_OFFSET_Y, "Mamma Cat", {
         fontFamily: "Arial, Helvetica, sans-serif",
         fontSize: "10px",
         color: "#ffffff",
@@ -100,7 +154,13 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
     this.crouchKeyDownTime = 0;
     this.crouchHoldActive = false;
     this.setVelocity(0);
-    this.anims.play(`${SPRITE_KEY}-rest`, true);
+
+    // Old 32x32 rest frames scaled up to match 48x48 display size
+    this.setScale(REST_SCALE);
+    const body = this.body as Phaser.Physics.Arcade.Body;
+    body.setOffset(REST_BODY_OFFSET_X, REST_BODY_OFFSET_Y);
+
+    this.anims.play(ANIM_REST, true);
     this.setAlpha(0.8);
   }
 
@@ -109,28 +169,31 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
     if (this.playerState !== "resting") return;
     this.playerState = "waking";
     this.wakeTimer = WAKE_DELAY_MS;
+
+    this.setScale(1);
+    const body = this.body as Phaser.Physics.Arcade.Body;
+    body.setOffset(BODY_OFFSET_X, BODY_OFFSET_Y);
+
     this.setAlpha(1);
-    this.anims.play(`${SPRITE_KEY}-sit-${this.lastDirection}`, true);
+    this.showStandFrame();
   }
 
   update(canRun = true, delta = 0): void {
     if (!this.cursors) return;
 
-    // Waking delay — cannot move for a brief moment
     if (this.playerState === "waking") {
       this.setVelocity(0);
       this.wakeTimer -= delta;
       if (this.wakeTimer <= 0) {
         this.playerState = "normal";
       }
-      this.nameLabel.setPosition(this.x, this.y - 12);
+      this.nameLabel.setPosition(this.x, this.y + LABEL_OFFSET_Y);
       return;
     }
 
-    // Resting — no movement, handled by GameScene
     if (this.playerState === "resting") {
       this.setVelocity(0);
-      this.nameLabel.setPosition(this.x, this.y - 12);
+      this.nameLabel.setPosition(this.x, this.y + LABEL_OFFSET_Y);
       return;
     }
 
@@ -144,7 +207,6 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
     const shift = this.shiftKey?.isDown ?? false;
     const crouch = this.crouchKey?.isDown ?? false;
 
-    // Tap C toggles crouch latch. Holding C past threshold acts as temporary crouch.
     if (crouch && this.crouchKeyDownTime > 0) {
       const heldMs = this.scene.time.now - this.crouchKeyDownTime;
       this.crouchHoldActive = heldMs >= CROUCH_TAP_THRESHOLD_MS;
@@ -152,9 +214,7 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
       this.crouchHoldActive = false;
     }
 
-    // Crouch/hide uses the dedicated C key.
     const wantsCrouch = this.crouchLatched || this.crouchHoldActive;
-    // Run: Shift + any direction (but not crouching)
     const wantsRun = shift && !wantsCrouch && canRun;
 
     if (wantsCrouch) {
@@ -195,34 +255,90 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
 
     this.isRunning = wantsRun && (movingX || movingY);
 
+    // ── Direction tracking ──
     if (movingX || movingY) {
-      if (left) this.lastDirection = "left";
-      else if (right) this.lastDirection = "right";
-      else if (up) this.lastDirection = "up";
-      else if (down) this.lastDirection = "down";
+      this.updateDirection8(left, right, up, down);
+    }
+
+    // ── Animation selection ──
+    if (movingX || movingY) {
+      const facingEast = this.isFacingEast();
 
       if (this.isRunning) {
-        this.anims.play(`${SPRITE_KEY}-run`, true);
+        this.anims.play(facingEast ? ANIM_RUN_E : ANIM_RUN_W, true);
       } else {
-        const walkAnim = `${SPRITE_KEY}-walk`;
-        if (this.scene.anims.exists(walkAnim)) {
-          this.anims.play(walkAnim, true);
-          if (this.anims.currentAnim?.key === walkAnim) {
-            const frameRate = wantsCrouch ? 4 : 8;
-            this.anims.msPerFrame = 1000 / frameRate;
-          } else {
-            this.anims.play(`${SPRITE_KEY}-sit-${this.lastDirection}`, true);
-          }
-        } else {
-          this.anims.play(`${SPRITE_KEY}-sit-${this.lastDirection}`, true);
+        const walkAnim = facingEast ? ANIM_WALK_E : ANIM_WALK_W;
+        this.anims.play(walkAnim, true);
+        if (wantsCrouch) {
+          this.anims.msPerFrame = 1000 / CROUCH_WALK_FPS;
         }
       }
     } else {
-      this.anims.play(`${SPRITE_KEY}-sit-${this.lastDirection}`, true);
+      this.playIdleAnimation(wantsCrouch);
     }
 
-    this.nameLabel.setPosition(this.x, this.y - 12);
+    this.nameLabel.setPosition(this.x, this.y + LABEL_OFFSET_Y);
   }
+
+  // ──────────── Direction helpers ────────────
+
+  private updateDirection8(left: boolean, right: boolean, up: boolean, down: boolean): void {
+    if (left && down) this.lastDir8 = "sw";
+    else if (left && up) this.lastDir8 = "nw";
+    else if (right && down) this.lastDir8 = "se";
+    else if (right && up) this.lastDir8 = "ne";
+    else if (left) this.lastDir8 = "w";
+    else if (right) this.lastDir8 = "e";
+    else if (up) this.lastDir8 = "n";
+    else if (down) this.lastDir8 = "s";
+
+    if (left) this.lastHorizontal = "w";
+    else if (right) this.lastHorizontal = "e";
+  }
+
+  /** True when the player's facing direction has an eastward component. */
+  private isFacingEast(): boolean {
+    switch (this.lastDir8) {
+      case "e":
+      case "ne":
+      case "se":
+        return true;
+      case "w":
+      case "nw":
+      case "sw":
+        return false;
+      case "n":
+      case "s":
+        return this.lastHorizontal === "e";
+    }
+  }
+
+  // ──────────── Idle animations ────────────
+
+  private playIdleAnimation(crouching: boolean): void {
+    if (crouching) {
+      const anim = this.isFacingEast() ? ANIM_SIT_IDLE_E : ANIM_SIT_IDLE_W;
+      this.anims.play(anim, true);
+      return;
+    }
+
+    // Pure north/south have no animated idle — show static stand frame
+    if (this.lastDir8 === "n" || this.lastDir8 === "s") {
+      this.showStandFrame();
+      return;
+    }
+
+    const anim = this.isFacingEast() ? ANIM_STAND_IDLE_E : ANIM_STAND_IDLE_W;
+    this.anims.play(anim, true);
+  }
+
+  /** Display a single static frame from the 8-direction stand sheet. */
+  private showStandFrame(): void {
+    this.anims.stop();
+    this.setTexture(MC_STAND8, STAND_FRAME[this.lastDir8]);
+  }
+
+  // ──────────── Input helpers ────────────
 
   /** True if any directional key (arrows or WASD) is pressed. */
   private anyDirectionDown(): boolean {
@@ -253,57 +369,75 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
     this.crouchHoldActive = false;
   }
 
+  // ──────────── Animation registration ────────────
+
   private createAnimations(scene: Phaser.Scene): void {
-    if (scene.anims.exists(`${SPRITE_KEY}-sit-down`)) return;
+    if (scene.anims.exists(ANIM_WALK_E)) return;
 
-    const row = (r: number, count = 4) => {
-      const start = r * COLS;
-      return { start, end: start + count - 1 };
-    };
-
-    // Rows 0-3: directional sitting (stationary/idle)
+    // Walk (4 frames each)
     scene.anims.create({
-      key: `${SPRITE_KEY}-sit-down`,
-      frames: scene.anims.generateFrameNumbers(SPRITE_KEY, row(0)),
-      frameRate: 4,
-      repeat: -1,
-    });
-    scene.anims.create({
-      key: `${SPRITE_KEY}-sit-left`,
-      frames: scene.anims.generateFrameNumbers(SPRITE_KEY, row(1)),
-      frameRate: 4,
-      repeat: -1,
-    });
-    scene.anims.create({
-      key: `${SPRITE_KEY}-sit-right`,
-      frames: scene.anims.generateFrameNumbers(SPRITE_KEY, row(2)),
-      frameRate: 4,
-      repeat: -1,
-    });
-    scene.anims.create({
-      key: `${SPRITE_KEY}-sit-up`,
-      frames: scene.anims.generateFrameNumbers(SPRITE_KEY, row(3)),
-      frameRate: 4,
-      repeat: -1,
-    });
-    // Row 5 (index 4): walking
-    scene.anims.create({
-      key: `${SPRITE_KEY}-walk`,
-      frames: scene.anims.generateFrameNumbers(SPRITE_KEY, row(4, 8)),
+      key: ANIM_WALK_E,
+      frames: scene.anims.generateFrameNumbers(MC_WALK_E, { start: 0, end: 3 }),
       frameRate: 8,
       repeat: -1,
     });
-    // Row 6 (index 5): running
     scene.anims.create({
-      key: `${SPRITE_KEY}-run`,
-      frames: scene.anims.generateFrameNumbers(SPRITE_KEY, row(5, 8)),
+      key: ANIM_WALK_W,
+      frames: scene.anims.generateFrameNumbers(MC_WALK_W, { start: 0, end: 3 }),
+      frameRate: 8,
+      repeat: -1,
+    });
+
+    // Run (8 frames each)
+    scene.anims.create({
+      key: ANIM_RUN_E,
+      frames: scene.anims.generateFrameNumbers(MC_RUN_E, { start: 0, end: 7 }),
       frameRate: 12,
       repeat: -1,
     });
-    // Row 7 (index 6): resting
     scene.anims.create({
-      key: `${SPRITE_KEY}-rest`,
-      frames: scene.anims.generateFrameNumbers(SPRITE_KEY, row(6, 4)),
+      key: ANIM_RUN_W,
+      frames: scene.anims.generateFrameNumbers(MC_RUN_W, { start: 0, end: 7 }),
+      frameRate: 12,
+      repeat: -1,
+    });
+
+    // Standing idle (8 frames each)
+    scene.anims.create({
+      key: ANIM_STAND_IDLE_E,
+      frames: scene.anims.generateFrameNumbers(MC_STAND_IDLE_E, { start: 0, end: 7 }),
+      frameRate: 6,
+      repeat: -1,
+    });
+    scene.anims.create({
+      key: ANIM_STAND_IDLE_W,
+      frames: scene.anims.generateFrameNumbers(MC_STAND_IDLE_W, { start: 0, end: 7 }),
+      frameRate: 6,
+      repeat: -1,
+    });
+
+    // Seated idle (10 frames each)
+    scene.anims.create({
+      key: ANIM_SIT_IDLE_E,
+      frames: scene.anims.generateFrameNumbers(MC_SIT_IDLE_E, { start: 0, end: 9 }),
+      frameRate: 4,
+      repeat: -1,
+    });
+    scene.anims.create({
+      key: ANIM_SIT_IDLE_W,
+      frames: scene.anims.generateFrameNumbers(MC_SIT_IDLE_W, { start: 0, end: 9 }),
+      frameRate: 4,
+      repeat: -1,
+    });
+
+    // Rest/sleep — old 32x32 sheet, row 6 (frames 48-51)
+    const OLD_COLS = 8;
+    scene.anims.create({
+      key: ANIM_REST,
+      frames: scene.anims.generateFrameNumbers(MC_OLD, {
+        start: 6 * OLD_COLS,
+        end: 6 * OLD_COLS + 3,
+      }),
       frameRate: 2,
       repeat: -1,
     });
