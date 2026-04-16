@@ -27,7 +27,7 @@ const TRACKED_KEYS = [
   'VISITED_ZONE_6', 'TERRITORY_CLAIMED', 'TERRITORY_DAY',
   'CAMILLE_ENCOUNTER', 'CAMILLE_ENCOUNTER_DAY', 'ENCOUNTER_5_COMPLETE',
   'COLONY_COUNT', 'DUMPING_EVENTS_SEEN', 'CATS_SNATCHED',
-  'GAME_COMPLETED', 'NEW_GAME_PLUS',
+  'GAME_COMPLETED', 'NEW_GAME_PLUS', 'INTRO_SEEN', 'FIRST_SNATCHER_SEEN',
 ] as const
 
 const VALID_PHASES: ReadonlySet<string> = new Set(['dawn', 'day', 'evening', 'night'])
@@ -44,14 +44,16 @@ export function isValidSave(data: unknown): data is SaveData {
   if (typeof data !== 'object' || data === null) return false
   const d = data as Record<string, unknown>
   if (typeof d.version !== 'number' || d.version > CURRENT_VERSION) return false
-  if (typeof d.gameTimeMs !== 'number') return false
+  if (typeof d.gameTimeMs !== 'number' || !Number.isFinite(d.gameTimeMs)) return false
   if (typeof d.timeOfDay !== 'string' || !VALID_PHASES.has(d.timeOfDay)) return false
 
   const pos = d.playerPosition as Record<string, unknown> | undefined
   if (!pos || typeof pos.x !== 'number' || typeof pos.y !== 'number') return false
+  if (!Number.isFinite(pos.x) || !Number.isFinite(pos.y)) return false
 
   const stats = d.stats as Record<string, unknown> | undefined
   if (!stats || typeof stats.hunger !== 'number' || typeof stats.thirst !== 'number' || typeof stats.energy !== 'number') return false
+  if (!Number.isFinite(stats.hunger) || !Number.isFinite(stats.thirst) || !Number.isFinite(stats.energy)) return false
 
   const sourceStates = d.sourceStates as unknown
   if (sourceStates !== undefined) {
@@ -61,6 +63,7 @@ export function isValidSave(data: unknown): data is SaveData {
       const s = entry as Record<string, unknown>
       if (typeof s.type !== 'string' || !VALID_SOURCE_TYPES.has(s.type)) return false
       if (typeof s.x !== 'number' || typeof s.y !== 'number' || typeof s.lastUsedAt !== 'number') return false
+      if (!Number.isFinite(s.x) || !Number.isFinite(s.y) || !Number.isFinite(s.lastUsedAt)) return false
     }
   }
 

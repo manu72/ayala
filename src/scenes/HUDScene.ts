@@ -47,6 +47,11 @@ export class HUDScene extends Phaser.Scene {
   private narrationText!: Phaser.GameObjects.Text;
   private narrationTween: Phaser.Tweens.Tween | null = null;
 
+  private chapterTitleCard!: Phaser.GameObjects.Text;
+  private pauseChapterTitle!: Phaser.GameObjects.Text;
+  private pauseChapterHint!: Phaser.GameObjects.Text;
+  private edgePulseGraphics!: Phaser.GameObjects.Graphics;
+
   constructor() {
     super({ key: "HUDScene" });
   }
@@ -161,6 +166,24 @@ export class HUDScene extends Phaser.Scene {
       .setAlpha(0)
       .setDepth(90);
 
+    // ──── Chapter title card ────
+    this.chapterTitleCard = this.add
+      .text(width / 2, height * 0.3, "", {
+        fontFamily: FONT_FAMILY,
+        fontSize: "22px",
+        fontStyle: "italic",
+        color: "#f0e8d0",
+        stroke: "#000000",
+        strokeThickness: 4,
+        align: "center",
+      })
+      .setOrigin(0.5)
+      .setAlpha(0)
+      .setDepth(95);
+
+    // ──── Screen edge pulse overlay ────
+    this.edgePulseGraphics = this.add.graphics().setDepth(80).setAlpha(0);
+
     // ──── Dialogue ────
     this.dialogue = new DialogueSystem(this);
 
@@ -232,7 +255,7 @@ export class HUDScene extends Phaser.Scene {
     const overlay = this.add.rectangle(0, 0, width, height, 0x000000, 0.6);
 
     const title = this.add
-      .text(0, -80, "PAUSED", {
+      .text(0, -110, "PAUSED", {
         fontFamily: FONT_FAMILY,
         fontSize: "28px",
         color: "#ffffff",
@@ -240,12 +263,29 @@ export class HUDScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
 
-    const saveBtn = this.createMenuButton(0, -34, "Save Game", () => {
+    this.pauseChapterTitle = this.add
+      .text(0, -76, "", {
+        fontFamily: FONT_FAMILY,
+        fontSize: "16px",
+        fontStyle: "italic",
+        color: "#f0e8d0",
+      })
+      .setOrigin(0.5);
+
+    this.pauseChapterHint = this.add
+      .text(0, -56, "", {
+        fontFamily: FONT_FAMILY,
+        fontSize: "12px",
+        color: "#aaaaaa",
+      })
+      .setOrigin(0.5);
+
+    const saveBtn = this.createMenuButton(0, -24, "Save Game", () => {
       const gameScene = this.scene.get("GameScene") as GameScene;
       gameScene.autoSave();
     });
 
-    const journalBtn = this.createMenuButton(0, 6, "Colony Journal", () => {
+    const journalBtn = this.createMenuButton(0, 16, "Colony Journal", () => {
       this.pauseContainer.setVisible(false);
       const gameScene = this.scene.get("GameScene") as GameScene;
       if (!this.scene.isActive("JournalScene")) {
@@ -256,19 +296,22 @@ export class HUDScene extends Phaser.Scene {
       }
     });
 
-    const resumeBtn = this.createMenuButton(0, 46, "Resume", () => {
+    const resumeBtn = this.createMenuButton(0, 56, "Resume", () => {
       const gameScene = this.scene.get("GameScene") as GameScene;
       gameScene.resumeGame();
       this.pauseContainer.setVisible(false);
     });
 
-    const quitBtn = this.createMenuButton(0, 86, "Quit to Title", () => {
+    const quitBtn = this.createMenuButton(0, 96, "Quit to Title", () => {
       const gameScene = this.scene.get("GameScene") as GameScene;
       this.pauseContainer.setVisible(false);
       gameScene.quitToTitle();
     });
 
-    return this.add.container(width / 2, height / 2, [overlay, title, saveBtn, journalBtn, resumeBtn, quitBtn]);
+    return this.add.container(width / 2, height / 2, [
+      overlay, title, this.pauseChapterTitle, this.pauseChapterHint,
+      saveBtn, journalBtn, resumeBtn, quitBtn,
+    ]);
   }
 
   private createMenuButton(x: number, y: number, label: string, callback: () => void): Phaser.GameObjects.Text {
@@ -288,11 +331,58 @@ export class HUDScene extends Phaser.Scene {
   }
 
   showPauseMenu(): void {
+    const gameScene = this.scene.get("GameScene") as GameScene;
+    if (gameScene?.chapters) {
+      this.pauseChapterTitle.setText(gameScene.chapters.titleCard);
+      this.pauseChapterHint.setText(gameScene.chapters.hint);
+    }
     this.pauseContainer.setVisible(true);
   }
 
   hidePauseMenu(): void {
     this.pauseContainer.setVisible(false);
+  }
+
+  /** Display a chapter title card that fades in, holds, then fades out. */
+  showChapterTitle(text: string): void {
+    this.chapterTitleCard.setText(text);
+    this.tweens.killTweensOf(this.chapterTitleCard);
+    this.chapterTitleCard.setAlpha(0);
+
+    this.tweens.add({
+      targets: this.chapterTitleCard,
+      alpha: 1,
+      duration: 1200,
+      ease: "Sine.easeIn",
+      hold: 3000,
+      yoyo: true,
+      onComplete: () => this.chapterTitleCard.setAlpha(0),
+    });
+  }
+
+  /** Pulse a subtle colour at the screen edges for story cues. */
+  pulseEdge(color: number, intensity = 0.25, durationMs = 2000): void {
+    const { width, height } = this.cameras.main;
+    this.edgePulseGraphics.clear();
+
+    const thickness = 48;
+    this.edgePulseGraphics.fillStyle(color, 1);
+    this.edgePulseGraphics.fillRect(0, 0, width, thickness);
+    this.edgePulseGraphics.fillRect(0, height - thickness, width, thickness);
+    this.edgePulseGraphics.fillRect(0, 0, thickness, height);
+    this.edgePulseGraphics.fillRect(width - thickness, 0, thickness, height);
+
+    this.tweens.killTweensOf(this.edgePulseGraphics);
+    this.edgePulseGraphics.setAlpha(0);
+    this.tweens.add({
+      targets: this.edgePulseGraphics,
+      alpha: intensity,
+      duration: durationMs / 4,
+      yoyo: true,
+      repeat: 1,
+      ease: "Sine.easeInOut",
+      onComplete: () => this.edgePulseGraphics.setAlpha(0),
+    });
   }
 
   /** Show a brief narration line at the top of the screen (Mamma Cat's inner voice). */

@@ -129,6 +129,38 @@ describe('isValidSave', () => {
     const data = validSaveData({ sourceStates: [null] })
     expect(isValidSave(data)).toBe(false)
   })
+
+  it('rejects non-finite gameTimeMs', () => {
+    expect(isValidSave(validSaveData({ gameTimeMs: NaN }))).toBe(false)
+    expect(isValidSave(validSaveData({ gameTimeMs: Infinity }))).toBe(false)
+  })
+
+  it('rejects non-finite playerPosition coordinates', () => {
+    expect(isValidSave(validSaveData({ playerPosition: { x: NaN, y: 0 } }))).toBe(false)
+    expect(isValidSave(validSaveData({ playerPosition: { x: 0, y: Infinity } }))).toBe(false)
+  })
+
+  it('rejects non-finite stats values', () => {
+    expect(isValidSave(validSaveData({ stats: { hunger: NaN, thirst: 50, energy: 50 } }))).toBe(false)
+    expect(isValidSave(validSaveData({ stats: { hunger: 50, thirst: 50, energy: Infinity } }))).toBe(false)
+  })
+
+  it('rejects sourceStates entry with non-finite coordinates or lastUsedAt', () => {
+    expect(
+      isValidSave(
+        validSaveData({
+          sourceStates: [{ type: 'fountain', x: NaN, y: 1, lastUsedAt: 0 }],
+        }),
+      ),
+    ).toBe(false)
+    expect(
+      isValidSave(
+        validSaveData({
+          sourceStates: [{ type: 'fountain', x: 1, y: 1, lastUsedAt: Infinity }],
+        }),
+      ),
+    ).toBe(false)
+  })
 })
 
 describe('SaveSystem.save / load / hasSave / clear', () => {

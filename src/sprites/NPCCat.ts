@@ -75,6 +75,9 @@ export class NPCCat extends BaseNPC {
   private readonly walkSpeed: number;
   private readonly hyperactive: boolean;
 
+  /** When true, AI is frozen and the cat faces a dialogue partner. */
+  private dialogueEngaged = false;
+
   /** Reference to the current phase (set externally each frame). */
   private currentPhase: TimeOfDay = "day";
 
@@ -107,6 +110,30 @@ export class NPCCat extends BaseNPC {
     this.currentPhase = phase;
   }
 
+  /** Freeze AI and face a dialogue partner. Optional pose overrides the default sit animation. */
+  engageDialogue(targetX: number, targetY: number, pose?: string): void {
+    this.dialogueEngaged = true;
+    this.setVelocity(0);
+    const dx = targetX - this.x;
+    const dy = targetY - this.y;
+    this.lastDirection = BaseNPC.directionFromComponents(dx, dy);
+
+    if (pose === "sleeping") {
+      this.anims.play(`${this.animPrefix}-rest`, true);
+      this.setAlpha(0.7);
+    } else {
+      this.setAlpha(1);
+      this.anims.play(`${this.animPrefix}-sit-${this.lastDirection}`, true);
+    }
+  }
+
+  /** Resume normal AI after dialogue ends. */
+  disengageDialogue(): void {
+    this.dialogueEngaged = false;
+    this.setAlpha(1);
+    this.enterState("idle");
+  }
+
   /** Trigger alert state (e.g. player got too close to a territorial cat). */
   triggerAlert(): void {
     if (this.state === "fleeing") return;
@@ -120,6 +147,11 @@ export class NPCCat extends BaseNPC {
   }
 
   update(delta: number): void {
+    if (this.dialogueEngaged) {
+      this.setVelocity(0);
+      return;
+    }
+
     this.stateTimer -= delta;
 
     switch (this.state) {

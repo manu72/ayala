@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 import { BaseNPC } from "./BaseNPC";
 
-export type HumanType = "jogger" | "feeder" | "dogwalker" | "camille" | "manu" | "kish";
+export type HumanType = "jogger" | "feeder" | "dogwalker" | "camille" | "manu" | "kish" | "snatcher";
 
 export interface SpriteProfile {
   key: string;
@@ -206,6 +206,31 @@ const KISH_PROFILE: SpriteProfile = {
   },
 };
 
+// Snatcher: reuses Manu's directional sheets, tinted solid black in GameScene.
+const SNATCHER_PROFILE: SpriteProfile = {
+  key: "snatcher",
+  cols: 8,
+  frameW: 68,
+  frameH: 68,
+  bodyW: 20,
+  bodyH: 18,
+  scale: 0.9,
+  directionalKeys: {
+    walkDown: "manu_walk_s",
+    walkLeft: "manu_walk_w",
+    walkRight: "manu_walk_e",
+    walkUp: "manu_walk_n",
+    idle: "manu_stand",
+  },
+  anims: {
+    walkDown: { row: 0, count: 8 },
+    walkRight: { row: 0, count: 8 },
+    walkLeft: { row: 0, count: 8 },
+    walkUp: { row: 0, count: 8 },
+    idle: { row: 0, count: 1 },
+  },
+};
+
 export function profileForType(type: HumanType): SpriteProfile {
   switch (type) {
     case "jogger":
@@ -220,6 +245,8 @@ export function profileForType(type: HumanType): SpriteProfile {
       return MANU_PROFILE;
     case "kish":
       return KISH_PROFILE;
+    case "snatcher":
+      return SNATCHER_PROFILE;
     default: {
       const _exhaustive: never = type;
       throw new Error(`Unhandled HumanType: ${_exhaustive}`);

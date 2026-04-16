@@ -92,12 +92,42 @@ const CHAPTERS: ChapterDef[] = [
   },
 ];
 
+const CHAPTER_TITLES: Record<number, string> = {
+  1: "Abandoned",
+  2: "Newcomer",
+  3: "Finding Her Place",
+  4: "Territory",
+  5: "The Human",
+  6: "Home",
+};
+
+const CHAPTER_HINTS: Record<number, string> = {
+  1: "Find food, water, and somewhere safe to rest",
+  2: "Meet the cats of the gardens",
+  3: "Explore beyond the central gardens",
+  4: "Find a place to call your own",
+  5: "Build trust with the new human visitor",
+  6: "Go home",
+};
+
 export class ChapterSystem {
   private current = 1;
   private pendingNarration: string[] | null = null;
 
   get chapter(): number {
     return this.current;
+  }
+
+  get title(): string {
+    return CHAPTER_TITLES[this.current] ?? "";
+  }
+
+  get hint(): string {
+    return CHAPTER_HINTS[this.current] ?? "";
+  }
+
+  get titleCard(): string {
+    return `Chapter ${this.current}: ${this.title}`;
   }
 
   /** Returns narration lines if a new chapter just triggered, then clears them. */
