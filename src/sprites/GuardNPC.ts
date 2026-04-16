@@ -1,7 +1,8 @@
 import Phaser from "phaser";
 import type { MammaCat } from "./MammaCat";
+import { BaseNPC } from "./BaseNPC";
+import { GUARD_PROFILE, createSpriteProfileAnimations } from "./SpriteProfiles";
 
-const COLS = 8;
 const SPRITE_KEY = "guard";
 const PATROL_SPEED = 30;
 const CHASE_SPEED = 100;
@@ -20,7 +21,7 @@ type GuardState = "patrol" | "chasing" | "returning";
  * A guard NPC that patrols near the restaurant area and chases
  * Mamma Cat away if she gets too close to the restaurant scraps.
  */
-export class GuardNPC extends Phaser.Physics.Arcade.Sprite {
+export class GuardNPC extends BaseNPC {
   private guardState: GuardState = "patrol";
   private homeX: number;
   private homeY: number;
@@ -34,18 +35,14 @@ export class GuardNPC extends Phaser.Physics.Arcade.Sprite {
     this.homeX = x;
     this.homeY = y;
 
-    scene.add.existing(this);
-    scene.physics.add.existing(this);
-    this.setDepth(3);
-    this.setCollideWorldBounds(true);
+    this.setupPhysicsBody(
+      GUARD_BODY_WIDTH,
+      GUARD_BODY_HEIGHT,
+      (GUARD_FRAME_SIZE - GUARD_BODY_WIDTH) / 2,
+      GUARD_FRAME_SIZE - GUARD_BODY_HEIGHT,
+    );
 
-    const body = this.body as Phaser.Physics.Arcade.Body;
-    body.setSize(GUARD_BODY_WIDTH, GUARD_BODY_HEIGHT);
-    // Anchor collisions to the lower body/feet so the larger sprite frame
-    // doesn't snag on map objects around the guard's head/arms.
-    body.setOffset((GUARD_FRAME_SIZE - GUARD_BODY_WIDTH) / 2, GUARD_FRAME_SIZE - GUARD_BODY_HEIGHT);
-
-    this.createAnimations(scene);
+    createSpriteProfileAnimations(scene, GUARD_PROFILE);
     this.anims.play(`${SPRITE_KEY}-idle`, true);
   }
 
@@ -138,51 +135,8 @@ export class GuardNPC extends Phaser.Physics.Arcade.Sprite {
   }
 
   private playWalkAnim(dir: Phaser.Math.Vector2): void {
-    if (Math.abs(dir.x) > Math.abs(dir.y)) {
-      this.anims.play(dir.x < 0 ? `${SPRITE_KEY}-walk-left` : `${SPRITE_KEY}-walk-right`, true);
-    } else {
-      this.anims.play(dir.y < 0 ? `${SPRITE_KEY}-walk-up` : `${SPRITE_KEY}-walk-down`, true);
-    }
-  }
-
-  private createAnimations(scene: Phaser.Scene): void {
-    if (scene.anims.exists(`${SPRITE_KEY}-idle`)) return;
-
-    const row = (r: number, count = 4) => {
-      const start = r * COLS;
-      return { start, end: start + count - 1 };
-    };
-
-    scene.anims.create({
-      key: `${SPRITE_KEY}-walk-down`,
-      frames: scene.anims.generateFrameNumbers(SPRITE_KEY, row(0)),
-      frameRate: 6,
-      repeat: -1,
-    });
-    scene.anims.create({
-      key: `${SPRITE_KEY}-walk-left`,
-      frames: scene.anims.generateFrameNumbers(SPRITE_KEY, row(1)),
-      frameRate: 6,
-      repeat: -1,
-    });
-    scene.anims.create({
-      key: `${SPRITE_KEY}-walk-right`,
-      frames: scene.anims.generateFrameNumbers(SPRITE_KEY, row(2)),
-      frameRate: 6,
-      repeat: -1,
-    });
-    scene.anims.create({
-      key: `${SPRITE_KEY}-walk-up`,
-      frames: scene.anims.generateFrameNumbers(SPRITE_KEY, row(3)),
-      frameRate: 6,
-      repeat: -1,
-    });
-    scene.anims.create({
-      key: `${SPRITE_KEY}-idle`,
-      frames: scene.anims.generateFrameNumbers(SPRITE_KEY, row(4, 3)),
-      frameRate: 3,
-      repeat: -1,
-    });
+    const d = this.directionFromVector(dir);
+    this.anims.play(`${SPRITE_KEY}-walk-${d}`, true);
   }
 
   destroy(fromScene?: boolean): void {

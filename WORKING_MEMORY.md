@@ -11,7 +11,7 @@
 **Ayala** is a 2D top-down cat adventure game built with Phaser 3 + Vite + TypeScript. The player controls Mamma Cat, a dumped pet navigating the colony at Ayala Triangle Gardens in Makati, Manila.
 
 - **Branch:** `sit` (active development)
-- **Repo:** ~5400 LoC (27 TypeScript source files)
+- **Repo:** ~5400 LoC (30 TypeScript source files)
 - **Build:** `npx vite build` produces static files in `dist/`
 
 ---
@@ -46,13 +46,16 @@ BootScene -> StartScene -> GameScene + HUDScene (overlay) + JournalScene (overla
 
 ### Sprite Types
 
-| File          | Purpose                                                                                       |
-| ------------- | --------------------------------------------------------------------------------------------- |
-| `MammaCat.ts` | Player (WASD, run, crouch tap/hold, rest)                                                     |
-| `NPCCat.ts`   | Generic NPC cat with state machine, config-driven (animPrefix, scale, walkSpeed, hyperactive) |
-| `GuardNPC.ts` | Guard that patrols and chases player from food scraps                                         |
-| `HumanNPC.ts` | Waypoint humans with SpriteProfile system (jogger/feeder/dogwalker), phase-active             |
-| `DogNPC.ts`   | Follows dog-walker owner, barks/lunges at player                                              |
+| File               | Purpose                                                                                       |
+| ------------------ | --------------------------------------------------------------------------------------------- |
+| `MammaCat.ts`      | Player (WASD, run, crouch tap/hold, rest)                                                     |
+| `BaseNPC.ts`       | Abstract base for physics NPCs: scene registration, depth, bounds, direction/row helpers      |
+| `NPCCat.ts`        | Generic NPC cat with state machine, config-driven (animPrefix, scale, walkSpeed, hyperactive) |
+| `GuardNPC.ts`      | Guard that patrols and chases player from food scraps                                         |
+| `HumanNPC.ts`      | Waypoint humans; phase-active; uses profiles from `SpriteProfiles.ts`                         |
+| `SpriteProfiles.ts`| `SpriteProfile` definitions, `profileForType`, `createSpriteProfileAnimations` (humans + guard) |
+| `types.ts`         | Shared `Disposition`, `CatState` for NPC cats and indicators                                  |
+| `DogNPC.ts`        | Follows dog-walker owner, barks/lunges at player                                              |
 
 ### Systems
 
@@ -193,10 +196,11 @@ SmallDog.png, WhiteDog.png, BrownDog.png — randomly assigned to dog walkers
 - The J-key handler in `GameScene.update()` must check `!this.dialogue.isActive` before opening the journal, otherwise Space key presses silently advance dialogue in the background while the journal is open.
 - ESC key handling is centralized in `GameScene.update()` — it checks `JournalScene` first, then toggles pause. The journal and HUDScene do NOT register their own ESC listeners.
 
-### SpriteProfile System (HumanNPC)
+### SpriteProfile System (`SpriteProfiles.ts`)
 
 - `SpriteProfile` interface defines per-type sprite configuration: `key`, `cols`, `frameW`, `frameH`, `bodyW`, `bodyH`, `scale`, and `anims` row mappings.
-- Profiles: `GUARD_PROFILE`, `JOGGER_PROFILE`, `DOGWALKER_PROFILE`. Constructor selects profile by `humanType`.
+- Profiles: `GUARD_PROFILE` (also used by `GuardNPC` animations), `JOGGER_PROFILE`, `DOGWALKER_PROFILE`, etc. `HumanNPC` selects via `profileForType(humanType)`.
+- `createSpriteProfileAnimations(scene, profile)` registers Phaser anims for one profile; idempotent if `${key}-idle` exists.
 - `frameW` and `frameH` are separate to correctly calculate physics body offset for non-square frames (e.g. dogwalker 50x45).
 
 ---

@@ -1,10 +1,11 @@
 import Phaser from "phaser";
 import type { TimeOfDay } from "../systems/DayNightCycle";
+import { BaseNPC } from "./BaseNPC";
+import type { CatState, Disposition } from "./types";
+
+export type { CatState, Disposition } from "./types";
 
 const COLS = 8;
-
-export type CatState = "idle" | "walking" | "sleeping" | "alert" | "fleeing";
-export type Disposition = "friendly" | "neutral" | "territorial" | "wary";
 
 export interface NPCCatConfig {
   name: string;
@@ -44,7 +45,7 @@ const SLEEP_MIN_MS = 8_000;
 const SLEEP_MAX_MS = 20_000;
 const ALERT_DURATION_MS = 2_000;
 
-export class NPCCat extends Phaser.Physics.Arcade.Sprite {
+export class NPCCat extends BaseNPC {
   readonly npcName: string;
   readonly config: NPCCatConfig;
 
@@ -89,18 +90,11 @@ export class NPCCat extends Phaser.Physics.Arcade.Sprite {
     this.walkSpeed = config.walkSpeed ?? WALK_SPEED;
     this.hyperactive = config.hyperactive ?? false;
 
-    scene.add.existing(this);
-    scene.physics.add.existing(this);
-    this.setDepth(3);
-    this.setCollideWorldBounds(true);
-
     if (config.scale && config.scale !== 1) {
       this.setScale(config.scale);
     }
 
-    const body = this.body as Phaser.Physics.Arcade.Body;
-    body.setSize(18, 18);
-    body.setOffset(7, 12);
+    this.setupPhysicsBody(18, 18, 7, 12);
 
     this.createAnimations(scene, this.animPrefix);
     this.anims.play(`${this.animPrefix}-sit-down`, true);
@@ -213,7 +207,6 @@ export class NPCCat extends Phaser.Physics.Arcade.Sprite {
   private transitionFromIdle(): void {
     const weights = BEHAVIOUR_WEIGHTS[this.currentPhase];
     const next = this.weightedPick(weights);
-    // this.setAlpha(1);
     this.enterState(next as CatState);
   }
 
@@ -244,11 +237,7 @@ export class NPCCat extends Phaser.Physics.Arcade.Sprite {
   }
 
   private playWalkAnim(): void {
-    if (Math.abs(this.walkDir.x) > Math.abs(this.walkDir.y)) {
-      this.lastDirection = this.walkDir.x < 0 ? "left" : "right";
-    } else {
-      this.lastDirection = this.walkDir.y < 0 ? "up" : "down";
-    }
+    this.lastDirection = this.directionFromVector(this.walkDir);
 
     const animKey = this.state === "fleeing" ? `${this.animPrefix}-run` : `${this.animPrefix}-walk`;
     this.anims.play(animKey, true);
@@ -258,10 +247,7 @@ export class NPCCat extends Phaser.Physics.Arcade.Sprite {
     if (scene.anims.exists(`${prefix}-sit-down`)) return;
 
     const tex = this.texture.key;
-    const row = (r: number, count = 4) => {
-      const start = r * COLS;
-      return { start, end: start + count - 1 };
-    };
+    const row = (r: number, count = 4) => BaseNPC.rowFrames(r, COLS, count);
 
     // Rows 0-3: directional sitting (stationary/idle)
     scene.anims.create({
