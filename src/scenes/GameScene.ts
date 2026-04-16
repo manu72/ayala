@@ -581,8 +581,13 @@ export class GameScene extends Phaser.Scene {
 
   private endIntroCinematic(): void {
     this.cinematicActive = false;
-    this.introTimerEvents = [];
-    this.introCinematicTweens = [];
+    // Route cleanup through the shared helper so any still-running tweens or
+    // pending delayed calls are actually cancelled (not just dereferenced).
+    // Today the final scheduled tween finishes at ~11.5s and endIntroCinematic
+    // runs at ~19.2s, so every tracked resource is already complete — but a
+    // future tween/timer added to the tail of the intro would otherwise
+    // silently leak past shutdown. Matches startIntroCinematic() + shutdown().
+    this.clearIntroCinematicResources();
 
     this.dayNight.snapVisualToPhase("dawn");
     this.player.exitForcedCrouchPose();
