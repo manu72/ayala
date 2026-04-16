@@ -18,7 +18,7 @@ import { TerritorySystem } from "../systems/TerritorySystem";
 import type { HUDScene } from "./HUDScene";
 import { REST_HOLD_MS } from "../config/constants";
 import { GP } from "../config/gameplayConstants";
-import { StoryKeys } from "../registry/storyKeys";
+import { StoryKeys, migrateLegacyIntroFlag } from "../registry/storyKeys";
 import {
   ScriptedDialogueService,
   type DialogueService,
@@ -370,9 +370,10 @@ export class GameScene extends Phaser.Scene {
     this.cameras.main.setZoom(DEFAULT_ZOOM);
 
     const isNewGame = !data?.loadSave && !data?.newGamePlus && !data?.snatcherCapture;
-    if (typeof localStorage !== "undefined" && localStorage.getItem("ayala_intro_seen") === "1") {
-      this.registry.set(StoryKeys.INTRO_SEEN, true);
-    }
+    migrateLegacyIntroFlag(
+      this.registry,
+      typeof localStorage !== "undefined" ? localStorage : undefined,
+    );
     const shouldPlayCinematic = isNewGame && this.registry.get(StoryKeys.INTRO_SEEN) !== true;
 
     if (!shouldPlayCinematic) {
