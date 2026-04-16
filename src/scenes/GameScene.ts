@@ -771,7 +771,7 @@ export class GameScene extends Phaser.Scene {
     // Spawn Manu from Encounter 3 onwards
     if (encounterNum >= 3) {
       const manuConfig: HumanConfig = {
-        type: "feeder",
+        type: "manu",
         speed: 35,
         activePhases: ["evening"],
         path: [
@@ -781,7 +781,6 @@ export class GameScene extends Phaser.Scene {
         ],
       };
       this.manuNPC = new HumanNPC(this, manuConfig);
-      this.manuNPC.setScale(1.2);
       if (this.groundLayer) this.physics.add.collider(this.manuNPC, this.groundLayer);
       if (this.objectsLayer) this.physics.add.collider(this.manuNPC, this.objectsLayer);
       this.humans.push(this.manuNPC);

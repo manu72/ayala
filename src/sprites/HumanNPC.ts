@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 import type { TimeOfDay } from "../systems/DayNightCycle";
 
-export type HumanType = "jogger" | "feeder" | "dogwalker" | "camille";
+export type HumanType = "jogger" | "feeder" | "dogwalker" | "camille" | "manu";
 
 export interface HumanConfig {
   type: HumanType;
@@ -139,6 +139,35 @@ const CAMILLE_PROFILE: SpriteProfile = {
   },
 };
 
+// Manu: 68x68 frames, 1.2× taller than Camille (0.7 * 1.2 ≈ 0.84).
+const MANU_PROFILE: SpriteProfile = {
+  key: "manu",
+  cols: 8,
+  frameW: 68,
+  frameH: 68,
+  bodyW: 20,
+  bodyH: 18,
+  scale: 0.84,
+  directionalKeys: {
+    walkDown: "manu_walk_s",
+    walkLeft: "manu_walk_w",
+    walkRight: "manu_walk_e",
+    walkUp: "manu_walk_n",
+    idle: "manu_stand",
+    crouchLeft: "manu_crouch_w",
+    crouchRight: "manu_crouch_e",
+  },
+  anims: {
+    walkDown: { row: 0, count: 8 },
+    walkRight: { row: 0, count: 8 },
+    walkLeft: { row: 0, count: 8 },
+    walkUp: { row: 0, count: 8 },
+    idle: { row: 0, count: 1 },
+    crouchLeft: { row: 0, count: 5 },
+    crouchRight: { row: 0, count: 5 },
+  },
+};
+
 function profileForType(type: HumanType): SpriteProfile {
   switch (type) {
     case "jogger":
@@ -148,6 +177,8 @@ function profileForType(type: HumanType): SpriteProfile {
       return DOGWALKER_PROFILE;
     case "camille":
       return CAMILLE_PROFILE;
+    case "manu":
+      return MANU_PROFILE;
     default:
       return GUARD_PROFILE;
   }

@@ -97,6 +97,23 @@ export class BootScene extends Phaser.Scene {
         frameHeight: 68,
       });
     }
+
+    // Manu spritesheets (68x68 frames, single-row strips)
+    const manuSheets: Array<[string, string]> = [
+      ["manu_stand", "manu_stand"],
+      ["manu_walk_e", "manu_walk_east"],
+      ["manu_walk_w", "manu_walk_west"],
+      ["manu_walk_n", "manu_walk_north"],
+      ["manu_walk_s", "manu_walk_south"],
+      ["manu_crouch_e", "manu_crouch_east"],
+      ["manu_crouch_w", "manu_crouch_west"],
+    ];
+    for (const [key, file] of manuSheets) {
+      this.load.spritesheet(key, `assets/sprites/${file}.png`, {
+        frameWidth: 68,
+        frameHeight: 68,
+      });
+    }
   }
 
   create(): void {
