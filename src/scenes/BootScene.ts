@@ -80,6 +80,23 @@ export class BootScene extends Phaser.Scene {
         frameHeight: 48,
       });
     }
+
+    // Camille spritesheets (68x68 frames, single-row strips)
+    const camSheets: Array<[string, string]> = [
+      ["cam_stand", "cam_stand"],
+      ["cam_walk_e", "cam_walk_east"],
+      ["cam_walk_w", "cam_walk_west"],
+      ["cam_walk_n", "cam_walk_north"],
+      ["cam_walk_s", "cam_walk_south"],
+      ["cam_crouch_e", "cam_crouch_east"],
+      ["cam_crouch_w", "cam_crouch_west"],
+    ];
+    for (const [key, file] of camSheets) {
+      this.load.spritesheet(key, `assets/sprites/${file}.png`, {
+        frameWidth: 68,
+        frameHeight: 68,
+      });
+    }
   }
 
   create(): void {

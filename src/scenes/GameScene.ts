@@ -717,8 +717,11 @@ export class GameScene extends Phaser.Scene {
    */
   private checkCamilleEncounter(): void {
     if (this.chapters.chapter < 5) return;
+    if (this.dayNight.currentPhase !== "evening") {
+      this.camilleEncounterActive = false;
+      return;
+    }
     if (this.camilleEncounterActive) return;
-    if (this.dayNight.currentPhase !== "evening") return;
 
     const currentEncounter = (this.registry.get("CAMILLE_ENCOUNTER") as number) ?? 0;
     if (currentEncounter >= 5) return;
@@ -749,7 +752,7 @@ export class GameScene extends Phaser.Scene {
     const targetY = shopsPOI?.y ?? 500;
 
     const camilleConfig: HumanConfig = {
-      type: "feeder",
+      type: "camille",
       speed: 35,
       activePhases: ["evening"],
       path: [
@@ -821,6 +824,7 @@ export class GameScene extends Phaser.Scene {
       case 2:
         this.time.delayedCall(8000, () => {
           if (this.dialogue.isActive) return;
+          this.camilleNPC?.playCrouchToward(this.player.x);
           this.dialogue.show(
             [
               "She sees you. She's not coming closer. She's... waiting. For you.",
@@ -837,6 +841,7 @@ export class GameScene extends Phaser.Scene {
       case 3:
         this.time.delayedCall(10000, () => {
           if (this.dialogue.isActive) return;
+          this.camilleNPC?.playCrouchToward(this.player.x);
           this.dialogue.show(
             [
               "She closes her eyes. Slowly. Opens them again. That means... trust.",
@@ -844,7 +849,6 @@ export class GameScene extends Phaser.Scene {
               "Slow blink back?",
             ],
             () => {
-              // Auto-accept the slow blink for scripted path
               this.emotes.show(this, this.player, "heart");
               if (this.camilleNPC) this.emotes.show(this, this.camilleNPC, "heart");
               hud?.showNarration("Something shifts between you. A thread, invisible but real.");
@@ -856,6 +860,7 @@ export class GameScene extends Phaser.Scene {
       case 4:
         this.time.delayedCall(10000, () => {
           if (this.dialogue.isActive) return;
+          this.camilleNPC?.playCrouchToward(this.player.x);
           this.dialogue.show(
             [
               "Her hand smells like fish treats and soap. And something else. Home.",

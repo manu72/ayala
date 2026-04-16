@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 import type { TimeOfDay } from "../systems/DayNightCycle";
 
-export type HumanType = "jogger" | "feeder" | "dogwalker";
+export type HumanType = "jogger" | "feeder" | "dogwalker" | "camille";
 
 export interface HumanConfig {
   type: HumanType;
@@ -35,6 +35,11 @@ interface SpriteProfile {
     walkLeft: string;
     walkRight: string;
     walkUp: string;
+    /** Separate stand/idle texture. Falls back to walkDown frame 0 if absent. */
+    idle?: string;
+    /** One-shot crouch textures (left = west, right = east). */
+    crouchLeft?: string;
+    crouchRight?: string;
   };
   anims: {
     walkDown: { row: number; count: number };
@@ -42,6 +47,8 @@ interface SpriteProfile {
     walkRight: { row: number; count: number };
     walkUp: { row: number; count: number };
     idle: { row: number; count: number };
+    crouchLeft?: { row: number; count: number };
+    crouchRight?: { row: number; count: number };
   };
 }
 
@@ -102,6 +109,36 @@ const JOGGER_PROFILE: SpriteProfile = {
   },
 };
 
+// Camille: 68x68 frames, scale 0.7 to match the scene's human proportions.
+// Adjust scale here if she looks too big or small.
+const CAMILLE_PROFILE: SpriteProfile = {
+  key: "camille",
+  cols: 8,
+  frameW: 68,
+  frameH: 68,
+  bodyW: 20,
+  bodyH: 18,
+  scale: 0.7,
+  directionalKeys: {
+    walkDown: "cam_walk_s",
+    walkLeft: "cam_walk_w",
+    walkRight: "cam_walk_e",
+    walkUp: "cam_walk_n",
+    idle: "cam_stand",
+    crouchLeft: "cam_crouch_w",
+    crouchRight: "cam_crouch_e",
+  },
+  anims: {
+    walkDown: { row: 0, count: 8 },
+    walkRight: { row: 0, count: 8 },
+    walkLeft: { row: 0, count: 8 },
+    walkUp: { row: 0, count: 8 },
+    idle: { row: 0, count: 1 },
+    crouchLeft: { row: 0, count: 5 },
+    crouchRight: { row: 0, count: 5 },
+  },
+};
+
 function profileForType(type: HumanType): SpriteProfile {
   switch (type) {
     case "jogger":
@@ -109,6 +146,8 @@ function profileForType(type: HumanType): SpriteProfile {
       return JOGGER_PROFILE;
     case "dogwalker":
       return DOGWALKER_PROFILE;
+    case "camille":
+      return CAMILLE_PROFILE;
     default:
       return GUARD_PROFILE;
   }
@@ -274,6 +313,19 @@ export class HumanNPC extends Phaser.Physics.Arcade.Sprite {
     body?.setEnable(false);
   }
 
+  /**
+   * Play a one-shot crouch animation facing toward the given world X position.
+   * Stops movement while crouching. No-op if the profile has no crouch sheets.
+   */
+  playCrouchToward(targetX: number): void {
+    const facingRight = targetX >= this.x;
+    const animKey = `${this.profile.key}-crouch-${facingRight ? "right" : "left"}`;
+    if (this.scene.anims.exists(animKey)) {
+      this.setVelocity(0);
+      this.anims.play(animKey, true);
+    }
+  }
+
   private playWalkAnim(dir: Phaser.Math.Vector2): void {
     const key = this.profile.key;
     if (Math.abs(dir.x) > Math.abs(dir.y)) {
@@ -313,12 +365,33 @@ export class HumanNPC extends Phaser.Physics.Arcade.Sprite {
         frameRate: 6,
         repeat: -1,
       });
+
+      const idleTex = dk.idle ?? dk.walkDown;
       scene.anims.create({
         key: `${key}-idle`,
-        frames: scene.anims.generateFrameNumbers(dk.walkDown, { start: 0, end: 0 }),
+        frames: scene.anims.generateFrameNumbers(idleTex, { start: 0, end: a.idle.count - 1 }),
         frameRate: 3,
         repeat: -1,
       });
+
+      // One-shot crouch animations (repeat: 0 = play once)
+      if (dk.crouchLeft && a.crouchLeft) {
+        scene.anims.create({
+          key: `${key}-crouch-left`,
+          frames: scene.anims.generateFrameNumbers(dk.crouchLeft, { start: 0, end: a.crouchLeft.count - 1 }),
+          frameRate: 6,
+          repeat: 0,
+        });
+      }
+      if (dk.crouchRight && a.crouchRight) {
+        scene.anims.create({
+          key: `${key}-crouch-right`,
+          frames: scene.anims.generateFrameNumbers(dk.crouchRight, { start: 0, end: a.crouchRight.count - 1 }),
+          frameRate: 6,
+          repeat: 0,
+        });
+      }
+
       return;
     }
 
