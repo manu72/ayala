@@ -109,6 +109,32 @@ const JOGGER_PROFILE: SpriteProfile = {
   },
 };
 
+// Feeder: 48x48 frames, east/west walk + stand. No north/south sheets yet,
+// so walkDown falls back to east and walkUp to west.
+// To revert to jogger placeholder: return JOGGER_PROFILE for "feeder" in profileForType.
+const FEEDER_PROFILE: SpriteProfile = {
+  key: "feeder",
+  cols: 8,
+  frameW: 48,
+  frameH: 48,
+  bodyW: 18,
+  bodyH: 16,
+  directionalKeys: {
+    walkDown: "feeder_walk_e",
+    walkLeft: "feeder_walk_w",
+    walkRight: "feeder_walk_e",
+    walkUp: "feeder_walk_w",
+    idle: "feeder_stand",
+  },
+  anims: {
+    walkDown: { row: 0, count: 8 },
+    walkRight: { row: 0, count: 8 },
+    walkLeft: { row: 0, count: 8 },
+    walkUp: { row: 0, count: 8 },
+    idle: { row: 0, count: 8 },
+  },
+};
+
 // Camille: 68x68 frames, scale 0.7 to match the scene's human proportions.
 // Adjust scale here if she looks too big or small.
 const CAMILLE_PROFILE: SpriteProfile = {
@@ -196,8 +222,9 @@ const KISH_PROFILE: SpriteProfile = {
 function profileForType(type: HumanType): SpriteProfile {
   switch (type) {
     case "jogger":
-    case "feeder":
       return JOGGER_PROFILE;
+    case "feeder":
+      return FEEDER_PROFILE;
     case "dogwalker":
       return DOGWALKER_PROFILE;
     case "camille":
@@ -267,9 +294,8 @@ export class HumanNPC extends Phaser.Physics.Arcade.Sprite {
     this.setActive(false);
     body?.setEnable(false);
 
-    if (config.type === "feeder") {
-      this.setTint(0x88ff88);
-    }
+    // Feeders no longer need a tint — they have dedicated sprites.
+    // To restore the old green tint: this.setTint(0x88ff88);
   }
 
   setPhase(phase: TimeOfDay): void {

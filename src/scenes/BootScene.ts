@@ -57,6 +57,19 @@ export class BootScene extends Phaser.Scene {
       });
     }
 
+    // Feeder spritesheets (48x48 frames, single-row strips)
+    const feederSheets: Array<[string, string]> = [
+      ["feeder_stand", "feeder_stand"],
+      ["feeder_walk_e", "feeder_walk_east"],
+      ["feeder_walk_w", "feeder_walk_west"],
+    ];
+    for (const [key, file] of feederSheets) {
+      this.load.spritesheet(key, `assets/sprites/${file}.png`, {
+        frameWidth: 48,
+        frameHeight: 48,
+      });
+    }
+
     // Jogger spritesheet: 8 cols x 6 rows of 150x85 frames
     this.load.spritesheet("jogger", "assets/sprites/girl.png", {
       frameWidth: 150,

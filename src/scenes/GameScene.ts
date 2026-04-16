@@ -771,8 +771,6 @@ export class GameScene extends Phaser.Scene {
   private startCamilleEncounter(encounterNum: number): void {
     this.cleanupCamilleNPCs();
     this.camilleEncounterActive = true;
-    this.registry.set("CAMILLE_ENCOUNTER", encounterNum);
-    this.registry.set("CAMILLE_ENCOUNTER_DAY", this.dayNight.dayCount);
 
     // Spawn Camille from the underpass area
     const underpasses = this.map.findObject("spawns", (o) => o.name === "spawn_blacky");
@@ -847,6 +845,8 @@ export class GameScene extends Phaser.Scene {
 
     switch (encounterNum) {
       case 1:
+        this.registry.set("CAMILLE_ENCOUNTER", encounterNum);
+        this.registry.set("CAMILLE_ENCOUNTER_DAY", this.dayNight.dayCount);
         hud?.showNarration(
           "A new human. She moves differently from the others. Slowly. Gently. She smells like... kindness?",
         );
@@ -855,6 +855,8 @@ export class GameScene extends Phaser.Scene {
       case 2:
         this.time.delayedCall(8000, () => {
           if (this.dialogue.isActive) return;
+          this.registry.set("CAMILLE_ENCOUNTER", encounterNum);
+          this.registry.set("CAMILLE_ENCOUNTER_DAY", this.dayNight.dayCount);
           this.camilleNPC?.playCrouchToward(this.player.x);
           this.dialogue.show(
             [
@@ -872,6 +874,8 @@ export class GameScene extends Phaser.Scene {
       case 3:
         this.time.delayedCall(10000, () => {
           if (this.dialogue.isActive) return;
+          this.registry.set("CAMILLE_ENCOUNTER", encounterNum);
+          this.registry.set("CAMILLE_ENCOUNTER_DAY", this.dayNight.dayCount);
           this.camilleNPC?.playCrouchToward(this.player.x);
           this.dialogue.show(
             [
@@ -891,6 +895,8 @@ export class GameScene extends Phaser.Scene {
       case 4:
         this.time.delayedCall(10000, () => {
           if (this.dialogue.isActive) return;
+          this.registry.set("CAMILLE_ENCOUNTER", encounterNum);
+          this.registry.set("CAMILLE_ENCOUNTER_DAY", this.dayNight.dayCount);
           this.camilleNPC?.playCrouchToward(this.player.x);
           this.dialogue.show(
             [
@@ -908,6 +914,8 @@ export class GameScene extends Phaser.Scene {
       case 5:
         this.time.delayedCall(12000, () => {
           if (this.dialogue.isActive) return;
+          this.registry.set("CAMILLE_ENCOUNTER", encounterNum);
+          this.registry.set("CAMILLE_ENCOUNTER_DAY", this.dayNight.dayCount);
           this.dialogue.show(
             [
               "She has a box. You've seen boxes before. Cats go in. They don't come back.",
