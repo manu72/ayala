@@ -16,7 +16,7 @@ const MC_SIT_IDLE_E = "mc_sit_idle_e";
 const MC_SIT_IDLE_W = "mc_sit_idle_w";
 const MC_STAND_IDLE_E = "mc_stand_idle_e";
 const MC_STAND_IDLE_W = "mc_stand_idle_w";
-const MC_OLD = "mammacat";
+const MC_SLEEP = "mc_sleep";
 
 // ── Animation keys ──
 const ANIM_WALK_E = "mc-walk-e";
@@ -27,7 +27,6 @@ const ANIM_SIT_IDLE_E = "mc-sit-idle-e";
 const ANIM_SIT_IDLE_W = "mc-sit-idle-w";
 const ANIM_STAND_IDLE_E = "mc-stand-idle-e";
 const ANIM_STAND_IDLE_W = "mc-stand-idle-w";
-const ANIM_REST = "mc-rest";
 
 // ── 8-direction stand frame indices (S, SW, W, NW, N, NE, E, SE) ──
 type Direction8 = "s" | "sw" | "w" | "nw" | "n" | "ne" | "e" | "se";
@@ -55,10 +54,12 @@ const BODY_H = 18;
 const BODY_OFFSET_X = 11;
 const BODY_OFFSET_Y = 18;
 
-// Rest uses old 32x32 frames at native size (no scaling needed at 32px display).
-const REST_SCALE = 1;
-const REST_BODY_OFFSET_X = 7;
-const REST_BODY_OFFSET_Y = 12;
+// Rest uses 64x64 sleep image scaled to 32px display (32/64 = 0.5).
+// To revert to old mammacat.png sleep: set REST_SCALE = 1, offsets to (7, 12),
+// reload MC_OLD = "mammacat" and restore the ANIM_REST animation in createAnimations.
+const REST_SCALE = 0.4;
+const REST_BODY_OFFSET_X = 15;
+const REST_BODY_OFFSET_Y = 24;
 
 const LABEL_OFFSET_Y = -12;
 
@@ -161,12 +162,13 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
     this.crouchHoldActive = false;
     this.setVelocity(0);
 
-    // Old 32x32 rest frames scaled up to match 48x48 display size
+    // 64x64 sleep image scaled to 32px display
     this.setScale(REST_SCALE);
     const body = this.body as Phaser.Physics.Arcade.Body;
     body.setOffset(REST_BODY_OFFSET_X, REST_BODY_OFFSET_Y);
 
-    this.anims.play(ANIM_REST, true);
+    this.anims.stop();
+    this.setTexture(MC_SLEEP);
     this.setAlpha(0.8);
   }
 
@@ -436,17 +438,8 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
       repeat: -1,
     });
 
-    // Rest/sleep — old 32x32 sheet, row 6 (frames 48-51)
-    const OLD_COLS = 8;
-    scene.anims.create({
-      key: ANIM_REST,
-      frames: scene.anims.generateFrameNumbers(MC_OLD, {
-        start: 6 * OLD_COLS,
-        end: 6 * OLD_COLS + 3,
-      }),
-      frameRate: 2,
-      repeat: -1,
-    });
+    // Sleep now uses a static 64x64 image (mc_sleep) set directly in enterRest().
+    // No frame-based animation needed.
   }
 
   destroy(fromScene?: boolean): void {

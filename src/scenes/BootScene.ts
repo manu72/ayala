@@ -39,6 +39,9 @@ export class BootScene extends Phaser.Scene {
       });
     }
 
+    // MammaCat sleep: single 64x64 image (scaled down at display time)
+    this.load.image("mc_sleep", "assets/sprites/mammacat_sleep_64x64.png");
+
     // Guard spritesheet: 8 cols x 7 rows of 64x64 frames
     this.load.spritesheet("guard", "assets/sprites/guard.png", {
       frameWidth: 64,
