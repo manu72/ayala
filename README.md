@@ -14,7 +14,7 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 
 ## Project Status
 
-**Version 0.1.4** -- Phases 1 through 4 are complete. The game is playable from start to finish: survival mechanics, social systems, 6 story chapters, territory claiming, snatchers, and the full adoption story arc through to the epilogue.
+**Version 0.1.5** -- Phases 1 through 4 are complete. The game is playable from start to finish: survival mechanics, social systems, 6 story chapters, territory claiming, snatchers, and the full adoption story arc through to the epilogue.
 
 ### Development Roadmap
 
@@ -93,6 +93,7 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 | [Phaser 3](https://phaser.io)                | 3.90.0  | WebGL/Canvas 2D game engine, Arcade physics    |
 | [Vite](https://vitejs.dev)                   | 8.x     | Build tooling, dev server, hot-reload          |
 | [TypeScript](https://www.typescriptlang.org) | 6.x     | Language (strict mode)                         |
+| [Vitest](https://vitest.dev)                   | 3.x     | Unit testing with V8 coverage                  |
 | [pngjs](https://github.com/lukeapage/pngjs)  | 7.x     | Dev-only procedural tileset and map generation |
 
 Maps are generated programmatically via Node.js scripts (not via the Tiled GUI), exported as Tiled-compatible JSON consumed by Phaser's tilemap loader.
@@ -190,11 +191,14 @@ ayala/
 │   │   ├── DialogueService.ts          #   Dialogue interface + ScriptedDialogueService
 │   │   └── ConversationStore.ts        #   IndexedDB conversation history persistence
 │   ├── sprites/
+│   │   ├── BaseNPC.ts                  #   Abstract base for physics NPCs
 │   │   ├── MammaCat.ts                 #   Player character
 │   │   ├── NPCCat.ts                  #   NPC cat (AI, config-driven)
 │   │   ├── GuardNPC.ts                #   Guard patrol and chase
 │   │   ├── HumanNPC.ts                #   Waypoint-following humans
-│   │   └── DogNPC.ts                  #   Dog follower with bark/lunge
+│   │   ├── DogNPC.ts                  #   Dog follower with bark/lunge
+│   │   ├── SpriteProfiles.ts          #   Per-type sprite configs and animation registration
+│   │   └── types.ts                   #   Shared Disposition and CatState types
 │   └── systems/
 │       ├── DayNightCycle.ts            #   4-phase time cycle
 │       ├── StatsSystem.ts              #   Hunger/thirst/energy
@@ -211,7 +215,13 @@ ayala/
 ├── package.json                         # npm manifest
 ├── tsconfig.json                        # TypeScript config (strict)
 ├── vite.config.ts                       # Vite config (relative base, dist output)
-└── VERSION                              # 0.1.4
+├── tests/                               # Unit tests (Vitest)
+│   ├── systems/                        #   StatsSystem, TrustSystem, SaveSystem, etc.
+│   ├── services/                       #   DialogueService
+│   ├── data/                           #   cat-dialogue script conditions
+│   └── sprites/                        #   BaseNPC helpers, SpriteProfiles
+├── vitest.config.ts                     # Vitest configuration
+└── VERSION                              # 0.1.5
 ```
 
 ## Asset Generation
@@ -265,8 +275,6 @@ Read the full document: [docs/Ayala_GDD_v0.1.md](docs/Ayala_GDD_v0.1.md)
 ## Known Limitations
 
 - No audio (planned Phase 5)
-- No test suite
-- No CI/CD pipeline
 - Crouch has no dedicated animation yet (uses walk animation)
 - GameScene is large (~1880 lines) and would benefit from extraction of subsystems (snatchers, colony dynamics, Camille encounters, territory)
 - Colony cat spawn positions are hardcoded, not tied to map POIs

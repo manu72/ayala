@@ -40,7 +40,7 @@ const VALID_SOURCE_TYPES: ReadonlySet<string> = new Set([
   'safe_sleep',
 ])
 
-function isValidSave(data: unknown): data is SaveData {
+export function isValidSave(data: unknown): data is SaveData {
   if (typeof data !== 'object' || data === null) return false
   const d = data as Record<string, unknown>
   if (typeof d.version !== 'number' || d.version > CURRENT_VERSION) return false

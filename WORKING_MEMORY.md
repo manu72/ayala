@@ -1,8 +1,8 @@
 # WORKING_MEMORY
 
 > Persistent memory layer for AI-assisted development sessions.
-> Last Updated: 2026-04-15
-> Version: 0.1.4
+> Last Updated: 2026-04-16
+> Version: 0.1.5
 
 ---
 
@@ -40,7 +40,7 @@ BootScene -> StartScene -> GameScene + HUDScene (overlay) + JournalScene (overla
 
 - **BootScene** (`src/scenes/BootScene.ts`): Loads all assets (tilesets, spritesheets)
 - **StartScene** (`src/scenes/StartScene.ts`): Title screen, New/Continue
-- **GameScene** (`src/scenes/GameScene.ts`): Main game loop, NPC management, input, chapters (~1275 lines)
+- **GameScene** (`src/scenes/GameScene.ts`): Main game loop, NPC management, input, chapters (~1900 lines)
 - **HUDScene** (`src/scenes/HUDScene.ts`): Stats bars, clock, rest progress, pause menu, narration, dialogue
 - **JournalScene** (`src/scenes/JournalScene.ts`): Colony journal overlay (J key or pause menu)
 
@@ -98,7 +98,7 @@ BootScene -> StartScene -> GameScene + HUDScene (overlay) + JournalScene (overla
 mammacat, blacky, tiger, jayco, fluffy
 
 **Guard (512x448, 8 cols x 7 rows, 64x64 frames):**
-guard.png — used for guard NPC and feeders (green tint placeholder)
+guard.png — `GuardNPC` + shared `GUARD_PROFILE` in `SpriteProfiles.ts` (feeders use separate `feeder_*` textures via profiles)
 
 **Dog sheets (4 cols x 9 rows, 32x32 frames):**
 SmallDog.png, WhiteDog.png, BrownDog.png — randomly assigned to dog walkers
@@ -203,6 +203,11 @@ SmallDog.png, WhiteDog.png, BrownDog.png — randomly assigned to dog walkers
 - `createSpriteProfileAnimations(scene, profile)` registers Phaser anims for one profile; idempotent if `${key}-idle` exists.
 - `frameW` and `frameH` are separate to correctly calculate physics body offset for non-square frames (e.g. dogwalker 50x45).
 
+### NPC sprite structure (`BaseNPC`)
+
+- `NPCCat`, `HumanNPC`, and `GuardNPC` extend `BaseNPC` (shared scene registration, depth, bounds, `setupPhysicsBody`, `directionFromVector` / `directionFromComponents`, static `rowFrames`).
+- `Disposition` and `CatState` live in `src/sprites/types.ts` (indicators import `Disposition` from there).
+
 ---
 
 ### DialogueService Architecture
@@ -219,9 +224,8 @@ SmallDog.png, WhiteDog.png, BrownDog.png — randomly assigned to dog walkers
 
 ## Technical Debt
 
-- **No test suite:** No unit or integration tests exist.
+- **Test coverage is partial:** Vitest unit tests cover pure systems (StatsSystem, TrustSystem, TerritorySystem, SaveSystem, ChapterSystem, DialogueService, cat-dialogue, BaseNPC helpers, SpriteProfiles). Phaser-coupled code (scenes, FoodSource, DayNightCycle visual layer) has no automated tests. CI runs tests before build.
 - **No audio:** Planned for Phase 5.
-- **No CI/CD pipeline.**
 - **Tilemap POI names are hardcoded:** Spawn points, food sources, shelter POIs use string names matched between Tiled JSON and GameScene. No validation that map contains expected POIs.
 - **GameScene is ~1700+ lines:** Growing further after Phase 4. Camille encounters, snatchers, colony dynamics, and territory could be extracted into dedicated systems.
 - **Colony cat random positions:** Not tied to map POIs; positions are hardcoded zone coordinates with random offsets. May clip into objects.
