@@ -483,11 +483,14 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    // ──── Rest hold initiation (Z key, separate from interact) ────
+    // ──── Z key: tap toggles catloaf, hold enters sleep ────
     const playerBody = this.player.body as Phaser.Physics.Arcade.Body;
     const playerStationary = playerBody.velocity.length() < 1;
+    const zDown = this.restKey?.isDown ?? false;
+    const zJustUp = this.restKey ? Phaser.Input.Keyboard.JustUp(this.restKey) : false;
+    const REST_TAP_MS = 300;
 
-    if (this.restKey?.isDown && playerStationary && !this.dialogue.isActive) {
+    if (zDown && playerStationary && !this.dialogue.isActive) {
       this.restHoldTimer += delta;
       this.restHoldActive = true;
       if (this.restHoldTimer >= REST_HOLD_MS) {
@@ -509,8 +512,31 @@ export class GameScene extends Phaser.Scene {
         }
       }
     } else {
+      // Detect tap: key released quickly while stationary, not moving, no dialogue
+      if (
+        zJustUp &&
+        this.restHoldTimer > 0 &&
+        this.restHoldTimer < REST_TAP_MS &&
+        playerStationary &&
+        !this.dialogue.isActive &&
+        !this.player.isMoving
+      ) {
+        if (this.player.isCatloaf) {
+          this.player.exitCatloaf();
+        } else if (
+          this.player.playerState === "normal" ||
+          this.player.playerState === "crouching"
+        ) {
+          this.player.enterCatloaf();
+        }
+      }
       this.restHoldTimer = 0;
       this.restHoldActive = false;
+    }
+
+    // Exit catloaf when any movement key is pressed
+    if (this.player.isCatloaf && this.player.isMoving) {
+      this.player.exitCatloaf();
     }
 
     // ──── Normal movement ────
@@ -771,8 +797,6 @@ export class GameScene extends Phaser.Scene {
   private startCamilleEncounter(encounterNum: number): void {
     this.cleanupCamilleNPCs();
     this.camilleEncounterActive = true;
-    this.registry.set("CAMILLE_ENCOUNTER", encounterNum);
-    this.registry.set("CAMILLE_ENCOUNTER_DAY", this.dayNight.dayCount);
 
     // Spawn Camille from the underpass area
     const underpasses = this.map.findObject("spawns", (o) => o.name === "spawn_blacky");
@@ -847,6 +871,8 @@ export class GameScene extends Phaser.Scene {
 
     switch (encounterNum) {
       case 1:
+        this.registry.set("CAMILLE_ENCOUNTER", encounterNum);
+        this.registry.set("CAMILLE_ENCOUNTER_DAY", this.dayNight.dayCount);
         hud?.showNarration(
           "A new human. She moves differently from the others. Slowly. Gently. She smells like... kindness?",
         );
@@ -855,6 +881,8 @@ export class GameScene extends Phaser.Scene {
       case 2:
         this.time.delayedCall(8000, () => {
           if (this.dialogue.isActive) return;
+          this.registry.set("CAMILLE_ENCOUNTER", encounterNum);
+          this.registry.set("CAMILLE_ENCOUNTER_DAY", this.dayNight.dayCount);
           this.camilleNPC?.playCrouchToward(this.player.x);
           this.dialogue.show(
             [
@@ -872,6 +900,8 @@ export class GameScene extends Phaser.Scene {
       case 3:
         this.time.delayedCall(10000, () => {
           if (this.dialogue.isActive) return;
+          this.registry.set("CAMILLE_ENCOUNTER", encounterNum);
+          this.registry.set("CAMILLE_ENCOUNTER_DAY", this.dayNight.dayCount);
           this.camilleNPC?.playCrouchToward(this.player.x);
           this.dialogue.show(
             [
@@ -891,6 +921,8 @@ export class GameScene extends Phaser.Scene {
       case 4:
         this.time.delayedCall(10000, () => {
           if (this.dialogue.isActive) return;
+          this.registry.set("CAMILLE_ENCOUNTER", encounterNum);
+          this.registry.set("CAMILLE_ENCOUNTER_DAY", this.dayNight.dayCount);
           this.camilleNPC?.playCrouchToward(this.player.x);
           this.dialogue.show(
             [
@@ -908,6 +940,8 @@ export class GameScene extends Phaser.Scene {
       case 5:
         this.time.delayedCall(12000, () => {
           if (this.dialogue.isActive) return;
+          this.registry.set("CAMILLE_ENCOUNTER", encounterNum);
+          this.registry.set("CAMILLE_ENCOUNTER_DAY", this.dayNight.dayCount);
           this.dialogue.show(
             [
               "She has a box. You've seen boxes before. Cats go in. They don't come back.",

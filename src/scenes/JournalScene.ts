@@ -25,7 +25,7 @@ const CAT_DESCRIPTIONS: Record<string, { low: string; high: string }> = {
   Jayco: { low: "Lives near the shops. Friendly.", high: "Jayco considers you a friend." },
   "Jayco Jr": { low: "A tiny kitten near the shops.", high: "Jayco's kitten follows you around." },
   Fluffy: { low: "Central gardens. Aloof.", high: "Fluffy acknowledges your existence." },
-  Pedigree: { low: "Near Nielson Tower. A former pet.", high: "Pedigree shares your story." },
+  Pedigree: { low: "Near Exchange Plaza. A former pet.", high: "Pedigree shares your story." },
   Ginger: { low: "A ginger cat near the fountain.", high: "The ginger cat tolerates you." },
   "Ginger B": { low: "The silent twin by the fountain.", high: "The twin watches without malice." },
 };
@@ -209,11 +209,7 @@ export class JournalScene extends Phaser.Scene {
       if (name.startsWith("Colony Cat")) continue;
       const trust = gameScene.trust.getCatTrust(name);
       const desc = CAT_DESCRIPTIONS[name];
-      const description = desc
-        ? trust >= 30
-          ? desc.high
-          : desc.low
-        : "A cat from the colony.";
+      const description = desc ? (trust >= 30 ? desc.high : desc.low) : "A cat from the colony.";
 
       if (typeof metDays[name] !== "number") {
         // Backfill for older saves that predate journal met-day tracking.

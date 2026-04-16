@@ -42,6 +42,9 @@ export class BootScene extends Phaser.Scene {
     // MammaCat sleep: single 64x64 image (scaled down at display time)
     this.load.image("mc_sleep", "assets/sprites/mammacat_sleep_64x64.png");
 
+    // MammaCat catloaf: single 48x48 image (alert rest pose)
+    this.load.image("mc_catloaf", "assets/sprites/mamma_catloaf.png");
+
     // Guard spritesheet: 8 cols x 7 rows of 64x64 frames
     this.load.spritesheet("guard", "assets/sprites/guard.png", {
       frameWidth: 64,
@@ -54,6 +57,19 @@ export class BootScene extends Phaser.Scene {
       this.load.spritesheet(key, `assets/sprites/${key}.png`, {
         frameWidth: 32,
         frameHeight: 32,
+      });
+    }
+
+    // Feeder spritesheets (48x48 frames, single-row strips)
+    const feederSheets: Array<[string, string]> = [
+      ["feeder_stand", "feeder_stand"],
+      ["feeder_walk_e", "feeder_walk_east"],
+      ["feeder_walk_w", "feeder_walk_west"],
+    ];
+    for (const [key, file] of feederSheets) {
+      this.load.spritesheet(key, `assets/sprites/${file}.png`, {
+        frameWidth: 48,
+        frameHeight: 48,
       });
     }
 
