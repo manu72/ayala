@@ -1663,10 +1663,9 @@ export class GameScene extends Phaser.Scene {
 
   private despawnSnatchers(): void {
     for (const snatcher of this.snatchers) {
-      snatcher.setVisible(false);
-      snatcher.setActive(false);
-      const body = snatcher.body as Phaser.Physics.Arcade.Body | undefined;
-      body?.setEnable(false);
+      const idx = this.humans.indexOf(snatcher);
+      if (idx !== -1) this.humans.splice(idx, 1);
+      snatcher.destroy();
     }
     this.snatchers = [];
   }
