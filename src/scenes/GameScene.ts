@@ -2532,10 +2532,21 @@ export class GameScene extends Phaser.Scene {
   /**
    * Play a visible dumping event: car drives up, door opens, cat placed,
    * car leaves, then narration fires because Mamma Cat witnessed it.
+   *
+   * `DUMPING_EVENTS_SEEN` and the colony count are persisted only inside
+   * `showDumpingNarration`'s witness gate below. The sequence runs for
+   * ~5s, and `MAKATI_AVE_WITNESS_DIST` is only 300px — a player who
+   * wanders off mid-animation would otherwise burn a scripted progression
+   * slot (and receive a modal "you witnessed a dumping" dialogue out of
+   * thin air). Persisting at reveal means a missed dumping simply re-arms
+   * on the next approach via `checkColonyDynamics`. Trade-off: the
+   * dumped colony cat added mid-sequence stays in the world even on a
+   * miss, so a subsequent successful retry adds a second cat for the
+   * same event slot. Bounded (3 dumping events total) and requires
+   * deliberate walk-away-then-return play; accepted as a minor artefact.
    */
   private playDumpingSequence(eventNum: number): void {
     this.dumpingInProgress = true;
-    this.registry.set(StoryKeys.DUMPING_EVENTS_SEEN, eventNum);
     this.generateCarTextures();
 
     const hud = this.scene.get("HUDScene") as HUDScene | undefined;
@@ -2571,7 +2582,7 @@ export class GameScene extends Phaser.Scene {
               });
 
               this.time.delayedCall(1500, () => {
-                this.showDumpingNarration(eventNum);
+                this.showDumpingNarration(eventNum, dumpedCat);
               });
             });
           });
@@ -2580,8 +2591,24 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  private showDumpingNarration(eventNum: number): void {
+  /**
+   * Reveal/completion handler. Re-checks proximity + LOS against the
+   * dumped cat because the trigger-time `isNearMakatiAve` check is ~5s
+   * stale by now. Only persists `DUMPING_EVENTS_SEEN` / `COLONY_COUNT`
+   * and fires narration when the player is actually positioned to
+   * witness the event; otherwise the slot re-arms on the next approach.
+   */
+  private showDumpingNarration(eventNum: number, source: NPCCat | null): void {
     this.dumpingInProgress = false;
+
+    const witnessed =
+      !!source &&
+      source.active &&
+      this.isNearMakatiAve(this.player.x, this.player.y) &&
+      this.hasLineOfSight(this.player.x, this.player.y, source.x, source.y);
+    if (!witnessed) return;
+
+    this.registry.set(StoryKeys.DUMPING_EVENTS_SEEN, eventNum);
     const hud = this.scene.get("HUDScene") as HUDScene | undefined;
     this.colonyCount++;
     this.registry.set("COLONY_COUNT", this.colonyCount);
