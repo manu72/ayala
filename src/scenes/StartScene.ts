@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { GAME_VERSION } from "../config/gameVersion";
 import { SaveSystem } from "../systems/SaveSystem";
 import { clearAllConversations } from "../services/ConversationStore";
 
@@ -118,5 +119,12 @@ export class StartScene extends Phaser.Scene {
         color: "#555555",
       })
       .setOrigin(0.5);
+
+    this.add
+      .text(width - 8, height - 8, `v${GAME_VERSION}`, {
+        fontSize: "10px",
+        color: "#555555",
+      })
+      .setOrigin(1, 1);
   }
 }
