@@ -18,15 +18,15 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 
 ### Development Roadmap
 
-| Phase               | Focus                                                                     | Status      |
-| ------------------- | ------------------------------------------------------------------------- | ----------- |
-| 1. Foundation       | Phaser 3 setup, ATG map, Mamma Cat movement, Blacky NPC, day/night cycle  | Complete    |
-| 1.5 Visual Polish   | Camera zoom, textured tiles, animated sprites, map expansion, dense trees | Complete    |
-| 2. Core Mechanics   | Hunger/thirst/energy stats, food/water sources, guard NPC, save/load, HUD | Complete    |
-| 3. Social & Story   | Named NPC cats, trust system, emotes, chapters 1-3, humans, dogs, journal | Complete    |
-| 4. Cam & Endgame    | Cam encounters, Chapters 4-6, snatchers, territory, epilogue, NG+         | Complete    |
+| Phase                  | Focus                                                                                     | Status      |
+| ---------------------- | ----------------------------------------------------------------------------------------- | ----------- |
+| 1. Foundation          | Phaser 3 setup, ATG map, Mamma Cat movement, Blacky NPC, day/night cycle                  | Complete    |
+| 1.5 Visual Polish      | Camera zoom, textured tiles, animated sprites, map expansion, dense trees                 | Complete    |
+| 2. Core Mechanics      | Hunger/thirst/energy stats, food/water sources, guard NPC, save/load, HUD                 | Complete    |
+| 3. Social & Story      | Named NPC cats, trust system, emotes, chapters 1-3, humans, dogs, journal                 | Complete    |
+| 4. Cam & Endgame       | Cam encounters, Chapters 4-6, snatchers, territory, epilogue, NG+                         | Complete    |
 | 4.5 Visual & Narrative | Intro cinematic, dialogue poses, cat-person circuits, witness-gated events, chapter cards | Complete    |
-| 5. Polish & Release | Playtesting, audio, PWA/offline, deployment                               | Not started |
+| 5. Polish & Release    | Playtesting, audio, PWA/offline, deployment                                               | Not started |
 
 ### What exists now
 
@@ -62,25 +62,25 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 - **Mamma Cat greeting action** -- press Space when no food or cat is in range to play a directional greeting animation (east/west sheets); non-interruptible for the ~1s play duration
 - **Male jogger circuit** running a clockwise loop complementing the existing counter-clockwise female jogger
 - **Collapse narrative consequences:** collapse triggers HUD narration, a global-trust penalty, and a lifetime collapse counter; recovery is witness-aware, awarding per-cat trust when a nearby friendly cat has line-of-sight. Total "times you've fallen" is surfaced in the colony journal footer once it is above zero
-- **Snatcher life-stat counters:** lifetime "Times you've been snatched" (Mamma Cat captures) and "Cats lost to snatchers" (colony cats lost, named or background) surfaced in the colony journal footer alongside the collapse count, each row only appears once its counter is above zero. Colony-cat loss narrates *"A cat was here. Now it's gone."* only when Mamma Cat is within range and has line-of-sight to the event
+- **Snatcher life-stat counters:** lifetime "Times you've been snatched" (Mamma Cat captures) and "Cats lost to snatchers" (colony cats lost, named or background) surfaced in the colony journal footer alongside the collapse count, each row only appears once its counter is above zero. Colony-cat loss narrates _"A cat was here. Now it's gone."_ only when Mamma Cat is within range and has line-of-sight to the event
 - **Dynamic colony population:** the colony total (shown in the journal) is now a real running count that includes named cats, Mamma Cat, and the unseen background. Dumping events add to it; snatcher captures subtract from it. A floor equal to the named roster + Mamma Cat prevents total narrative collapse. Once the total thins enough, the visible background roster shrinks with it so the world actually feels smaller after heavy losses
 
 ## How to Play
 
 ### Controls
 
-| Input                               | Action                                                                   |
-| ----------------------------------- | ------------------------------------------------------------------------ |
-| Arrow keys / WASD                   | Move Mamma Cat                                                           |
-| Shift + direction                   | Run (2x speed, drains energy faster)                                     |
-| C (tap to toggle, or hold)          | Crouch / hide (slow, harder for threats to detect)                       |
+| Input                               | Action                                                                                                                       |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Arrow keys / WASD                   | Move Mamma Cat                                                                                                               |
+| Shift + direction                   | Run (2x speed, drains energy faster)                                                                                         |
+| C (tap to toggle, or hold)          | Crouch / hide (slow, harder for threats to detect)                                                                           |
 | Space (tap)                         | Interact -- context-sensitive: eat food, talk to nearby cat, or play Mamma Cat's greeting animation when nothing is in range |
-| Space                               | Advance dialogue text                                                    |
-| Z (hold 2 seconds while stationary) | Rest / sleep -- restores energy over time                                |
-| Any movement key, Space, or Z       | Wake up from rest                                                        |
-| J                                   | Open colony journal                                                      |
-| Tab (toggle)                        | Look around -- camera zooms out to survey the area, press again to return |
-| Escape                              | Pause menu (Save Game, Colony Journal, Resume, Quit to Title)            |
+| Space                               | Advance dialogue text                                                                                                        |
+| Z (hold 2 seconds while stationary) | Rest / sleep -- restores energy over time                                                                                    |
+| Any movement key, Space, or Z       | Wake up from rest                                                                                                            |
+| J                                   | Open colony journal                                                                                                          |
+| Tab (toggle)                        | Look around -- camera zooms out to survey the area, press again to return                                                    |
+| Escape                              | Pause menu (Save Game, Colony Journal, Resume, Quit to Title)                                                                |
 
 ### Tips
 
@@ -101,7 +101,7 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 | [Phaser 3](https://phaser.io)                | 3.90.0  | WebGL/Canvas 2D game engine, Arcade physics    |
 | [Vite](https://vitejs.dev)                   | 8.x     | Build tooling, dev server, hot-reload          |
 | [TypeScript](https://www.typescriptlang.org) | 6.x     | Language (strict mode)                         |
-| [Vitest](https://vitest.dev)                   | 3.x     | Unit testing with V8 coverage                  |
+| [Vitest](https://vitest.dev)                 | 3.x     | Unit testing with V8 coverage                  |
 | [pngjs](https://github.com/lukeapage/pngjs)  | 7.x     | Dev-only procedural tileset and map generation |
 
 Maps are generated programmatically via Node.js scripts (not via the Tiled GUI), exported as Tiled-compatible JSON consumed by Phaser's tilemap loader.
@@ -292,18 +292,10 @@ Read the full document: [docs/Ayala_GDD_v0.1.md](docs/Ayala_GDD_v0.1.md)
 ## Known Limitations
 
 - No audio (planned Phase 5)
-- Crouch has no dedicated animation yet (uses walk animation)
 - GameScene is large (~2900+ lines) and would benefit from extraction of subsystems (snatchers, colony dynamics, Camille encounters, territory); `src/systems/SnatcherSystem.ts` re-exports spawn policy logic as a stepping stone
 - Colony cat spawn positions are hardcoded, not tied to map POIs
 - The `"wary"` disposition affects indicators and narration but not yet NPC AI behaviour weights
-- Camille, Manu, and Kish use the feeder sprite profile with tinting -- no dedicated character sprites yet
-- Snatchers use the jogger type with a dark tint -- a dedicated silhouette sprite would improve visual impact
 - Dumping events fire probabilistically rather than on a deterministic schedule
-
-## Developers
-
-- **Manu** -- Developer
-- **Claude** -- AI co-developer
 
 ## License
 
