@@ -51,7 +51,7 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 - **Story chapters 4-6** completing the full narrative arc from territory claiming through adoption
 - **Territory system** at The Shops / Pyramid Steps with safe sleep, food proximity, and a home-base heart indicator
 - **Camille encounter sequence** (5 encounters over multiple game days) building the human-cat relationship
-- **Snatchers** (night threat) with detection radius, crouching/cover evasion, and capture-reload mechanic
+- **Snatchers** (night threat) with detection radius, crouching/cover evasion, capture-reload mechanic for Mamma Cat, and a background colony-cat capture sweep (named story cats are immune; sleeping cats are treated as sheltered)
 - **Colony dynamics** with 3 dumping events and fluctuating background population
 - **Centralized DialogueService** routing all NPC dialogue through a service interface (designed for AI swap in Phase 5)
 - **IndexedDB conversation history** persisting every NPC interaction for future AI context
@@ -62,6 +62,7 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 - **Mamma Cat greeting action** -- press Space when no food or cat is in range to play a directional greeting animation (east/west sheets); non-interruptible for the ~1s play duration
 - **Male jogger circuit** running a clockwise loop complementing the existing counter-clockwise female jogger
 - **Collapse narrative consequences:** collapse triggers HUD narration, a global-trust penalty, and a lifetime collapse counter; recovery is witness-aware, awarding per-cat trust when a nearby friendly cat has line-of-sight. Total "times you've fallen" is surfaced in the colony journal footer once it is above zero
+- **Snatcher life-stat counters:** lifetime "Times you've been snatched" (Mamma Cat captures) and "Cats lost to snatchers" (background colony cats lost) surfaced in the colony journal footer alongside the collapse count, each row only appears once its counter is above zero. Colony-cat loss narrates *"A cat was here. Now it's gone."* only when Mamma Cat is within range and has line-of-sight to the event
 
 ## How to Play
 
@@ -190,6 +191,7 @@ ayala/
 │   │   └── storyKeys.ts                #   Typed registry keys for story/endgame flags
 │   ├── utils/
 │   │   ├── dialoguePoseAnim.ts         #   Maps SpeakerPose tones to NPC animation rows
+│   │   ├── lifetimeCount.ts            #   Defensive registry reader for lifetime life-stat counters (unit tested)
 │   │   ├── lineOfSight.ts              #   Pure raymarch through tile collision for LOS checks
 │   │   └── snatcherSpawnLogic.ts       #   Pure nightly spawn decision logic (unit tested)
 │   ├── scenes/
@@ -289,7 +291,7 @@ Read the full document: [docs/Ayala_GDD_v0.1.md](docs/Ayala_GDD_v0.1.md)
 
 - No audio (planned Phase 5)
 - Crouch has no dedicated animation yet (uses walk animation)
-- GameScene is large (~2400+ lines) and would benefit from extraction of subsystems (snatchers, colony dynamics, Camille encounters, territory); `src/systems/SnatcherSystem.ts` re-exports spawn policy logic as a stepping stone
+- GameScene is large (~2900+ lines) and would benefit from extraction of subsystems (snatchers, colony dynamics, Camille encounters, territory); `src/systems/SnatcherSystem.ts` re-exports spawn policy logic as a stepping stone
 - Colony cat spawn positions are hardcoded, not tied to map POIs
 - The `"wary"` disposition affects indicators and narration but not yet NPC AI behaviour weights
 - Camille, Manu, and Kish use the feeder sprite profile with tinting -- no dedicated character sprites yet

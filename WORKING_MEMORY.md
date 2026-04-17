@@ -126,8 +126,11 @@ SmallDog.png, WhiteDog.png, BrownDog.png — randomly assigned to dog walkers
 
 - Key: `ayala_save` in localStorage
 - Phase 1-3 keys: MET_BLACKY, TIGER_TALKS, JAYCO_TALKS, KNOWN_CATS, CHAPTER, CH1_RESTED, FLUFFY_TALKS, PEDIGREE_TALKS, MET_GINGER_A, MET_GINGER_B, JAYCO_JR_TALKS, JOURNAL_MET_DAYS
-- Phase 4 keys: VISITED_ZONE_6, TERRITORY_CLAIMED, TERRITORY_DAY, CAMILLE_ENCOUNTER, CAMILLE_ENCOUNTER_DAY, COLONY_COUNT, DUMPING_EVENTS_SEEN, CATS_SNATCHED, GAME_COMPLETED, NEW_GAME_PLUS, INTRO_SEEN, FIRST_SNATCHER_SEEN, ENCOUNTER_5_COMPLETE
-- Phase 4.5+ keys: COLLAPSE_COUNT (lifetime times Mamma Cat has fallen; surfaced in the journal footer once > 0)
+- Phase 4 keys: VISITED_ZONE_6, TERRITORY_CLAIMED, TERRITORY_DAY, CAMILLE_ENCOUNTER, CAMILLE_ENCOUNTER_DAY, COLONY_COUNT, DUMPING_EVENTS_SEEN, GAME_COMPLETED, NEW_GAME_PLUS, INTRO_SEEN, FIRST_SNATCHER_SEEN, ENCOUNTER_5_COMPLETE
+- Phase 4.5+ life-stat keys (all lifetime counters surfaced in the journal footer once > 0; all read via the shared `readLifetimeCount` helper in `src/utils/lifetimeCount.ts`):
+  - `COLLAPSE_COUNT` — times Mamma Cat has fallen
+  - `PLAYER_SNATCHED_COUNT` — times Mamma Cat was captured by a snatcher (incremented before the save-and-restart flow in `handleSnatcherCapture`)
+  - `CATS_SNATCHED` — background colony cats lost to snatchers (incremented from v0.1.9 via `handleColonyCatSnatch`; was a dead scaffolded key before)
 - Legacy: `localStorage["ayala_intro_seen"]` is migrated to registry `INTRO_SEEN` on load; both may be set on intro completion for older clients
 - Also persists: player position, stats, timeOfDay, gameTimeMs, sourceStates, trust data, territory data
 - Conversation history stored separately in IndexedDB (`ayala_conversations`)
@@ -231,6 +234,11 @@ SmallDog.png, WhiteDog.png, BrownDog.png — randomly assigned to dog walkers
 
 - When restarting a scene (e.g. after snatcher capture), pass flags through the `data` parameter rather than using `delayedCall`, which won't survive the restart. The pattern is: `this.scene.restart({ loadSave: true, snatcherCapture: true })` and check in `create()`.
 
+### Persisting counters across save-based scene restarts
+
+- Any registry value you bump just before a `scene.restart({ loadSave: true })` will be overwritten on reload, because `SaveSystem.load()` writes the on-disk `save.variables` back into the registry. The pattern for lifetime counters that need to span a capture/restart flow is: (1) mutate the registry, (2) call `this.autoSave()` so the new value reaches localStorage, (3) *then* trigger the fade/restart. See `GameScene.handleSnatcherCapture` for `PLAYER_SNATCHED_COUNT`. Colony-side counters that don't go through a restart (e.g. `COLLAPSE_COUNT`, `CATS_SNATCHED`) don't need the intermediate save — the normal autosave cadence is enough.
+- Life-stat counters are game-scoped, not scene-scoped. Phaser's `scene.registry` is actually the game-level `game.registry`, so any key not explicitly cleared in `GameScene.create`'s New-Game clear-list will leak from a previous run into "New Game". Keep the clear-list as the single source of truth for which keys reset on a fresh start — and add new `StoryKeys.*` entries there at creation time, not as a follow-up.
+
 ### Cross-system communication — GameScene polls, it does not subscribe
 
 - The dominant pattern is `GameScene.update()` reading state from systems each tick (`stats.collapsed`, `stats.hunger`, `trust.globalTrust`, `foodSource.hasFood`, …). `DayNightCycle` is the *only* system that currently emits events, because consumers sit in other scenes (`HUDScene`, `StartScene`) that can't poll `GameScene` cheaply. Do NOT add a lone `EventEmitter` to another system just to model a state transition — it fragments the architecture and leaves some consumers polling while others subscribe. For rising/falling-edge semantics on polled state, cache the previous value on `GameScene` (e.g. `private wasCollapsed = false`) and compare in `update()`: this is how the collapse narrative hooks (`onCollapsed` / `onRecovered`) are wired. Reconsider only if multiple cross-scene consumers appear.
@@ -258,6 +266,14 @@ SmallDog.png, WhiteDog.png, BrownDog.png — randomly assigned to dog walkers
 
 ## Recent Features (v0.1.8 - v0.1.9)
 
+### v0.1.9 — Snatcher counters + colony-cat capture mechanic
+
+- **Two new lifetime counters** wired to the existing snatcher system and surfaced in the journal footer alongside the collapse count: `PLAYER_SNATCHED_COUNT` ("Times you've been snatched: N") and `CATS_SNATCHED` ("Cats lost to snatchers: N"). Both suppressed when 0, all three counters share the muted "Days survived" tone.
+- **Colony-cat capture mechanic** added (`handleColonyCatSnatch` in `GameScene`). Before this version, `CATS_SNATCHED` was a scaffolded but unincremented registry key, and cats only ever *fled* from snatchers. Now `checkSnatcherDetection` also sweeps for background "Colony Cat N" entries within a 16px grab range; named story cats are immune, sleeping cats are treated as sheltered (mirrors the player rule). Narration "A cat was here. Now it's gone." is gated by the standard Phase 4.5 witness check (proximity + LOS); unperceived captures happen silently. Splice-during-iteration is avoided by collecting victims and applying removals after the nested loop.
+- **Player capture counter** (`PLAYER_SNATCHED_COUNT`): incremented in `handleSnatcherCapture` *before* `autoSave()`, then the existing fade → dialogue → `scene.restart({ loadSave: true })` flow. See the "Persisting counters across save-based scene restarts" lesson.
+- **`readLifetimeCount` helper** (`src/utils/lifetimeCount.ts`) — pure, no-Phaser defensive parse that powers all three journal life-stat rows. Returns a safe non-negative integer; non-finite, negative, or non-numeric registry values collapse to 0 so the caller can use `> 0` as its "show this row" gate. 8 unit tests.
+- **Latent bug fixed:** `COLLAPSE_COUNT` was missing from the New-Game clear-list, so a previous run's fall count would leak into a fresh game. Added to the list alongside `CATS_SNATCHED` (promoted from raw string literal to `StoryKeys.CATS_SNATCHED`) and `PLAYER_SNATCHED_COUNT`.
+
 ### v0.1.9 — Collapse mechanism narrative upgrade
 
 - **Rising/falling-edge collapse detection** in `GameScene.update()` via a `wasCollapsed` boolean. On collapse it runs `onCollapsed()` (HUD narration, `trust.collapsedInColony()` penalty, `StoryKeys.COLLAPSE_COUNT++` on the registry). `onRecovered()` is a symmetric hook for future use. The flag is re-primed after save load in `create()` to suppress spurious events.
@@ -283,10 +299,10 @@ SmallDog.png, WhiteDog.png, BrownDog.png — randomly assigned to dog walkers
 - **Test coverage is partial:** Vitest unit tests cover pure systems and most leaf modules — StatsSystem, TrustSystem, TerritorySystem, SaveSystem, ChapterSystem, DialogueService, DialogueSystem, DayNightCycle, FoodSource, BaseNPC helpers, HumanNPC, SpriteProfiles, ConversationStore, cat-dialogue, storyKeys, plus pure utils (`lineOfSight`, `snatcherSpawnLogic`, `dialoguePoseAnim`). ~18 test files, ~315 tests at the time of writing (count drifts; re-run `npx vitest run` for the current number). Remaining gaps are the Phaser-coupled scene glue (GameScene, HUDScene, JournalScene, EpilogueScene, BootScene, StartScene) and the NPCCat/GuardNPC/DogNPC state-machine update loops. CI runs tests before build.
 - **No audio:** Planned for Phase 5.
 - **Tilemap POI names are hardcoded:** Spawn points, food sources, shelter POIs use string names matched between Tiled JSON and GameScene. No validation that map contains expected POIs.
-- **GameScene is ~2400+ lines:** Camille encounters, snatchers, colony dynamics, and territory should be extracted into dedicated systems; `SnatcherSystem.ts` is a thin re-export for spawn policy only.
+- **GameScene is ~2900+ lines:** Camille encounters, snatchers, colony dynamics, and territory should be extracted into dedicated systems; `SnatcherSystem.ts` is a thin re-export for spawn policy only.
 - **Colony cat random positions:** Not tied to map POIs; positions are hardcoded zone coordinates with random offsets. May clip into objects.
 - **Disposition type `"wary"` added in Phase 3:** Not yet used in NPC AI behavior weights (only affects emotes/narration/indicators).
 - **Camille/Manu/Kish use generic HumanNPC:** No dedicated sprites yet. They use the feeder profile/sprite. Custom sprites needed for visual distinction.
 - **Snatchers use jogger type with dark tint:** A dedicated snatcher sprite (silhouette) would improve visual impact.
 - **Dumping events fire probabilistically:** Could be more deterministic with a day-counter to avoid very long waits or double-fires.
-- **Partial registry-key typing:** `StoryKeys` (`src/registry/storyKeys.ts`) covers story/endgame + life-stat keys (`INTRO_SEEN`, `FIRST_SNATCHER_SEEN`, `CAMILLE_ENCOUNTER`(`_DAY`), `DUMPING_EVENTS_SEEN`, `ENCOUNTER_5_COMPLETE`, `NEW_GAME_PLUS`, `GAME_COMPLETED`, `COLLAPSE_COUNT`). Cat/chapter progression keys (`MET_BLACKY`, `TIGER_TALKS`, `JAYCO_TALKS`, `KNOWN_CATS`, `CHAPTER`, `CH1_RESTED`, `FLUFFY_TALKS`, `PEDIGREE_TALKS`, `MET_GINGER_A`/`_B`, `JAYCO_JR_TALKS`, `JOURNAL_MET_DAYS`, `VISITED_ZONE_6`, `TERRITORY_CLAIMED`, `TERRITORY_DAY`, `COLONY_COUNT`, `CATS_SNATCHED`) are still raw string literals in `GameScene` and `SaveSystem.TRACKED_KEYS`. Follow-up: introduce a sibling `ProgressionKeys` module and retrofit the clear-list in `GameScene.create` plus `SaveSystem.TRACKED_KEYS` so typos become compile errors everywhere.
+- **Partial registry-key typing:** `StoryKeys` (`src/registry/storyKeys.ts`) covers story/endgame + life-stat keys (`INTRO_SEEN`, `FIRST_SNATCHER_SEEN`, `CAMILLE_ENCOUNTER`(`_DAY`), `DUMPING_EVENTS_SEEN`, `ENCOUNTER_5_COMPLETE`, `NEW_GAME_PLUS`, `GAME_COMPLETED`, `COLLAPSE_COUNT`, `CATS_SNATCHED`, `PLAYER_SNATCHED_COUNT`). Cat/chapter progression keys (`MET_BLACKY`, `TIGER_TALKS`, `JAYCO_TALKS`, `KNOWN_CATS`, `CHAPTER`, `CH1_RESTED`, `FLUFFY_TALKS`, `PEDIGREE_TALKS`, `MET_GINGER_A`/`_B`, `JAYCO_JR_TALKS`, `JOURNAL_MET_DAYS`, `VISITED_ZONE_6`, `TERRITORY_CLAIMED`, `TERRITORY_DAY`, `COLONY_COUNT`) are still raw string literals in `GameScene` and `SaveSystem.TRACKED_KEYS`. Follow-up: introduce a sibling `ProgressionKeys` module and retrofit the clear-list in `GameScene.create` plus `SaveSystem.TRACKED_KEYS` so typos become compile errors everywhere.
