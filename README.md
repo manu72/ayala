@@ -14,7 +14,7 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 
 ## Project Status
 
-**Version 0.1.6** -- Phases 1 through 4 and **Phase 4.5 (visual & narrative alignment)** are complete. The game is playable from start to finish: survival mechanics, social systems, 6 story chapters, territory claiming, snatchers, the full adoption story arc through to the epilogue, plus intro cinematic, grounded narration hooks, and human/cat engagement polish.
+**Version 0.1.7** -- Phases 1 through 4 and **Phase 4.5 (visual & narrative alignment)** are complete. The game is playable from start to finish: survival mechanics, social systems, 6 story chapters, territory claiming, snatchers, the full adoption story arc through to the epilogue, plus intro cinematic, grounded narration hooks, and human/cat engagement polish.
 
 ### Development Roadmap
 
@@ -179,9 +179,15 @@ ayala/
 │   ├── main.ts                         #   Entry point -- creates Phaser.Game
 │   ├── config/
 │   │   ├── GameConfig.ts               #   Resolution, physics, scenes, scaling
-│   │   └── constants.ts                #   Shared constants
+│   │   └── gameplayConstants.ts        #   Shared gameplay radii, witness distances, input timings
 │   ├── data/
 │   │   └── cat-dialogue.ts             #   Named cat dialogue scripts (condition/response data)
+│   ├── registry/
+│   │   └── storyKeys.ts                #   Typed registry keys for story/endgame flags
+│   ├── utils/
+│   │   ├── dialoguePoseAnim.ts         #   Maps SpeakerPose tones to NPC animation rows
+│   │   ├── lineOfSight.ts              #   Pure raymarch through tile collision for LOS checks
+│   │   └── snatcherSpawnLogic.ts       #   Pure nightly spawn decision logic (unit tested)
 │   ├── scenes/
 │   │   ├── BootScene.ts                #   Asset preloading
 │   │   ├── StartScene.ts               #   Title screen, new/continue/NG+
@@ -211,6 +217,7 @@ ayala/
 │       ├── EmoteSystem.ts              #   Floating text emotes
 │       ├── ChapterSystem.ts            #   Story chapter progression (Chapters 1-6)
 │       ├── TerritorySystem.ts          #   Territory claiming and benefits at The Shops
+│       ├── SnatcherSystem.ts           #   Facade re-exporting snatcher spawn policy
 │       └── ThreatIndicator.ts          #   NPC disposition indicators
 │
 ├── index.html                           # Vite entry page
@@ -223,7 +230,7 @@ ayala/
 │   ├── data/                           #   cat-dialogue script conditions
 │   └── sprites/                        #   BaseNPC helpers, SpriteProfiles
 ├── vitest.config.ts                     # Vitest configuration
-└── VERSION                              # 0.1.6
+└── VERSION                              # 0.1.7
 ```
 
 ## Asset Generation

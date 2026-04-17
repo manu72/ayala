@@ -2,7 +2,7 @@
 
 > Persistent memory layer for AI-assisted development sessions.
 > Last Updated: 2026-04-17
-> Version: 0.1.6
+> Version: 0.1.7
 
 ---
 
@@ -11,7 +11,7 @@
 **Ayala** is a 2D top-down cat adventure game built with Phaser 3 + Vite + TypeScript. The player controls Mamma Cat, a dumped pet navigating the colony at Ayala Triangle Gardens in Makati, Manila.
 
 - **Branch:** `sit` (active development)
-- **Repo:** ~5400 LoC (30 TypeScript source files)
+- **Repo:** ~8000 LoC (35 TypeScript source files)
 - **Build:** `npx vite build` produces static files in `dist/`
 
 ---
@@ -41,7 +41,7 @@ BootScene -> StartScene -> GameScene + HUDScene (overlay) + JournalScene (overla
 
 - **BootScene** (`src/scenes/BootScene.ts`): Loads all assets (tilesets, spritesheets)
 - **StartScene** (`src/scenes/StartScene.ts`): Title screen, New/Continue
-- **GameScene** (`src/scenes/GameScene.ts`): Main game loop, NPC management, input, chapters (~2400+ lines)
+- **GameScene** (`src/scenes/GameScene.ts`): Main game loop, NPC management, input, chapters (~2600 lines)
 - **HUDScene** (`src/scenes/HUDScene.ts`): Stats bars, clock, rest progress, pause menu, narration, dialogue
 - **JournalScene** (`src/scenes/JournalScene.ts`): Colony journal overlay (J key or pause menu)
 
@@ -199,6 +199,7 @@ SmallDog.png, WhiteDog.png, BrownDog.png — randomly assigned to dog walkers
 
 - The J-key handler in `GameScene.update()` must check `!this.dialogue.isActive` before opening the journal, otherwise Space key presses silently advance dialogue in the background while the journal is open.
 - ESC key handling is centralized in `GameScene.update()` — it checks `JournalScene` first, then toggles pause. The journal and HUDScene do NOT register their own ESC listeners.
+- **Phaser dispatches key `"down"` events BEFORE `scene.update()`, so one Space keystroke can chain through two layers in the same frame.** `DialogueSystem.advance()` (wired via `advanceKey.on("down", ...)`) closes the overlay and fires `onComplete`; later in the same frame `JustDown(spaceKey)` is still true and `dialogue.isActive` is now false, so `tryInteract()` re-engages the same NPC and plays the next scripted response (e.g. Blacky's first-meeting dialogue chaining into the `blacky_return` line with no elapsed time). Fix pattern: track the most recent dialogue partner in `GameScene.lastDialoguePartner` when `dialogue.show(...)`'s `onComplete` fires, skip that cat in `tryInteract()`, and clear the guard in `updateNPCs()` once `dist > INTERACTION_DISTANCE`. Clear it in `shutdown()` to avoid stale state across scene restarts. This also enforces the "walk away, come back" narrative gate for return-dialogue scripts.
 
 ### SpriteProfile System (`SpriteProfiles.ts`)
 
@@ -242,7 +243,7 @@ SmallDog.png, WhiteDog.png, BrownDog.png — randomly assigned to dog walkers
 
 ## Technical Debt
 
-- **Test coverage is partial:** Vitest unit tests cover pure systems (StatsSystem, TrustSystem, TerritorySystem, SaveSystem, ChapterSystem, DialogueService, cat-dialogue, BaseNPC helpers, SpriteProfiles). Phaser-coupled code (scenes, FoodSource, DayNightCycle visual layer) has no automated tests. CI runs tests before build.
+- **Test coverage is partial:** Vitest unit tests cover pure systems and most leaf modules — StatsSystem, TrustSystem, TerritorySystem, SaveSystem, ChapterSystem, DialogueService, DialogueSystem, DayNightCycle, FoodSource, BaseNPC helpers, HumanNPC, SpriteProfiles, ConversationStore, cat-dialogue, storyKeys, plus pure utils (`lineOfSight`, `snatcherSpawnLogic`, `dialoguePoseAnim`). 18 test files, 307 tests at the time of writing. Remaining gaps are the Phaser-coupled scene glue (GameScene, HUDScene, JournalScene, EpilogueScene, BootScene, StartScene) and the NPCCat/GuardNPC/DogNPC state-machine update loops. CI runs tests before build.
 - **No audio:** Planned for Phase 5.
 - **Tilemap POI names are hardcoded:** Spawn points, food sources, shelter POIs use string names matched between Tiled JSON and GameScene. No validation that map contains expected POIs.
 - **GameScene is ~2400+ lines:** Camille encounters, snatchers, colony dynamics, and territory should be extracted into dedicated systems; `SnatcherSystem.ts` is a thin re-export for spawn policy only.
