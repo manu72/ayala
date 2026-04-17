@@ -16,7 +16,7 @@ import { EmoteSystem, type EmoteType } from "../systems/EmoteSystem";
 import { ChapterSystem } from "../systems/ChapterSystem";
 import { TerritorySystem } from "../systems/TerritorySystem";
 import type { HUDScene } from "./HUDScene";
-import { GP, REST_HOLD_MS } from "../config/gameplayConstants";
+import { GP, REST_HOLD_MS, COLLAPSE_RECOVERY_MS } from "../config/gameplayConstants";
 import { StoryKeys, migrateLegacyIntroFlag } from "../registry/storyKeys";
 import {
   ScriptedDialogueService,
@@ -78,6 +78,19 @@ export class GameScene extends Phaser.Scene {
   private shelterPoints: Array<{ x: number; y: number }> = [];
   private collapseRecoveryTimer = 0;
   private collapseRecovering = false;
+  /**
+   * Rising/falling-edge tracker for `stats.collapsed`. `onCollapsed` /
+   * `onRecovered` only fire on the frame the flag transitions. Reset in
+   * `create()` after a save load so `fromJSON` never triggers narration.
+   */
+  private wasCollapsed = false;
+  /**
+   * The nearest friendly NPC cat captured at the moment of collapse, used by
+   * `recoverFromCollapse()` for witness-aware narration and bonus trust. Held
+   * by object ref (not name) so the check survives name churn. Null when no
+   * witness was in range, or between collapses.
+   */
+  private collapseWitness: NPCCat | null = null;
   private emotes!: EmoteSystem;
   chapters!: ChapterSystem;
   private chapterCheckTimer = 0;
@@ -163,6 +176,10 @@ export class GameScene extends Phaser.Scene {
     }
     this.lastDialoguePartner = null;
     this.player?.stopGreeting();
+    this.collapseWitness = null;
+    this.wasCollapsed = false;
+    this.collapseRecovering = false;
+    this.collapseRecoveryTimer = 0;
     this.dialogue.dismiss();
   }
 
@@ -213,6 +230,8 @@ export class GameScene extends Phaser.Scene {
     this.isPaused = false;
     this.collapseRecovering = false;
     this.collapseRecoveryTimer = 0;
+    this.wasCollapsed = false;
+    this.collapseWitness = null;
 
     this.map = this.make.tilemap({ key: "atg" });
     const parkTileset = this.map.addTilesetImage("park-tiles", "park-tiles");
@@ -728,7 +747,7 @@ export class GameScene extends Phaser.Scene {
         } else {
           this.resumeGame();
         }
-      } else if (!this.isPaused && !this.dialogue.isActive) {
+      } else if (!this.isPaused && !this.dialogue.isActive && !this.stats.collapsed) {
         this.openJournal();
       }
       return;
@@ -741,7 +760,22 @@ export class GameScene extends Phaser.Scene {
 
     this.player.speedMultiplier = this.stats.speedMultiplier;
 
-    // Collapse recovery
+    // Collapse rising/falling-edge detection. Kept symmetrical and co-located
+    // with the polling branch below so the whole collapse state machine lives
+    // in one place. `onCollapsed` runs narrative side effects (narration, trust
+    // penalty, registry increment, witness capture) exactly once per collapse;
+    // `onRecovered` mirrors it for bookkeeping after `recoverFromCollapse()`
+    // flips `stats.collapsed` back to false.
+    if (this.stats.collapsed && !this.wasCollapsed) {
+      this.onCollapsed();
+    } else if (!this.stats.collapsed && this.wasCollapsed) {
+      this.onRecovered();
+    }
+    this.wasCollapsed = this.stats.collapsed;
+
+    // Collapse recovery — pins the player and drives the 3 s blackout timer.
+    // Consistent with every other polled state transition in this scene; no
+    // event emitter, no delayedCall, no listener lifecycle to manage.
     if (this.stats.collapsed) {
       this.player.setVelocity(0);
       if (!this.collapseRecovering) {
@@ -749,7 +783,7 @@ export class GameScene extends Phaser.Scene {
         this.collapseRecoveryTimer = 0;
       }
       this.collapseRecoveryTimer += delta;
-      if (this.collapseRecoveryTimer >= 3000) {
+      if (this.collapseRecoveryTimer >= COLLAPSE_RECOVERY_MS) {
         this.recoverFromCollapse();
       }
       return;
@@ -1395,6 +1429,61 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  /**
+   * Rising-edge handler for `stats.collapsed`. Fires exactly once on the frame
+   * the flag transitions from false to true. All side effects are idempotent
+   * enough to survive save-load (but `StatsSystem.fromJSON` also resets the
+   * flag, so in practice this only fires on a genuine in-session collapse).
+   */
+  private onCollapsed(): void {
+    // Capture the nearest friendly NPC cat (with LOS) as a witness. Stored by
+    // object ref so a rename would still point to the same cat; we re-check
+    // `.active` before using it in `recoverFromCollapse`.
+    this.collapseWitness = this.findCollapseWitness();
+
+    const hud = this.scene.get("HUDScene") as HUDScene | undefined;
+    hud?.showNarration?.("You can't... go any further.");
+
+    this.trust.collapsedInColony();
+
+    const prior = this.registry.get(StoryKeys.COLLAPSE_COUNT);
+    const priorCount = typeof prior === "number" && Number.isFinite(prior) ? prior : 0;
+    this.registry.set(StoryKeys.COLLAPSE_COUNT, priorCount + 1);
+  }
+
+  /**
+   * Falling-edge handler. Currently a no-op hook; the recovery narration and
+   * trust credit are emitted from `recoverFromCollapse()` itself because they
+   * depend on witness range at the moment of teleport, not at the moment the
+   * flag flips. Kept as a distinct symbol so the edge detection above reads
+   * symmetrically and a future change (e.g. an end-of-blackout SFX cue) has an
+   * obvious home.
+   */
+  private onRecovered(): void {
+    // intentionally empty — see doc comment above.
+  }
+
+  /**
+   * Find the nearest friendly NPC cat within narration-witness range that has
+   * line-of-sight to the player. Returns null when no candidate qualifies.
+   * Used at the moment of collapse so a friendly cat who wanders off during
+   * the 3 s blackout can still be credited at recovery time.
+   */
+  private findCollapseWitness(): NPCCat | null {
+    let nearest: NPCCat | null = null;
+    let nearestDist: number = GP.NARRATION_WITNESS_DIST;
+    for (const { cat } of this.npcs) {
+      if (!cat.active) continue;
+      if (cat.disposition !== "friendly") continue;
+      const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, cat.x, cat.y);
+      if (dist > nearestDist) continue;
+      if (!this.hasLineOfSight(this.player.x, this.player.y, cat.x, cat.y)) continue;
+      nearest = cat;
+      nearestDist = dist;
+    }
+    return nearest;
+  }
+
   private recoverFromCollapse(): void {
     const safeSleep = this.map.findObject("spawns", (o) => o.name === "poi_safe_sleep");
     const safeX = safeSleep?.x ?? this.map.widthInPixels / 2;
@@ -1406,6 +1495,28 @@ export class GameScene extends Phaser.Scene {
     this.collapseRecoveryTimer = 0;
 
     this.cameras.main.flash(500, 0, 0, 0);
+
+    // Witness-aware recovery narration. If a friendly cat is still active and
+    // within range at the moment we teleport to safe sleep, credit them with
+    // the "stayed close" trust bump. Otherwise, a neutral line.
+    const hud = this.scene.get("HUDScene") as HUDScene | undefined;
+    const witness = this.collapseWitness;
+    const witnessStillHere =
+      witness !== null &&
+      witness.active &&
+      Phaser.Math.Distance.Between(this.player.x, this.player.y, witness.x, witness.y) <=
+        GP.NARRATION_WITNESS_DIST;
+
+    if (witnessStillHere && witness) {
+      hud?.showNarration?.(`You wake. ${witness.npcName} stayed close.`);
+      this.trust.supportedDuringCollapse(witness.npcName);
+      this.syncTrustDisposition(witness.npcName);
+    } else {
+      hud?.showNarration?.("You wake. Safer ground.");
+    }
+
+    this.collapseWitness = null;
+
     this.autoSave();
   }
 

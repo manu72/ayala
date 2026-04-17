@@ -23,3 +23,6 @@ export const GP = {
 
 /** Duration (ms) the player must hold the rest key to enter resting state. */
 export const REST_HOLD_MS = 1000;
+
+/** Duration (ms) Mamma Cat lies immobilised before the collapse recovery fires. */
+export const COLLAPSE_RECOVERY_MS = 3000;

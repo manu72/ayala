@@ -59,6 +59,26 @@ export class TrustSystem {
     this.addGlobal(3);
   }
 
+  /**
+   * Apply a small global-trust penalty when Mamma Cat collapses in the open.
+   * Clamps at zero so repeated collapses don't push trust into negatives.
+   * The magnitude intentionally matches the existing scale (cf. seenEating=+1,
+   * survivedDay=+3, firstConversation=+5).
+   */
+  collapsedInColony(): void {
+    this._global = Math.max(0, this._global - 2);
+  }
+
+  /**
+   * Credit a nearby friendly cat for "staying with" Mamma Cat during collapse.
+   * Awards a small global bump plus a per-cat bump to reinforce the bond with
+   * the specific witness. Both values clamp at MAX_TRUST via addGlobal/addCat.
+   */
+  supportedDuringCollapse(catName: string): void {
+    this.addGlobal(1);
+    this.addCat(catName, 3);
+  }
+
   private addGlobal(amount: number): void {
     this._global = Math.min(MAX_TRUST, this._global + amount);
   }

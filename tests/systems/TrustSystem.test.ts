@@ -83,6 +83,65 @@ describe('TrustSystem', () => {
     })
   })
 
+  describe('collapsedInColony', () => {
+    it('subtracts 2 global trust', () => {
+      trust.firstConversation('Tiger')
+      expect(trust.global).toBe(5)
+      trust.collapsedInColony()
+      expect(trust.global).toBe(3)
+    })
+
+    it('clamps global trust at zero (never goes negative)', () => {
+      expect(trust.global).toBe(0)
+      trust.collapsedInColony()
+      expect(trust.global).toBe(0)
+      trust.collapsedInColony()
+      trust.collapsedInColony()
+      expect(trust.global).toBe(0)
+    })
+
+    it('does not touch per-cat trust', () => {
+      trust.firstConversation('Tiger')
+      trust.collapsedInColony()
+      expect(trust.getCatTrust('Tiger')).toBe(10)
+    })
+  })
+
+  describe('supportedDuringCollapse', () => {
+    it('awards 1 global and 3 cat trust', () => {
+      trust.supportedDuringCollapse('Blacky')
+      expect(trust.global).toBe(1)
+      expect(trust.getCatTrust('Blacky')).toBe(3)
+    })
+
+    it('stacks on existing trust', () => {
+      trust.firstConversation('Blacky')
+      trust.supportedDuringCollapse('Blacky')
+      expect(trust.global).toBe(6)
+      expect(trust.getCatTrust('Blacky')).toBe(13)
+    })
+
+    it('clamps per-cat trust at MAX_TRUST (100)', () => {
+      for (let i = 0; i < 10; i++) trust.firstConversation('Blacky')
+      expect(trust.getCatTrust('Blacky')).toBe(100)
+      trust.supportedDuringCollapse('Blacky')
+      expect(trust.getCatTrust('Blacky')).toBe(100)
+    })
+
+    it('clamps global trust at MAX_TRUST (100)', () => {
+      for (let i = 0; i < 50; i++) trust.survivedDay()
+      expect(trust.global).toBe(100)
+      trust.supportedDuringCollapse('Tiger')
+      expect(trust.global).toBe(100)
+    })
+
+    it('creates a new cat entry when one does not exist', () => {
+      expect(trust.getCatTrust('Unknown')).toBe(0)
+      trust.supportedDuringCollapse('Unknown')
+      expect(trust.getCatTrust('Unknown')).toBe(3)
+    })
+  })
+
   describe('clamping at MAX_TRUST (100)', () => {
     it('caps global trust at 100', () => {
       for (let i = 0; i < 50; i++) trust.survivedDay()

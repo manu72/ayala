@@ -11,6 +11,7 @@ export const StoryKeys = {
   ENCOUNTER_5_COMPLETE: "ENCOUNTER_5_COMPLETE",
   NEW_GAME_PLUS: "NEW_GAME_PLUS",
   GAME_COMPLETED: "GAME_COMPLETED",
+  COLLAPSE_COUNT: "COLLAPSE_COUNT",
 } as const;
 
 export type StoryKey = (typeof StoryKeys)[keyof typeof StoryKeys];
