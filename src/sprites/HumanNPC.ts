@@ -28,6 +28,14 @@ export interface HumanConfig {
    * {@link HumanNPC.applySteeringAvoidance}.
    */
   avoidanceRadius?: number;
+  /**
+   * If set (>0), after completing a full path traversal the NPC becomes
+   * invisible for this many seconds (simulating exiting the map), then
+   * respawns at path[0] and restarts the loop. Useful for perimeter
+   * patrols that should visibly "leave" and "return" rather than
+   * teleport-wrap from the last waypoint to the first.
+   */
+  loopPauseSec?: number;
 }
 
 /** Park exit waypoints — on the road perimeter, avoiding interior obstacles. */
@@ -68,6 +76,10 @@ export class HumanNPC extends BaseNPC {
 
   private exiting = false;
   private exitTarget: { x: number; y: number } | null = null;
+
+  // Between-loop "off-map" pause (see HumanConfig.loopPauseSec).
+  private loopPausing = false;
+  private loopPauseTimer = 0;
 
   constructor(scene: Phaser.Scene, config: HumanConfig) {
     const prof = profileForType(config.type);
@@ -175,12 +187,26 @@ export class HumanNPC extends BaseNPC {
     if (shouldBeActive && !this.isActive && !this.exiting) {
       this.activate();
     } else if (!shouldBeActive && this.isActive && !this.exiting) {
+      if (this.loopPausing) {
+        // Already off-map between loops; deactivate quietly — don't try to
+        // walk to an exit since we're effectively already gone.
+        this.deactivate();
+        return;
+      }
       this.startExiting();
     }
   }
 
   update(delta: number): void {
     if (!this.isActive) return;
+
+    if (this.loopPausing) {
+      this.loopPauseTimer -= delta;
+      if (this.loopPauseTimer <= 0) {
+        this.endLoopPause();
+      }
+      return;
+    }
 
     if (this.exiting) {
       this.updateExiting();
@@ -269,6 +295,10 @@ export class HumanNPC extends BaseNPC {
         this.startExiting();
         return;
       }
+      if (this.config.loopPauseSec && this.config.loopPauseSec > 0) {
+        this.beginLoopPause();
+        return;
+      }
       this.currentWaypoint = 0;
       this.greetedCats = new WeakSet<object>();
       this.manuGreetWave = 0;
@@ -277,8 +307,46 @@ export class HumanNPC extends BaseNPC {
     }
   }
 
+  /**
+   * Enter the between-loops "off-map" pause. The NPC is hidden and its
+   * body is disabled so it can't be collided with or steered around while
+   * offstage. {@link endLoopPause} restores it at path[0] once the timer
+   * elapses.
+   */
+  private beginLoopPause(): void {
+    this.loopPausing = true;
+    this.loopPauseTimer = (this.config.loopPauseSec ?? 0) * 1000;
+    this.setVelocity(0);
+    this.setVisible(false);
+    const body = this.body as Phaser.Physics.Arcade.Body | undefined;
+    body?.setEnable(false);
+  }
+
+  private endLoopPause(): void {
+    this.loopPausing = false;
+    this.greetedCats = new WeakSet<object>();
+    this.manuGreetWave = 0;
+    const start = this.waypointPath[0]!;
+    const body = this.body as Phaser.Physics.Arcade.Body | undefined;
+    body?.setEnable(true);
+    if (body) {
+      body.reset(start.x, start.y);
+    } else {
+      this.setPosition(start.x, start.y);
+    }
+    this.setVisible(true);
+    this.currentWaypoint =
+      this.waypointPath.length > 1
+        ? this.normalizedLingerIndex === 0
+          ? 0
+          : 1
+        : 0;
+  }
+
   private activate(): void {
     this.isActive = true;
+    this.loopPausing = false;
+    this.loopPauseTimer = 0;
     this.setVisible(true);
     this.setActive(true);
     const body = this.body as Phaser.Physics.Arcade.Body | undefined;
@@ -303,6 +371,8 @@ export class HumanNPC extends BaseNPC {
     this.isActive = false;
     this.exiting = false;
     this.exitTarget = null;
+    this.loopPausing = false;
+    this.loopPauseTimer = 0;
     this.feedingStationProp?.destroy();
     this.feedingStationProp = null;
     this.setVisible(false);
@@ -369,7 +439,7 @@ export class HumanNPC extends BaseNPC {
     neighbours: Iterable<{ x: number; y: number }>,
     radius: number,
   ): void {
-    if (!this.isActive || this.greetingActive || this.lingering) return;
+    if (!this.isActive || this.greetingActive || this.lingering || this.loopPausing) return;
     const body = this.body as Phaser.Physics.Arcade.Body | undefined;
     if (!body) return;
     const vx = body.velocity.x;

@@ -1686,39 +1686,31 @@ export class GameScene extends Phaser.Scene {
           { x: 1400, y: 1100 },
         ],
       },
-      // Jogger 3 (male): clockwise loop around the park — up the NW diagonal
-      // sidewalk, cuts east along the main northern park walkway (shortcut),
-      // down the east sidewalk, and back along the southern road. Dawn +
-      // evenings only. Steers softly around other NPCs/cats (he ignores
-      // cats socially but must not run through them).
+      // Jogger 3 (male): clockwise perimeter loop around the park triangle.
+      // Dawn + evenings only. Steers softly around other NPCs/cats (he
+      // ignores cats socially but must not run through them).
+      //
+      // Route (tile coordinates from the user's Tiled screenshot):
+      //   (0,43)  SW  — spawn on the Paseo de Roxas diagonal sidewalk (west edge)
+      //   (31,13) NE  — top of the diagonal where it meets the main N walkway
+      //   (94,13) E   — east end of the N walkway (turns south)
+      //   (94,77) SE  — bottom of the Makati Ave sidewalk (turns west)
+      //   (0,77)  SW  — runs off the west edge along Ayala Ave, then pauses
+      //                 before respawning at (0,43) for the next loop.
+      //
+      // Tile → world: world = tile * 32 + 16 (centre of tile).
       {
         type: "jogger_male",
-        speed: 100,
+        speed: 140,
         activePhases: ["dawn", "evening"],
         avoidanceRadius: 40,
+        loopPauseSec: 5,
         path: [
-          // SW corner, bottom of the NW diagonal sidewalk (near Ayala Ave).
-          { x: 700, y: 1450 },
-          // Up the NW diagonal sidewalk.
-          { x: 550, y: 1100 },
-          { x: 480, y: 780 },
-          { x: 560, y: 520 },
-          // Shortcut east along the main northern park walkway.
-          { x: 900, y: 500 },
-          { x: 1400, y: 500 },
-          { x: 1900, y: 500 },
-          { x: 2300, y: 460 },
-          // NE corner onto Paseo de Roxas sidewalk.
-          { x: 2450, y: 420 },
-          // Down the east sidewalk (Makati Ave side).
-          { x: 2700, y: 700 },
-          { x: 2820, y: 1000 },
-          { x: 2820, y: 1300 },
-          // SE corner turning west along the southern road.
-          { x: 2600, y: 1500 },
-          { x: 2000, y: 1520 },
-          { x: 1400, y: 1520 },
-          { x: 1000, y: 1500 },
+          { x: 16, y: 1392 },   // tile (0,43)  — SW spawn on diagonal sidewalk
+          { x: 1008, y: 432 },  // tile (31,13) — NE turn onto main N walkway
+          { x: 3024, y: 432 },  // tile (94,13) — E end, turn south
+          { x: 3024, y: 2480 }, // tile (94,77) — SE corner, turn west
+          { x: 16, y: 2480 },   // tile (0,77)  — west-edge exit along Ayala Ave
         ],
       },
       ...this.buildFeederConfigs(),
