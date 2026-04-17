@@ -14,7 +14,7 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 
 ## Project Status
 
-**Version 0.1.7** -- Phases 1 through 4 and **Phase 4.5 (visual & narrative alignment)** are complete. The game is playable from start to finish: survival mechanics, social systems, 6 story chapters, territory claiming, snatchers, the full adoption story arc through to the epilogue, plus intro cinematic, grounded narration hooks, and human/cat engagement polish.
+**Version 0.1.9** -- Phases 1 through 4 and **Phase 4.5 (visual & narrative alignment)** are complete. The game is playable from start to finish: survival mechanics, social systems, 6 story chapters, territory claiming, snatchers, the full adoption story arc through to the epilogue, plus intro cinematic, grounded narration hooks, and human/cat engagement polish.
 
 ### Development Roadmap
 
@@ -58,6 +58,10 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 - **Epilogue and end screen** with welfare information, links to CARA Philippines and @atgcats, and credits
 - **New Game+** (cozy mode) unlocked after completing the story -- replay with full trust and territory
 - **Phase 4.5:** Opening abandonment cinematic; NPC dialogue engagement with `speakerPose`-driven animations; Category A/B human behaviour (glances vs circuits); witness-gated dumping and snatcher narration; Camille encounter re-validation on delayed dialogue; chapter title cards + pause-menu chapter hint; `prefers-reduced-motion` support for decorative HUD/emote/intro tweens; gameplay radii centralised in `src/config/gameplayConstants.ts`
+- **Mamma Cat 8-way movement** with north/south walk and run animations completing the movement set
+- **Mamma Cat greeting action** -- press Space when no food or cat is in range to play a directional greeting animation (east/west sheets); non-interruptible for the ~1s play duration
+- **Male jogger circuit** running a clockwise loop complementing the existing counter-clockwise female jogger
+- **Collapse narrative consequences:** collapse triggers HUD narration, a global-trust penalty, and a lifetime collapse counter; recovery is witness-aware, awarding per-cat trust when a nearby friendly cat has line-of-sight. Total "times you've fallen" is surfaced in the colony journal footer once it is above zero
 
 ## How to Play
 
@@ -68,7 +72,7 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 | Arrow keys / WASD                   | Move Mamma Cat                                                           |
 | Shift + direction                   | Run (2x speed, drains energy faster)                                     |
 | C (tap to toggle, or hold)          | Crouch / hide (slow, harder for threats to detect)                       |
-| Space (tap)                         | Interact -- context-sensitive: talk to nearby cat, eat food, drink water |
+| Space (tap)                         | Interact -- context-sensitive: eat food, talk to nearby cat, or play Mamma Cat's greeting animation when nothing is in range |
 | Space                               | Advance dialogue text                                                    |
 | Z (hold 2 seconds while stationary) | Rest / sleep -- restores energy over time                                |
 | Any movement key, Space, or Z       | Wake up from rest                                                        |
@@ -230,7 +234,7 @@ ayala/
 │   ├── data/                           #   cat-dialogue script conditions
 │   └── sprites/                        #   BaseNPC helpers, SpriteProfiles
 ├── vitest.config.ts                     # Vitest configuration
-└── VERSION                              # 0.1.7
+└── VERSION                              # 0.1.9
 ```
 
 ## Asset Generation

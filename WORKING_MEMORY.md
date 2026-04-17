@@ -2,7 +2,7 @@
 
 > Persistent memory layer for AI-assisted development sessions.
 > Last Updated: 2026-04-17
-> Version: 0.1.7
+> Version: 0.1.9
 
 ---
 
@@ -127,6 +127,7 @@ SmallDog.png, WhiteDog.png, BrownDog.png — randomly assigned to dog walkers
 - Key: `ayala_save` in localStorage
 - Phase 1-3 keys: MET_BLACKY, TIGER_TALKS, JAYCO_TALKS, KNOWN_CATS, CHAPTER, CH1_RESTED, FLUFFY_TALKS, PEDIGREE_TALKS, MET_GINGER_A, MET_GINGER_B, JAYCO_JR_TALKS, JOURNAL_MET_DAYS
 - Phase 4 keys: VISITED_ZONE_6, TERRITORY_CLAIMED, TERRITORY_DAY, CAMILLE_ENCOUNTER, CAMILLE_ENCOUNTER_DAY, COLONY_COUNT, DUMPING_EVENTS_SEEN, CATS_SNATCHED, GAME_COMPLETED, NEW_GAME_PLUS, INTRO_SEEN, FIRST_SNATCHER_SEEN, ENCOUNTER_5_COMPLETE
+- Phase 4.5+ keys: COLLAPSE_COUNT (lifetime times Mamma Cat has fallen; surfaced in the journal footer once > 0)
 - Legacy: `localStorage["ayala_intro_seen"]` is migrated to registry `INTRO_SEEN` on load; both may be set on intro completion for older clients
 - Also persists: player position, stats, timeOfDay, gameTimeMs, sourceStates, trust data, territory data
 - Conversation history stored separately in IndexedDB (`ayala_conversations`)
@@ -230,9 +231,18 @@ SmallDog.png, WhiteDog.png, BrownDog.png — randomly assigned to dog walkers
 
 - When restarting a scene (e.g. after snatcher capture), pass flags through the `data` parameter rather than using `delayedCall`, which won't survive the restart. The pattern is: `this.scene.restart({ loadSave: true, snatcherCapture: true })` and check in `create()`.
 
+### Cross-system communication — GameScene polls, it does not subscribe
+
+- The dominant pattern is `GameScene.update()` reading state from systems each tick (`stats.collapsed`, `stats.hunger`, `trust.globalTrust`, `foodSource.hasFood`, …). `DayNightCycle` is the *only* system that currently emits events, because consumers sit in other scenes (`HUDScene`, `StartScene`) that can't poll `GameScene` cheaply. Do NOT add a lone `EventEmitter` to another system just to model a state transition — it fragments the architecture and leaves some consumers polling while others subscribe. For rising/falling-edge semantics on polled state, cache the previous value on `GameScene` (e.g. `private wasCollapsed = false`) and compare in `update()`: this is how the collapse narrative hooks (`onCollapsed` / `onRecovered`) are wired. Reconsider only if multiple cross-scene consumers appear.
+- When adding such edge flags, re-prime them from persisted state in `create()` *after* the save loads (e.g. `this.wasCollapsed = this.stats.collapsed`), otherwise you'll fire a spurious "entered" event on every reload. Also clear them in `shutdown()` so scene restarts don't inherit stale edges.
+
 ### Scene Lifecycle — shutdown is NOT auto-wired
 
 - Phaser 3 auto-invokes `init/preload/create/update` on your Scene subclass, but **not** `shutdown`. `Systems.shutdown()` only emits the `'shutdown'` event. If your Scene's `shutdown()` does cleanup (cancelling intro timers/tweens, disengaging NPCs, dismissing dialogue, removing listeners), register it explicitly in `create()` with `this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.shutdown, this)`. Use `once` (not `on`) so a subsequent `create()` on scene restart re-subscribes cleanly.
+
+### Testing — couple test deltas to exported runtime constants
+
+- When a test exercises a time- or threshold-gated behaviour, derive the delta from the runtime constant, not a hardcoded literal. Five `StatsSystem` tests silently went stale when `COLLAPSE_THRESHOLD_MS` was raised from 15s → 30s: the tests kept asserting on 14.9s / 15s / 16s deltas, which no longer crossed the threshold, so collapse-related assertions passed vacuously. Fix pattern: `export const COLLAPSE_THRESHOLD_MS` from the system, import it in the test, and compute deltas as `COLLAPSE_THRESHOLD_MS / 1000 + 1` (or fractions thereof). If exporting a constant feels heavy, it's still cheaper than a silent regression. Apply the same rule to `COLLAPSE_RECOVERY_MS`, trust clamps, and any future tunable.
 
 ### Phase 4.5 (visual / narrative alignment)
 
@@ -246,9 +256,31 @@ SmallDog.png, WhiteDog.png, BrownDog.png — randomly assigned to dog walkers
 
 ---
 
+## Recent Features (v0.1.8 - v0.1.9)
+
+### v0.1.9 — Collapse mechanism narrative upgrade
+
+- **Rising/falling-edge collapse detection** in `GameScene.update()` via a `wasCollapsed` boolean. On collapse it runs `onCollapsed()` (HUD narration, `trust.collapsedInColony()` penalty, `StoryKeys.COLLAPSE_COUNT++` on the registry). `onRecovered()` is a symmetric hook for future use. The flag is re-primed after save load in `create()` to suppress spurious events.
+- **Witness-aware recovery:** `findCollapseWitness()` picks the nearest friendly `NPCCat` within `GP.NARRATION_WITNESS_DIST` with line-of-sight (reuses the private `hasLineOfSight` helper). If a witness is still present/active/in-range at recovery time, `recoverFromCollapse()` narrates accordingly and awards `trust.supportedDuringCollapse(catName)` (+1 global, +3 per-cat); otherwise generic recovery narration fires.
+- **New trust methods** on `TrustSystem`: `collapsedInColony()` (-2 global, clamped to 0) and `supportedDuringCollapse(name)` (+1 global, +3 per-cat, 0-100 clamp, creates per-cat entry if missing). Covered by 8 new unit tests.
+- **Persistence:** `COLLAPSE_COUNT` added to `StoryKeys`, `SaveSystem.TRACKED_KEYS`, and the New-Game clear list in `GameScene.create`.
+- **Named constant:** `COLLAPSE_RECOVERY_MS = 3000` lives in `src/config/gameplayConstants.ts`; the literal `3000` in the recovery timer was replaced. `COLLAPSE_THRESHOLD_MS` is now exported from `StatsSystem.ts` so tests can derive their deltas from it.
+- **Journal surface:** `JournalScene` footer shows "Times you've fallen: N" in the muted "Days survived" tone, only when `COLLAPSE_COUNT > 0`. Defensive parse: non-finite / negative values resolve to 0 (no UI row).
+- **Input guards:** Space (interact/wake) and J (journal) handlers check `!this.stats.collapsed`, so the collapse sequence can't be short-circuited by interact/dialogue/journal input.
+- **Architectural note:** Tier 4 (replace polling with a StatsSystem `EventEmitter`) was explicitly rejected — see the "Cross-system communication" lesson. The `wasCollapsed` edge flag is the canonical pattern for new rising/falling-edge needs.
+
+### v0.1.8 / late-0.1.7 — Movement & greeting additions
+
+- **Mamma Cat N/S walk + run animations** added so the 8-way move set is complete (previous sheets covered only E/W). Frame rows follow the existing cat-grid convention.
+- **Mamma Cat greeting action** (`MammaCat.startGreeting()` / `stopGreeting()`, `playerState === "greeting"`): Space-key fallback when no food/NPC is in range. Plays the directional `mammacat_greeting_east/west` sheet once at 8 fps, sets `setVelocity(0)`, and blocks movement for the duration. Triggered unconditionally by the player — **not** proximity-gated to humans. Priority order in `tryInteract()`: food → cat dialogue → greeting. Z-key (rest) is guarded by `!this.player.isGreeting`, and `shutdown()` calls `stopGreeting()`.
+- **Male jogger** added as a second jogger circuit (clockwise loop, counter to the existing female jogger). Waypoints were iteratively corrected and conflicting collision tiles removed from the tilemap.
+- **Boot-path `localStorage` hardening** (fixed PR feedback from 0.1.7): wrapped the `window.localStorage` *reference acquisition* itself (not just `getItem`/`setItem`) in try/catch around `migrateLegacyIntroFlag`. See the "`localStorage` access itself can throw" lesson under Persistence.
+
+---
+
 ## Technical Debt
 
-- **Test coverage is partial:** Vitest unit tests cover pure systems and most leaf modules — StatsSystem, TrustSystem, TerritorySystem, SaveSystem, ChapterSystem, DialogueService, DialogueSystem, DayNightCycle, FoodSource, BaseNPC helpers, HumanNPC, SpriteProfiles, ConversationStore, cat-dialogue, storyKeys, plus pure utils (`lineOfSight`, `snatcherSpawnLogic`, `dialoguePoseAnim`). 18 test files, 307 tests at the time of writing. Remaining gaps are the Phaser-coupled scene glue (GameScene, HUDScene, JournalScene, EpilogueScene, BootScene, StartScene) and the NPCCat/GuardNPC/DogNPC state-machine update loops. CI runs tests before build.
+- **Test coverage is partial:** Vitest unit tests cover pure systems and most leaf modules — StatsSystem, TrustSystem, TerritorySystem, SaveSystem, ChapterSystem, DialogueService, DialogueSystem, DayNightCycle, FoodSource, BaseNPC helpers, HumanNPC, SpriteProfiles, ConversationStore, cat-dialogue, storyKeys, plus pure utils (`lineOfSight`, `snatcherSpawnLogic`, `dialoguePoseAnim`). ~18 test files, ~315 tests at the time of writing (count drifts; re-run `npx vitest run` for the current number). Remaining gaps are the Phaser-coupled scene glue (GameScene, HUDScene, JournalScene, EpilogueScene, BootScene, StartScene) and the NPCCat/GuardNPC/DogNPC state-machine update loops. CI runs tests before build.
 - **No audio:** Planned for Phase 5.
 - **Tilemap POI names are hardcoded:** Spawn points, food sources, shelter POIs use string names matched between Tiled JSON and GameScene. No validation that map contains expected POIs.
 - **GameScene is ~2400+ lines:** Camille encounters, snatchers, colony dynamics, and territory should be extracted into dedicated systems; `SnatcherSystem.ts` is a thin re-export for spawn policy only.
@@ -257,4 +289,4 @@ SmallDog.png, WhiteDog.png, BrownDog.png — randomly assigned to dog walkers
 - **Camille/Manu/Kish use generic HumanNPC:** No dedicated sprites yet. They use the feeder profile/sprite. Custom sprites needed for visual distinction.
 - **Snatchers use jogger type with dark tint:** A dedicated snatcher sprite (silhouette) would improve visual impact.
 - **Dumping events fire probabilistically:** Could be more deterministic with a day-counter to avoid very long waits or double-fires.
-- **Partial registry-key typing:** `StoryKeys` (`src/registry/storyKeys.ts`) only covers story/endgame keys (`INTRO_SEEN`, `FIRST_SNATCHER_SEEN`, `CAMILLE_ENCOUNTER`(`_DAY`), `DUMPING_EVENTS_SEEN`, `ENCOUNTER_5_COMPLETE`, `NEW_GAME_PLUS`, `GAME_COMPLETED`). Cat/chapter progression keys (`MET_BLACKY`, `TIGER_TALKS`, `JAYCO_TALKS`, `KNOWN_CATS`, `CHAPTER`, `CH1_RESTED`, `FLUFFY_TALKS`, `PEDIGREE_TALKS`, `MET_GINGER_A`/`_B`, `JAYCO_JR_TALKS`, `JOURNAL_MET_DAYS`, `VISITED_ZONE_6`, `TERRITORY_CLAIMED`, `TERRITORY_DAY`, `COLONY_COUNT`, `CATS_SNATCHED`) are still raw string literals in `GameScene` and `SaveSystem.TRACKED_KEYS`. Follow-up: introduce a sibling `ProgressionKeys` module and retrofit the clear-list in `GameScene.create` plus `SaveSystem.TRACKED_KEYS` so typos become compile errors everywhere.
+- **Partial registry-key typing:** `StoryKeys` (`src/registry/storyKeys.ts`) covers story/endgame + life-stat keys (`INTRO_SEEN`, `FIRST_SNATCHER_SEEN`, `CAMILLE_ENCOUNTER`(`_DAY`), `DUMPING_EVENTS_SEEN`, `ENCOUNTER_5_COMPLETE`, `NEW_GAME_PLUS`, `GAME_COMPLETED`, `COLLAPSE_COUNT`). Cat/chapter progression keys (`MET_BLACKY`, `TIGER_TALKS`, `JAYCO_TALKS`, `KNOWN_CATS`, `CHAPTER`, `CH1_RESTED`, `FLUFFY_TALKS`, `PEDIGREE_TALKS`, `MET_GINGER_A`/`_B`, `JAYCO_JR_TALKS`, `JOURNAL_MET_DAYS`, `VISITED_ZONE_6`, `TERRITORY_CLAIMED`, `TERRITORY_DAY`, `COLONY_COUNT`, `CATS_SNATCHED`) are still raw string literals in `GameScene` and `SaveSystem.TRACKED_KEYS`. Follow-up: introduce a sibling `ProgressionKeys` module and retrofit the clear-list in `GameScene.create` plus `SaveSystem.TRACKED_KEYS` so typos become compile errors everywhere.
