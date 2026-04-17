@@ -301,8 +301,9 @@ export class GameScene extends Phaser.Scene {
       "TERRITORY_CLAIMED",
       "TERRITORY_DAY",
       "COLONY_COUNT",
-      "CATS_SNATCHED",
       // Story / endgame keys — always use StoryKeys so typos become compile errors.
+      StoryKeys.CATS_SNATCHED,
+      StoryKeys.PLAYER_SNATCHED_COUNT,
       StoryKeys.CAMILLE_ENCOUNTER,
       StoryKeys.CAMILLE_ENCOUNTER_DAY,
       StoryKeys.ENCOUNTER_5_COMPLETE,
@@ -311,6 +312,7 @@ export class GameScene extends Phaser.Scene {
       StoryKeys.NEW_GAME_PLUS,
       StoryKeys.INTRO_SEEN,
       StoryKeys.FIRST_SNATCHER_SEEN,
+      StoryKeys.COLLAPSE_COUNT,
     ]) {
       this.registry.remove(key);
     }
@@ -2596,14 +2598,37 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * Check if a snatcher has detected and caught Mamma Cat.
-   * Called from updateHumans during night phase.
+   * Check if a snatcher has detected and caught Mamma Cat, and sweep for
+   * background colony cats that wandered into grab range. Called from
+   * updateHumans during night phase.
+   *
+   * Named story cats (Blacky, Tiger, …) are immune — only entries whose
+   * `npcName` starts with "Colony Cat" can be taken. Sleeping cats are
+   * treated as sheltered, mirroring the player shelter-immunity rule below.
    */
   private checkSnatcherDetection(): void {
     if (this.snatchers.length === 0) return;
 
+    // Collect colony-cat victims during the sweep, then apply removals after
+    // the nested loop so we don't splice `this.npcs` mid-iteration.
+    const colonyVictims: NPCCat[] = [];
+    const PLAYER_CAPTURE_RANGE = 16;
+    const COLONY_CAT_CAPTURE_RANGE = 16;
+
     for (const snatcher of this.snatchers) {
       if (!snatcher.visible) continue;
+
+      for (const { cat } of this.npcs) {
+        if (!cat.npcName.startsWith("Colony Cat")) continue;
+        if (!cat.active) continue;
+        if (cat.state === "sleeping") continue;
+        if (colonyVictims.includes(cat)) continue;
+        const catDist = Phaser.Math.Distance.Between(snatcher.x, snatcher.y, cat.x, cat.y);
+        if (catDist < COLONY_CAT_CAPTURE_RANGE) {
+          colonyVictims.push(cat);
+        }
+      }
+
       const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, snatcher.x, snatcher.y);
 
       // Detection radius: 128px normal, 32px if crouching near cover
@@ -2627,15 +2652,70 @@ export class GameScene extends Phaser.Scene {
         const chaseSpeed = 35;
         snatcher.setVelocity(Math.cos(angle) * chaseSpeed, Math.sin(angle) * chaseSpeed);
 
-        if (dist < 16) {
+        if (dist < PLAYER_CAPTURE_RANGE) {
+          // Apply any pending colony captures before the scene restart so
+          // the counter bump reaches the save file alongside the player's.
+          for (const victim of colonyVictims) this.handleColonyCatSnatch(victim);
           this.handleSnatcherCapture();
           return;
         }
       }
     }
+
+    for (const victim of colonyVictims) this.handleColonyCatSnatch(victim);
+  }
+
+  /**
+   * Remove a background colony cat that a snatcher caught, increment
+   * `CATS_SNATCHED`, and narrate only if the player could actually perceive
+   * the event (proximity + line-of-sight, matching the Phase 4.5 witness-
+   * gate convention used elsewhere for snatcher beats). Unperceived
+   * captures happen silently — the cat is simply gone next time the
+   * player looks.
+   */
+  private handleColonyCatSnatch(cat: NPCCat): void {
+    const near =
+      Phaser.Math.Distance.Between(this.player.x, this.player.y, cat.x, cat.y) <= GP.SNATCHER_WITNESS_DIST;
+    const los = near && this.hasLineOfSight(this.player.x, this.player.y, cat.x, cat.y);
+
+    const idx = this.npcs.findIndex((entry) => entry.cat === cat);
+    if (idx !== -1) {
+      const entry = this.npcs[idx]!;
+      this.npcs.splice(idx, 1);
+      entry.indicator.destroy();
+      entry.cat.destroy();
+    } else {
+      cat.destroy();
+    }
+
+    // Defensive clear of the dialogue-chaining guard (see WORKING_MEMORY
+    // "Input Guards — Dialogue State"). Colony cats don't normally engage
+    // dialogue, but clearing is cheap insurance against ghost references.
+    if (this.lastDialoguePartner === cat) {
+      this.lastDialoguePartner = null;
+    }
+
+    const prev = this.registry.get(StoryKeys.CATS_SNATCHED);
+    const prevCount = typeof prev === "number" && Number.isFinite(prev) && prev >= 0 ? Math.floor(prev) : 0;
+    this.registry.set(StoryKeys.CATS_SNATCHED, prevCount + 1);
+
+    if (near && los) {
+      const hud = this.scene.get("HUDScene") as HUDScene | undefined;
+      hud?.showNarration("A cat was here. Now it's gone.");
+    }
   }
 
   private handleSnatcherCapture(): void {
+    // Increment the lifetime capture counter and persist it *before* the
+    // scene restart. `snatcherCapture` reloads via `SaveSystem.load()` which
+    // overwrites in-memory registry state from localStorage, so a mere
+    // `registry.set` here would be discarded on reload. Saving first ensures
+    // the new value is in the save payload when it's read back.
+    const prev = this.registry.get(StoryKeys.PLAYER_SNATCHED_COUNT);
+    const prevCount = typeof prev === "number" && Number.isFinite(prev) && prev >= 0 ? Math.floor(prev) : 0;
+    this.registry.set(StoryKeys.PLAYER_SNATCHED_COUNT, prevCount + 1);
+    this.autoSave();
+
     this.cameras.main.fade(100, 0, 0, 0, false, (_cam: Phaser.Cameras.Scene2D.Camera, progress: number) => {
       if (progress >= 1) {
         this.dialogue.show(["Hands. Darkness. You can't move. You can't breathe.", "..."], () => {

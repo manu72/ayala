@@ -12,6 +12,13 @@ export const StoryKeys = {
   NEW_GAME_PLUS: "NEW_GAME_PLUS",
   GAME_COMPLETED: "GAME_COMPLETED",
   COLLAPSE_COUNT: "COLLAPSE_COUNT",
+  // Lifetime counter for background colony cats lost to snatchers. Incremented
+  // by `handleColonyCatSnatch` in GameScene; surfaced in the journal footer.
+  CATS_SNATCHED: "CATS_SNATCHED",
+  // Lifetime counter for Mamma Cat's own captures by snatchers. Incremented in
+  // `handleSnatcherCapture` before the save-and-restart flow so the bump
+  // survives the scene reload. Surfaced in the journal footer.
+  PLAYER_SNATCHED_COUNT: "PLAYER_SNATCHED_COUNT",
 } as const;
 
 export type StoryKey = (typeof StoryKeys)[keyof typeof StoryKeys];

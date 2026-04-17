@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import type { GameScene } from "./GameScene";
 import type { HUDScene } from "./HUDScene";
 import { StoryKeys } from "../registry/storyKeys";
+import { readLifetimeCount } from "../utils/lifetimeCount";
 
 const FONT_FAMILY = "Arial, Helvetica, sans-serif";
 const BG_COLOR = 0x111118;
@@ -166,19 +167,48 @@ export class JournalScene extends Phaser.Scene {
       yOffset += LINE_HEIGHT;
     }
 
-    // Collapse count — only shown once the player has actually collapsed, so
-    // newcomers don't see a "Times fallen: 0" line. Uses the same muted tone
-    // as "Days survived" to read as a life stat rather than a UI alert.
-    const rawCollapseCount = gameScene?.registry.get(StoryKeys.COLLAPSE_COUNT);
-    const collapseCount =
-      typeof rawCollapseCount === "number" && Number.isFinite(rawCollapseCount) && rawCollapseCount > 0
-        ? Math.floor(rawCollapseCount)
-        : 0;
+    // Life-stat counters — each is only shown once it has actually ticked above
+    // zero, so newcomers don't see "Times fallen: 0" style rows. All use the
+    // same muted tone as "Days survived" so they read as life stats rather
+    // than UI alerts.
+    const collapseCount = readLifetimeCount(gameScene, StoryKeys.COLLAPSE_COUNT);
     if (collapseCount > 0) {
       const label =
         collapseCount === 1
           ? "Times you've fallen: 1"
           : `Times you've fallen: ${collapseCount}`;
+      this.container.add(
+        this.add.text(0, yOffset, label, {
+          fontFamily: FONT_FAMILY,
+          fontSize: "12px",
+          color: "#888888",
+        }),
+      );
+      yOffset += LINE_HEIGHT;
+    }
+
+    const playerSnatchedCount = readLifetimeCount(gameScene, StoryKeys.PLAYER_SNATCHED_COUNT);
+    if (playerSnatchedCount > 0) {
+      const label =
+        playerSnatchedCount === 1
+          ? "Times you've been snatched: 1"
+          : `Times you've been snatched: ${playerSnatchedCount}`;
+      this.container.add(
+        this.add.text(0, yOffset, label, {
+          fontFamily: FONT_FAMILY,
+          fontSize: "12px",
+          color: "#888888",
+        }),
+      );
+      yOffset += LINE_HEIGHT;
+    }
+
+    const catsSnatchedCount = readLifetimeCount(gameScene, StoryKeys.CATS_SNATCHED);
+    if (catsSnatchedCount > 0) {
+      const label =
+        catsSnatchedCount === 1
+          ? "Cats lost to snatchers: 1"
+          : `Cats lost to snatchers: ${catsSnatchedCount}`;
       this.container.add(
         this.add.text(0, yOffset, label, {
           fontFamily: FONT_FAMILY,
