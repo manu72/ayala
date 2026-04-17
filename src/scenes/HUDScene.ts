@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { GAME_VERSION } from "../config/gameVersion";
 import type { GameScene } from "./GameScene";
 import { DialogueSystem } from "../systems/DialogueSystem";
 import { REST_HOLD_MS } from "../config/gameplayConstants";
@@ -47,6 +48,7 @@ export class HUDScene extends Phaser.Scene {
   private restingLabel!: Phaser.GameObjects.Text;
 
   private pauseContainer!: Phaser.GameObjects.Container;
+  private pauseVersionLabel!: Phaser.GameObjects.Text;
 
   private narrationText!: Phaser.GameObjects.Text;
   private narrationTween: Phaser.Tweens.Tween | null = null;
@@ -319,9 +321,17 @@ export class HUDScene extends Phaser.Scene {
       gameScene.quitToTitle();
     });
 
+    this.pauseVersionLabel = this.add
+      .text(width / 2 - 8, height / 2 - 8, `v${GAME_VERSION}`, {
+        fontFamily: FONT_FAMILY,
+        fontSize: "10px",
+        color: "#666666",
+      })
+      .setOrigin(1, 1);
+
     return this.add.container(width / 2, height / 2, [
       overlay, title, this.pauseChapterTitle, this.pauseChapterHint,
-      saveBtn, journalBtn, resumeBtn, quitBtn,
+      saveBtn, journalBtn, resumeBtn, quitBtn, this.pauseVersionLabel,
     ]);
   }
 
