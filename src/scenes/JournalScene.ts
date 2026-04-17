@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import type { GameScene } from "./GameScene";
 import type { HUDScene } from "./HUDScene";
+import { StoryKeys } from "../registry/storyKeys";
 
 const FONT_FAMILY = "Arial, Helvetica, sans-serif";
 const BG_COLOR = 0x111118;
@@ -160,6 +161,29 @@ export class JournalScene extends Phaser.Scene {
           fontFamily: FONT_FAMILY,
           fontSize: "12px",
           color: "#44aa88",
+        }),
+      );
+      yOffset += LINE_HEIGHT;
+    }
+
+    // Collapse count — only shown once the player has actually collapsed, so
+    // newcomers don't see a "Times fallen: 0" line. Uses the same muted tone
+    // as "Days survived" to read as a life stat rather than a UI alert.
+    const rawCollapseCount = gameScene?.registry.get(StoryKeys.COLLAPSE_COUNT);
+    const collapseCount =
+      typeof rawCollapseCount === "number" && Number.isFinite(rawCollapseCount) && rawCollapseCount > 0
+        ? Math.floor(rawCollapseCount)
+        : 0;
+    if (collapseCount > 0) {
+      const label =
+        collapseCount === 1
+          ? "Times you've fallen: 1"
+          : `Times you've fallen: ${collapseCount}`;
+      this.container.add(
+        this.add.text(0, yOffset, label, {
+          fontFamily: FONT_FAMILY,
+          fontSize: "12px",
+          color: "#888888",
         }),
       );
       yOffset += LINE_HEIGHT;
