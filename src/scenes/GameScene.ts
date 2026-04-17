@@ -355,11 +355,25 @@ export class GameScene extends Phaser.Scene {
         if (typeof savedChapter === "number") {
           this.chapters.restore(savedChapter);
         }
+        // Reconcile `COLONY_COUNT` defensively. The `for ([key, val])` loop
+        // above restored `save.variables` blindly, so a corrupt save (e.g. a
+        // string, null, NaN, Infinity) has already overwritten the seed in
+        // the registry. If we only re-write the field here, field and
+        // registry drift — and `SaveSystem.save` reads the registry directly
+        // on the next autosave, persisting the garbage back to disk.
+        //
+        // Valid numeric saves are clamped to the floor (unchanged behaviour).
+        // Invalid / missing saves fall back to the fresh-game seed rather
+        // than the floor, because the floor would collapse the visible
+        // background roster to zero on what may otherwise be a mostly-healthy
+        // save with a single corrupt field.
         const savedColony = save.variables[StoryKeys.COLONY_COUNT];
         if (typeof savedColony === "number" && Number.isFinite(savedColony)) {
           this.colonyCount = Math.max(NAMED_AND_MAMMA_COUNT, Math.floor(savedColony));
-          this.registry.set(StoryKeys.COLONY_COUNT, this.colonyCount);
+        } else {
+          this.colonyCount = INITIAL_COLONY_TOTAL;
         }
+        this.registry.set(StoryKeys.COLONY_COUNT, this.colonyCount);
       }
     }
 
@@ -1470,8 +1484,14 @@ export class GameScene extends Phaser.Scene {
 
     this.trust.collapsedInColony();
 
+    // Defensive pre-increment normalisation — matches the peer counters
+    // (CATS_SNATCHED, PLAYER_SNATCHED_COUNT). Treating negative, fractional,
+    // or non-finite registry values as 0 prevents a corrupt value from
+    // propagating forward (and then being persisted by the next autosave,
+    // which reads `registry.get` directly without its own validation).
     const prior = this.registry.get(StoryKeys.COLLAPSE_COUNT);
-    const priorCount = typeof prior === "number" && Number.isFinite(prior) ? prior : 0;
+    const priorCount =
+      typeof prior === "number" && Number.isFinite(prior) && prior >= 0 ? Math.floor(prior) : 0;
     this.registry.set(StoryKeys.COLLAPSE_COUNT, priorCount + 1);
   }
 

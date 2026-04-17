@@ -27,26 +27,26 @@ NPCs are organised into tiers based on narrative importance and interaction freq
 
 These are the characters whose relationships define the game. Each gets a detailed persona file, full conversation memory in IndexedDB, and frequent AI-driven dialogue.
 
-| NPC | Type | Role |
-|-----|------|------|
-| Blacky | Cat | Calm, wise gatekeeper. Sits at the Paseo de Roxas underpass. Camille's first friend. Mamma Cat's likely mentor. |
-| Tiger | Cat | Territorial tabby in the Central Gardens. Hostile initially, slowly warms up. Classic "tough love" colony elder. |
-| Jayco | Cat | Friendly resident of the pyramid steps. Curious, helpful, knows all the good scraps. Father of Jayco Junior. |
-| Camille | Human | Mamma Cat's eventual adopter. Gentle, patient, returns nightly. The emotional centre of the game. |
+| NPC     | Type  | Role                                                                                                             |
+| ------- | ----- | ---------------------------------------------------------------------------------------------------------------- |
+| Blacky  | Cat   | Calm, wise gatekeeper. Sits at the Paseo de Roxas underpass. Camille's first friend. Mamma Cat's likely mentor.  |
+| Tiger   | Cat   | Territorial tabby in the Central Gardens. Hostile initially, slowly warms up. Classic "tough love" colony elder. |
+| Jayco   | Cat   | Friendly resident of the pyramid steps. Curious, helpful, knows all the good scraps. Father of Jayco Junior.     |
+| Camille | Human | Mamma Cat's eventual adopter. Gentle, patient, returns nightly. The emotional centre of the game.                |
 
 ### Tier 2 — Lighter AI Personas (simpler prompts, shorter memory)
 
 These characters feel alive but require less depth. Shorter persona files, less frequent dialogue, faster turnaround.
 
-| NPC | Type | Role |
-|-----|------|------|
-| Jayco Junior | Cat (kitten) | Playful, curious, attached to Jayco. Bouncy energy, short attention span. |
-| Fluffy Cat | Cat | Aloof, dignified, long-furred. Dismissive at first, gradually warming. |
-| Pedigree Cat | Cat | Former pet near the Blackbird area. Melancholy, recognises Mamma Cat's story. |
-| Ginger Twin 1 | Cat | Territorial ginger near the fountain. Wary, protective of the water source. |
-| Ginger Twin 2 | Cat | Silent shadow of Twin 1. Observes, rarely speaks. Follows Twin 1's cues. |
-| Manu | Human | Camille's partner. Tall, quiet, friendly to cats. Accompanies Camille from Encounter 3. |
-| Kish | Human | Camille's 12-year-old niece. Enthusiastic, sometimes too eager. Appears in Encounters 4-5. |
+| NPC           | Type         | Role                                                                                       |
+| ------------- | ------------ | ------------------------------------------------------------------------------------------ |
+| Jayco Junior  | Cat (kitten) | Playful, curious, attached to Jayco. Bouncy energy, short attention span.                  |
+| Fluffy Cat    | Cat          | Aloof, dignified, long-furred. Dismissive at first, gradually warming.                     |
+| Pedigree Cat  | Cat          | Former pet near the Blackbird area. Melancholy, recognises Mamma Cat's story.              |
+| Ginger Twin 1 | Cat          | Territorial ginger near the fountain. Wary, protective of the water source.                |
+| Ginger Twin 2 | Cat          | Silent shadow of Twin 1. Observes, rarely speaks. Follows Twin 1's cues.                   |
+| Manu          | Human        | Camille's partner. Tall, quiet, friendly to cats. Accompanies Camille from Encounter 3.    |
+| Kish          | Human        | Camille's 12-year-old niece. Enthusiastic, sometimes too eager. Appears in Encounters 4-5. |
 
 ### Tier 3 — Scripted (no AI)
 
@@ -88,28 +88,35 @@ Each `.md` file follows a standard structure:
 # [Name]
 
 ## Identity
+
 - Species: cat / human
 - Age: (approximate)
 - Appearance: (brief)
 
 ## Backstory
+
 (2-4 sentences of history — how they came to be in the gardens, any prior life, key relationships)
 
 ## Personality
+
 (Core traits — friendly, wary, calm, anxious, etc. 3-5 traits with brief explanation)
 
 ## Speech Style
+
 - Cats use short "cat-speak" — "Mrrp", "Prrrrp", "Hssss", never full paragraphs
 - Humans speak naturally but briefly, with their own quirks
 - Keep lines short — 1 sentence typically, 2 at most
 
 ## Knowledge
+
 (What they know about the colony, the gardens, other cats, threats, etc.)
 
 ## Relationship to Mamma Cat
+
 (Default disposition — wary, curious, friendly. How their attitude evolves with trust.)
 
 ## Rules of Engagement
+
 - When to approach Mamma Cat (proximity, mood, time of day)
 - When to retreat or ignore
 - What triggers warm behaviour (sharing food, time spent, trust thresholds)
@@ -127,34 +134,32 @@ These files are loaded at game start and used as system prompts for that persona
 ```typescript
 class AIDialogueService implements DialogueService {
   async getDialogue(request: DialogueRequest): Promise<DialogueResponse> {
-    const persona = this.personas[request.speaker]
-    const history = await this.getConversationHistory(request.speaker)
-    
-    const systemPrompt = this.buildSystemPrompt(persona, request.gameState)
-    const messages = this.buildMessages(history, request)
-    
+    const persona = this.personas[request.speaker];
+    const history = await this.getConversationHistory(request.speaker);
+
+    const systemPrompt = this.buildSystemPrompt(persona, request.gameState);
+    const messages = this.buildMessages(history, request);
+
     const response = await this.callLLM({
-      model: 'deepseek-chat',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        ...messages
-      ],
+      model: "deepseek-chat",
+      messages: [{ role: "system", content: systemPrompt }, ...messages],
       temperature: 0.8,
-      max_tokens: 150
-    })
-    
-    const parsed = this.parseResponse(response)
-    await this.storeConversation(request.speaker, parsed)
-    
-    return parsed
+      max_tokens: 150,
+    });
+
+    const parsed = this.parseResponse(response);
+    await this.storeConversation(request.speaker, parsed);
+
+    return parsed;
   }
 }
 ```
 
 ### Model configuration
 
-Primary: **Deepseek Chat** via OpenAI-compatible API
-Fallback: **OpenAI gpt-4o-mini** (cheap, fast, high quality)
+Primary: **Deepseek deepseek-chat** via OpenAI-chat completions compatible API
+Fallback: **OpenAI gpt-4.1-mini** (cheap, fast, non-reasoning, high quality using chat completions)
+Additional: **Inception Labs mercury-2** super fast diffusion model uses chat completions API format
 
 **Provider API keys MUST NOT be shipped in the client bundle.** The game builds to static files (see DoD), so any `VITE_`-prefixed variable is inlined verbatim into the JavaScript served to the browser and is trivially extractable by anyone viewing the page source. A leaked provider key means metered-API abuse billed to the project owner.
 
@@ -210,6 +215,7 @@ Parse this into the existing `DialogueResponse` shape. If parsing fails, fall ba
 Use the existing IndexedDB conversation store from Phase 4. Per-NPC conversation history is the memory.
 
 For v1, keep it simple:
+
 - Store all conversations with each NPC
 - When building the AI request, include the last N conversations (configurable, start with 20)
 - If more than 100 conversations accumulate with one NPC, drop the oldest ones
@@ -219,21 +225,21 @@ Schema (already built in Phase 4, confirm it includes these fields):
 
 ```typescript
 interface ConversationRecord {
-  id?: number
-  speaker: string
-  timestamp: number        // game time
-  realTimestamp: number    // real time (for debugging)
-  gameDay: number
-  chapter: number
-  lines: string[]          // what the NPC said
-  playerAction?: string    // what Mamma Cat "did" (e.g. "approached tail up", "offered food")
+  id?: number;
+  speaker: string;
+  timestamp: number; // game time
+  realTimestamp: number; // real time (for debugging)
+  gameDay: number;
+  chapter: number;
+  lines: string[]; // what the NPC said
+  playerAction?: string; // what Mamma Cat "did" (e.g. "approached tail up", "offered food")
   gameStateSnapshot: {
-    trustWithSpeaker: number
-    trustGlobal: number
-    timeOfDay: string
-    hunger: number
+    trustWithSpeaker: number;
+    trustGlobal: number;
+    timeOfDay: string;
+    hunger: number;
     // other relevant state
-  }
+  };
 }
 ```
 
@@ -241,13 +247,13 @@ interface ConversationRecord {
 
 ## AUTONOMOUS BEHAVIOUR (STRETCH GOAL FOR PHASE 5)
 
-Ideally each Tier 1 NPC's AI also drives their *movement intentions* — not pixel-by-pixel pathfinding, but high-level goals:
+Ideally each Tier 1 NPC's AI also drives their _movement intentions_ — not pixel-by-pixel pathfinding, but high-level goals:
 
 ```typescript
 interface NPCIntention {
-  goal: 'approach_mamma_cat' | 'retreat' | 'stay' | 'move_to_shade' | 'seek_food'
-  urgency: 'low' | 'medium' | 'high'
-  reasoning: string
+  goal: "approach_mamma_cat" | "retreat" | "stay" | "move_to_shade" | "seek_food";
+  urgency: "low" | "medium" | "high";
+  reasoning: string;
 }
 ```
 
@@ -262,6 +268,7 @@ The game engine executes the goal using existing pathfinding and behaviour state
 ## RATE LIMITING VIA GAMEPLAY
 
 Natural game mechanics prevent runaway API calls:
+
 - Sleeping cats don't talk (no call)
 - Wary cats walk away when Mamma Cat approaches (no call)
 - Cats outside proximity (~48px) aren't engaged (no call)
