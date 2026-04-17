@@ -89,7 +89,7 @@ BootScene -> StartScene -> GameScene + HUDScene (overlay) + JournalScene (overla
 
 ### Key Config
 
-- `src/config/gameplayConstants.ts`: Single source of truth for shared gameplay constants — interaction and narrative witness radii (`GP`, Phase 4.5) plus input-timing values (`REST_HOLD_MS`)
+- `src/config/gameplayConstants.ts`: Single source of truth for **cross-scene** gameplay constants — interaction and narrative witness radii (`GP`, Phase 4.5) plus input-timing values (`REST_HOLD_MS`). Per-system implementation details (e.g. `FoodSource` source cooldowns / amounts, `INTERACT_RANGE`) stay owned by their module and are exported from there for test consumption (see `SOURCE_DEFS`, `INTERACT_RANGE` in `src/systems/FoodSource.ts`). Tests should import the canonical constant rather than copy its numeric value, but promote to `gameplayConstants.ts` only when two or more *production* modules share the value.
 - `src/config/GameConfig.ts`: Phaser config, scene list, resolution (816x624)
 - `src/registry/storyKeys.ts`: `StoryKeys` constants for registry (`INTRO_SEEN`, etc.)
 

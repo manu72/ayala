@@ -16,7 +16,12 @@ interface SourceDef {
   symbolColor: string;
 }
 
-const DEFS: Record<SourceType, SourceDef> = {
+/**
+ * Canonical per-source definition table. Exported so that `FoodSource.test`
+ * can assert against cooldowns/amounts without hardcoding magic numbers that
+ * would silently drift out of sync with gameplay tuning.
+ */
+export const SOURCE_DEFS: Readonly<Record<SourceType, SourceDef>> = {
   feeding_station: {
     type: "feeding_station",
     stat: "hunger",
@@ -48,7 +53,8 @@ const DEFS: Record<SourceType, SourceDef> = {
   safe_sleep: { type: "safe_sleep", stat: "energy", amount: 100, cooldownMs: 0, symbol: "★", symbolColor: "#ffdd44" },
 };
 
-const INTERACT_RANGE = 32;
+/** Maximum world-distance (px) at which the player can use a nearby source. */
+export const INTERACT_RANGE = 32;
 
 interface Source {
   type: SourceType;
@@ -74,7 +80,7 @@ export class FoodSourceManager {
 
   /** Register a source at a world position. */
   addSource(type: SourceType, worldX: number, worldY: number): void {
-    const def = DEFS[type];
+    const def = SOURCE_DEFS[type];
 
     const marker = this.scene.add
       .text(worldX, worldY, def.symbol, {
@@ -137,7 +143,7 @@ export class FoodSourceManager {
     let nearestDist = Infinity;
 
     for (const src of this.sources) {
-      const def = DEFS[src.type];
+      const def = SOURCE_DEFS[src.type];
       // Safe sleep should only restore energy through hold-to-rest (Z), not Space interact.
       if (src.type === "safe_sleep") continue;
       if (def.activePhases && !def.activePhases.includes(currentPhase)) continue;
@@ -152,7 +158,7 @@ export class FoodSourceManager {
 
     if (!nearest) return false;
 
-    const def = DEFS[nearest.type];
+    const def = SOURCE_DEFS[nearest.type];
     const actual = stats.restore(def.stat, def.amount);
     nearest.lastUsedAt = now;
 
@@ -164,7 +170,7 @@ export class FoodSourceManager {
   /** Update markers to reflect availability. */
   update(currentPhase: TimeOfDay, now: number): void {
     for (const src of this.sources) {
-      const def = DEFS[src.type];
+      const def = SOURCE_DEFS[src.type];
 
       const phaseOk = !def.activePhases || def.activePhases.includes(currentPhase);
       const cooldownOk = def.cooldownMs <= 0 || now - src.lastUsedAt >= def.cooldownMs;

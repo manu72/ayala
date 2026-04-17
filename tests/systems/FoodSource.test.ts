@@ -19,7 +19,12 @@ vi.mock('phaser', () => ({
   },
 }))
 
-import { FoodSourceManager, type SourceType } from '../../src/systems/FoodSource'
+import {
+  FoodSourceManager,
+  INTERACT_RANGE,
+  SOURCE_DEFS,
+  type SourceType,
+} from '../../src/systems/FoodSource'
 import { StatsSystem } from '../../src/systems/StatsSystem'
 
 interface TextMock {
@@ -110,7 +115,7 @@ describe('FoodSourceManager.tryInteract — cooldown enforcement', () => {
     stats.thirst = 50
     manager.tryInteract(100, 100, stats, 'day', 0)
     stats.thirst = 50
-    const cooldownMs = 60_000
+    const cooldownMs = SOURCE_DEFS.fountain.cooldownMs
     expect(manager.tryInteract(100, 100, stats, 'day', cooldownMs - 1)).toBe(false)
     expect(stats.thirst).toBe(50)
   })
@@ -120,7 +125,7 @@ describe('FoodSourceManager.tryInteract — cooldown enforcement', () => {
     stats.thirst = 50
     manager.tryInteract(100, 100, stats, 'day', 0)
     stats.thirst = 50
-    expect(manager.tryInteract(100, 100, stats, 'day', 60_000)).toBe(true)
+    expect(manager.tryInteract(100, 100, stats, 'day', SOURCE_DEFS.fountain.cooldownMs)).toBe(true)
     expect(stats.thirst).toBe(100)
   })
 })
@@ -131,16 +136,24 @@ describe('FoodSourceManager.tryInteract — range gating', () => {
     expect(manager.tryInteract(0, 0, stats, 'day', 0)).toBe(false)
   })
 
-  it('returns false when the only source sits outside INTERACT_RANGE (32px)', () => {
+  it('returns false when the only source sits outside INTERACT_RANGE', () => {
     const { manager, stats } = buildManager([['fountain', 200, 200]])
-    // Distance = ~56.6 px, well beyond 32.
-    expect(manager.tryInteract(160, 160, stats, 'day', 0)).toBe(false)
+    // Per-axis offset of INTERACT_RANGE → Euclidean dist = INTERACT_RANGE × √2
+    // (~1.41 × range), safely outside for any value of the constant.
+    const axisOffset = INTERACT_RANGE
+    expect(
+      manager.tryInteract(200 - axisOffset, 200 - axisOffset, stats, 'day', 0),
+    ).toBe(false)
   })
 
   it('returns true on the near side of INTERACT_RANGE', () => {
     const { manager, stats } = buildManager([['fountain', 100, 100]])
-    // Distance = ~28.28 px, within range.
-    expect(manager.tryInteract(80, 80, stats, 'day', 0)).toBe(true)
+    // Per-axis offset of INTERACT_RANGE/2 → Euclidean dist ≈ 0.71 × INTERACT_RANGE,
+    // safely inside for any value of the constant.
+    const axisOffset = Math.floor(INTERACT_RANGE / 2)
+    expect(
+      manager.tryInteract(100 - axisOffset, 100 - axisOffset, stats, 'day', 0),
+    ).toBe(true)
   })
 
   it('picks the nearest in-range source when multiple are in range', () => {
@@ -234,10 +247,12 @@ describe('FoodSourceManager.update — marker visibility', () => {
     manager.tryInteract(100, 100, stats, 'day', 0)
     const marker = texts[0]!
     const label = texts[1]!
-    manager.update('day', 20_000)
+    const cooldownMs = SOURCE_DEFS.fountain.cooldownMs
+    const elapsedMs = Math.floor(cooldownMs / 3)
+    manager.update('day', elapsedMs)
     expect(marker.lastAlpha).toBe(0.5)
-    // fountain cooldown is 60_000ms; 40s remaining.
-    expect(label.lastText).toBe('40s')
+    const remainingSec = Math.ceil((cooldownMs - elapsedMs) / 1000)
+    expect(label.lastText).toBe(`${remainingSec}s`)
   })
 
   it('marks available sources full-alpha with an empty label', () => {
@@ -336,7 +351,7 @@ describe('FoodSourceManager — addSource initial availability', () => {
   it('sets lastUsedAt to -cooldownMs so the first tryInteract at now=0 succeeds', () => {
     const { manager } = buildManager([['fountain', 0, 0]])
     const [state] = manager.getSourceStates()
-    expect(state!.lastUsedAt).toBe(-60_000)
+    expect(state!.lastUsedAt).toBe(-SOURCE_DEFS.fountain.cooldownMs)
   })
 })
 
