@@ -16,8 +16,16 @@ import { EmoteSystem, type EmoteType } from "../systems/EmoteSystem";
 import { ChapterSystem } from "../systems/ChapterSystem";
 import { TerritorySystem } from "../systems/TerritorySystem";
 import type { HUDScene } from "./HUDScene";
-import { GP, REST_HOLD_MS } from "../config/gameplayConstants";
+import {
+  GP,
+  REST_HOLD_MS,
+  COLLAPSE_RECOVERY_MS,
+  INITIAL_COLONY_TOTAL,
+  NAMED_AND_MAMMA_COUNT,
+  VISIBLE_BACKGROUND_CAP,
+} from "../config/gameplayConstants";
 import { StoryKeys, migrateLegacyIntroFlag } from "../registry/storyKeys";
+import { computeBackgroundSpawnCount, decrementColonyTotal } from "../utils/colonySpawn";
 import {
   ScriptedDialogueService,
   type DialogueService,
@@ -78,6 +86,19 @@ export class GameScene extends Phaser.Scene {
   private shelterPoints: Array<{ x: number; y: number }> = [];
   private collapseRecoveryTimer = 0;
   private collapseRecovering = false;
+  /**
+   * Rising/falling-edge tracker for `stats.collapsed`. `onCollapsed` /
+   * `onRecovered` only fire on the frame the flag transitions. Reset in
+   * `create()` after a save load so `fromJSON` never triggers narration.
+   */
+  private wasCollapsed = false;
+  /**
+   * The nearest friendly NPC cat captured at the moment of collapse, used by
+   * `recoverFromCollapse()` for witness-aware narration and bonus trust. Held
+   * by object ref (not name) so the check survives name churn. Null when no
+   * witness was in range, or between collapses.
+   */
+  private collapseWitness: NPCCat | null = null;
   private emotes!: EmoteSystem;
   chapters!: ChapterSystem;
   private chapterCheckTimer = 0;
@@ -113,8 +134,13 @@ export class GameScene extends Phaser.Scene {
   private snatchers: HumanNPC[] = [];
   private snatcherSpawnChecked = false;
 
-  // Colony dynamics
-  private colonyCount = 42;
+  // Colony dynamics. `colonyCount` mirrors `StoryKeys.COLONY_COUNT` in the
+  // registry — total cat population (named + Mamma + background). See
+  // gameplayConstants.ts for the model. Source of truth is the registry;
+  // the field is a cache read on load and written alongside every registry
+  // mutation so code paths that already reference `this.colonyCount` keep
+  // working without a second registry round-trip each frame.
+  private colonyCount = INITIAL_COLONY_TOTAL;
   private dumpingArmed = 0;
   private dumpingInProgress = false;
   private pendingCamilleEncounter = 0;
@@ -163,6 +189,10 @@ export class GameScene extends Phaser.Scene {
     }
     this.lastDialoguePartner = null;
     this.player?.stopGreeting();
+    this.collapseWitness = null;
+    this.wasCollapsed = false;
+    this.collapseRecovering = false;
+    this.collapseRecoveryTimer = 0;
     this.dialogue.dismiss();
   }
 
@@ -213,6 +243,8 @@ export class GameScene extends Phaser.Scene {
     this.isPaused = false;
     this.collapseRecovering = false;
     this.collapseRecoveryTimer = 0;
+    this.wasCollapsed = false;
+    this.collapseWitness = null;
 
     this.map = this.make.tilemap({ key: "atg" });
     const parkTileset = this.map.addTilesetImage("park-tiles", "park-tiles");
@@ -261,7 +293,7 @@ export class GameScene extends Phaser.Scene {
     this.camilleRollDay = 0;
     this.snatchers = [];
     this.snatcherSpawnChecked = false;
-    this.colonyCount = 42;
+    this.colonyCount = INITIAL_COLONY_TOTAL;
 
     // Clear story state from any prior session before restoring
     for (const key of [
@@ -281,9 +313,9 @@ export class GameScene extends Phaser.Scene {
       "VISITED_ZONE_6",
       "TERRITORY_CLAIMED",
       "TERRITORY_DAY",
-      "COLONY_COUNT",
-      "CATS_SNATCHED",
       // Story / endgame keys — always use StoryKeys so typos become compile errors.
+      StoryKeys.CATS_SNATCHED,
+      StoryKeys.PLAYER_SNATCHED_COUNT,
       StoryKeys.CAMILLE_ENCOUNTER,
       StoryKeys.CAMILLE_ENCOUNTER_DAY,
       StoryKeys.ENCOUNTER_5_COMPLETE,
@@ -292,9 +324,18 @@ export class GameScene extends Phaser.Scene {
       StoryKeys.NEW_GAME_PLUS,
       StoryKeys.INTRO_SEEN,
       StoryKeys.FIRST_SNATCHER_SEEN,
+      StoryKeys.COLLAPSE_COUNT,
+      StoryKeys.COLONY_COUNT,
     ]) {
       this.registry.remove(key);
     }
+
+    // Seed the colony total so a fresh game has a well-defined starting value
+    // in the registry (not just the field). If a save is loaded below, the
+    // `Object.entries(save.variables)` loop overwrites this with the persisted
+    // value. Keeping field + registry in lockstep is the invariant used by
+    // `spawnColonyCats`, `JournalScene`, and the decrement/increment paths.
+    this.registry.set(StoryKeys.COLONY_COUNT, INITIAL_COLONY_TOTAL);
 
     let savedSourceStates: Array<{ type: SourceType; x: number; y: number; lastUsedAt: number }> | undefined;
     if (data?.loadSave) {
@@ -314,9 +355,25 @@ export class GameScene extends Phaser.Scene {
         if (typeof savedChapter === "number") {
           this.chapters.restore(savedChapter);
         }
-        if (typeof save.variables.COLONY_COUNT === "number") {
-          this.colonyCount = save.variables.COLONY_COUNT as number;
+        // Reconcile `COLONY_COUNT` defensively. The `for ([key, val])` loop
+        // above restored `save.variables` blindly, so a corrupt save (e.g. a
+        // string, null, NaN, Infinity) has already overwritten the seed in
+        // the registry. If we only re-write the field here, field and
+        // registry drift — and `SaveSystem.save` reads the registry directly
+        // on the next autosave, persisting the garbage back to disk.
+        //
+        // Valid numeric saves are clamped to the floor (unchanged behaviour).
+        // Invalid / missing saves fall back to the fresh-game seed rather
+        // than the floor, because the floor would collapse the visible
+        // background roster to zero on what may otherwise be a mostly-healthy
+        // save with a single corrupt field.
+        const savedColony = save.variables[StoryKeys.COLONY_COUNT];
+        if (typeof savedColony === "number" && Number.isFinite(savedColony)) {
+          this.colonyCount = Math.max(NAMED_AND_MAMMA_COUNT, Math.floor(savedColony));
+        } else {
+          this.colonyCount = INITIAL_COLONY_TOTAL;
         }
+        this.registry.set(StoryKeys.COLONY_COUNT, this.colonyCount);
       }
     }
 
@@ -728,7 +785,7 @@ export class GameScene extends Phaser.Scene {
         } else {
           this.resumeGame();
         }
-      } else if (!this.isPaused && !this.dialogue.isActive) {
+      } else if (!this.isPaused && !this.dialogue.isActive && !this.stats.collapsed) {
         this.openJournal();
       }
       return;
@@ -741,7 +798,22 @@ export class GameScene extends Phaser.Scene {
 
     this.player.speedMultiplier = this.stats.speedMultiplier;
 
-    // Collapse recovery
+    // Collapse rising/falling-edge detection. Kept symmetrical and co-located
+    // with the polling branch below so the whole collapse state machine lives
+    // in one place. `onCollapsed` runs narrative side effects (narration, trust
+    // penalty, registry increment, witness capture) exactly once per collapse;
+    // `onRecovered` mirrors it for bookkeeping after `recoverFromCollapse()`
+    // flips `stats.collapsed` back to false.
+    if (this.stats.collapsed && !this.wasCollapsed) {
+      this.onCollapsed();
+    } else if (!this.stats.collapsed && this.wasCollapsed) {
+      this.onRecovered();
+    }
+    this.wasCollapsed = this.stats.collapsed;
+
+    // Collapse recovery — pins the player and drives the 3 s blackout timer.
+    // Consistent with every other polled state transition in this scene; no
+    // event emitter, no delayedCall, no listener lifecycle to manage.
     if (this.stats.collapsed) {
       this.player.setVelocity(0);
       if (!this.collapseRecovering) {
@@ -749,7 +821,7 @@ export class GameScene extends Phaser.Scene {
         this.collapseRecoveryTimer = 0;
       }
       this.collapseRecoveryTimer += delta;
-      if (this.collapseRecoveryTimer >= 3000) {
+      if (this.collapseRecoveryTimer >= COLLAPSE_RECOVERY_MS) {
         this.recoverFromCollapse();
       }
       return;
@@ -1395,10 +1467,89 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  /**
+   * Rising-edge handler for `stats.collapsed`. Fires exactly once on the frame
+   * the flag transitions from false to true. All side effects are idempotent
+   * enough to survive save-load (but `StatsSystem.fromJSON` also resets the
+   * flag, so in practice this only fires on a genuine in-session collapse).
+   */
+  private onCollapsed(): void {
+    // Capture the nearest friendly NPC cat (with LOS) as a witness. Stored by
+    // object ref so a rename would still point to the same cat; we re-check
+    // `.active` before using it in `recoverFromCollapse`.
+    this.collapseWitness = this.findCollapseWitness();
+
+    const hud = this.scene.get("HUDScene") as HUDScene | undefined;
+    hud?.showNarration?.("You can't... go any further.");
+
+    this.trust.collapsedInColony();
+
+    // Defensive pre-increment normalisation — matches the peer counters
+    // (CATS_SNATCHED, PLAYER_SNATCHED_COUNT). Treating negative, fractional,
+    // or non-finite registry values as 0 prevents a corrupt value from
+    // propagating forward (and then being persisted by the next autosave,
+    // which reads `registry.get` directly without its own validation).
+    const prior = this.registry.get(StoryKeys.COLLAPSE_COUNT);
+    const priorCount =
+      typeof prior === "number" && Number.isFinite(prior) && prior >= 0 ? Math.floor(prior) : 0;
+    this.registry.set(StoryKeys.COLLAPSE_COUNT, priorCount + 1);
+  }
+
+  /**
+   * Falling-edge handler. Currently a no-op hook; the recovery narration and
+   * trust credit are emitted from `recoverFromCollapse()` itself because they
+   * depend on witness range at the moment of teleport, not at the moment the
+   * flag flips. Kept as a distinct symbol so the edge detection above reads
+   * symmetrically and a future change (e.g. an end-of-blackout SFX cue) has an
+   * obvious home.
+   */
+  private onRecovered(): void {
+    // intentionally empty — see doc comment above.
+  }
+
+  /**
+   * Find the nearest friendly NPC cat within narration-witness range that has
+   * line-of-sight to the player. Returns null when no candidate qualifies.
+   * Used at the moment of collapse so a friendly cat who wanders off during
+   * the 3 s blackout can still be credited at recovery time.
+   */
+  private findCollapseWitness(): NPCCat | null {
+    let nearest: NPCCat | null = null;
+    let nearestDist: number = GP.NARRATION_WITNESS_DIST;
+    for (const { cat } of this.npcs) {
+      if (!cat.active) continue;
+      if (cat.disposition !== "friendly") continue;
+      const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, cat.x, cat.y);
+      if (dist > nearestDist) continue;
+      if (!this.hasLineOfSight(this.player.x, this.player.y, cat.x, cat.y)) continue;
+      nearest = cat;
+      nearestDist = dist;
+    }
+    return nearest;
+  }
+
   private recoverFromCollapse(): void {
     const safeSleep = this.map.findObject("spawns", (o) => o.name === "poi_safe_sleep");
     const safeX = safeSleep?.x ?? this.map.widthInPixels / 2;
     const safeY = safeSleep?.y ?? this.map.heightInPixels / 2;
+
+    // Witness-aware recovery narration. Must be evaluated BEFORE the teleport
+    // below: the intent of `witnessStillHere` is "did the witness stay close
+    // to where Mamma Cat collapsed during the 3 s blackout?" If we compute the
+    // distance after `setPosition(safeX, safeY)`, we measure from the safe-
+    // sleep POI instead — and since the POI is a dedicated map location and
+    // witnesses are ordinary colony cats scattered across the map, the range
+    // check at GP.NARRATION_WITNESS_DIST (~150 px) would almost always fail
+    // and the witness-aware branch would become unreachable. The player is
+    // velocity-pinned for the full blackout (see the `stats.collapsed` guard
+    // in update()), so `this.player.x/y` here still reflects the collapse
+    // location.
+    const witness = this.collapseWitness;
+    const witnessStillHere =
+      witness !== null &&
+      witness.active &&
+      Phaser.Math.Distance.Between(this.player.x, this.player.y, witness.x, witness.y) <=
+        GP.NARRATION_WITNESS_DIST;
 
     this.player.setPosition(safeX, safeY);
     this.stats.resetCollapse();
@@ -1406,6 +1557,18 @@ export class GameScene extends Phaser.Scene {
     this.collapseRecoveryTimer = 0;
 
     this.cameras.main.flash(500, 0, 0, 0);
+
+    const hud = this.scene.get("HUDScene") as HUDScene | undefined;
+    if (witnessStillHere && witness) {
+      hud?.showNarration?.(`You wake. ${witness.npcName} stayed close.`);
+      this.trust.supportedDuringCollapse(witness.npcName);
+      this.syncTrustDisposition(witness.npcName);
+    } else {
+      hud?.showNarration?.("You wake. Safer ground.");
+    }
+
+    this.collapseWitness = null;
+
     this.autoSave();
   }
 
@@ -1639,7 +1802,18 @@ export class GameScene extends Phaser.Scene {
       { cx: 2400, cy: 1500, radius: 200 }, // Southeast / Blackbird approach
     ];
 
-    const count = 12;
+    // Visible background roster is derived from the registry's dynamic
+    // `COLONY_COUNT` (total cat population), minus the named roster + Mamma
+    // Cat, capped for performance/readability. On a healthy colony this
+    // returns the cap (12); once enough cats have been snatched that
+    // `COLONY_COUNT` drops below named+mamma+cap, the visible roster
+    // shrinks in lockstep. Reads `this.colonyCount` which is kept in
+    // lockstep with the registry by the seed/load/dumping/snatch paths.
+    const count = computeBackgroundSpawnCount(
+      this.colonyCount,
+      NAMED_AND_MAMMA_COUNT,
+      VISIBLE_BACKGROUND_CAP,
+    );
     for (let i = 0; i < count; i++) {
       const zone = zones[i % zones.length]!;
       const angle = Math.random() * Math.PI * 2;
@@ -2485,14 +2659,56 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * Check if a snatcher has detected and caught Mamma Cat.
-   * Called from updateHumans during night phase.
+   * Check if a snatcher has detected and caught Mamma Cat, and sweep for
+   * colony cats (named or unnamed) that wandered into grab range. Called
+   * from updateHumans during night phase.
+   *
+   * Eligibility rules (mirror Mamma Cat's shelter-immunity rule):
+   *   - Cat must be `active`.
+   *   - Cats sleeping *near a shelter POI* are immune (didn't get ambushed;
+   *     the narrative "safe sleeping spot" protection that Mamma Cat also
+   *     enjoys). Cats sleeping anywhere else are vulnerable — this is the
+   *     "didn't wake from rest in time" case.
+   *   - Named cats (Blacky, Tiger, Jayco, etc.) are NOT automatically immune.
+   *     They are less often caught because they mostly stay inside their home
+   *     zones near shelter, but a named cat caught napping in the wrong spot
+   *     can be taken. The `COLONY_COUNT` floor (`NAMED_AND_MAMMA_COUNT`)
+   *     prevents total narrative annihilation; geography keeps named-cat
+   *     snatches rare in practice.
+   *
+   * KNOWN LIMITATION: named-cat snatches remove the live entity within the
+   * current session (destroy + splice from `this.npcs`) and decrement
+   * `COLONY_COUNT`, but the next scene boot (player capture reload or fresh
+   * `create()`) unconditionally re-runs the named spawn list and brings the
+   * cat back visually while the counter stays decremented. Tracking
+   * persistently-removed named cats needs a dedicated registry list + spawn
+   * guards + chapter-progression review (e.g. `JAYCO_TALKS` gating); see
+   * WORKING_MEMORY.md "Follow-ups" for the proposed shape.
    */
   private checkSnatcherDetection(): void {
     if (this.snatchers.length === 0) return;
 
+    // Collect colony-cat victims during the sweep, then apply removals after
+    // the nested loop so we don't splice `this.npcs` mid-iteration.
+    const colonyVictims: NPCCat[] = [];
+    const PLAYER_CAPTURE_RANGE = 16;
+    const COLONY_CAT_CAPTURE_RANGE = 16;
+
     for (const snatcher of this.snatchers) {
       if (!snatcher.visible) continue;
+
+      for (const { cat } of this.npcs) {
+        if (!cat.active) continue;
+        // Sleeping near shelter = sheltered (mirrors the player rule below).
+        // Sleeping elsewhere remains eligible — "didn't wake in time".
+        if (cat.state === "sleeping" && this.isNearShelter(cat.x, cat.y)) continue;
+        if (colonyVictims.includes(cat)) continue;
+        const catDist = Phaser.Math.Distance.Between(snatcher.x, snatcher.y, cat.x, cat.y);
+        if (catDist < COLONY_CAT_CAPTURE_RANGE) {
+          colonyVictims.push(cat);
+        }
+      }
+
       const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, snatcher.x, snatcher.y);
 
       // Detection radius: 128px normal, 32px if crouching near cover
@@ -2516,15 +2732,85 @@ export class GameScene extends Phaser.Scene {
         const chaseSpeed = 35;
         snatcher.setVelocity(Math.cos(angle) * chaseSpeed, Math.sin(angle) * chaseSpeed);
 
-        if (dist < 16) {
+        if (dist < PLAYER_CAPTURE_RANGE) {
+          // Apply any pending colony captures before the scene restart so
+          // the counter bump reaches the save file alongside the player's.
+          for (const victim of colonyVictims) this.handleColonyCatSnatch(victim);
           this.handleSnatcherCapture();
           return;
         }
       }
     }
+
+    for (const victim of colonyVictims) this.handleColonyCatSnatch(victim);
+  }
+
+  /**
+   * Remove a colony cat that a snatcher caught (named or unnamed), increment
+   * the lifetime `CATS_SNATCHED` counter, decrement the dynamic
+   * `COLONY_COUNT` total (clamped at `NAMED_AND_MAMMA_COUNT`), and narrate
+   * only if the player could actually perceive the event (proximity +
+   * line-of-sight, matching the Phase 4.5 witness-gate convention used
+   * elsewhere for snatcher beats). Unperceived captures happen silently —
+   * the cat is simply gone next time the player looks.
+   *
+   * Named cats: within-session removal is effective (entity destroyed,
+   * spliced from `this.npcs`). Cross-session persistence is NOT yet
+   * implemented — see the comment on `checkSnatcherDetection` and the
+   * "Follow-ups" block in WORKING_MEMORY.md.
+   */
+  private handleColonyCatSnatch(cat: NPCCat): void {
+    const near =
+      Phaser.Math.Distance.Between(this.player.x, this.player.y, cat.x, cat.y) <= GP.SNATCHER_WITNESS_DIST;
+    const los = near && this.hasLineOfSight(this.player.x, this.player.y, cat.x, cat.y);
+
+    const idx = this.npcs.findIndex((entry) => entry.cat === cat);
+    if (idx !== -1) {
+      const entry = this.npcs[idx]!;
+      this.npcs.splice(idx, 1);
+      entry.indicator.destroy();
+      entry.cat.destroy();
+    } else {
+      cat.destroy();
+    }
+
+    // Defensive clear of the dialogue-chaining guard (see WORKING_MEMORY
+    // "Input Guards — Dialogue State"). Colony cats don't normally engage
+    // dialogue, but named cats do — and a rare named-cat snatch while the
+    // player is mid-dialogue with that cat would otherwise leave a stale
+    // partner pointer.
+    if (this.lastDialoguePartner === cat) {
+      this.lastDialoguePartner = null;
+    }
+
+    const prev = this.registry.get(StoryKeys.CATS_SNATCHED);
+    const prevCount = typeof prev === "number" && Number.isFinite(prev) && prev >= 0 ? Math.floor(prev) : 0;
+    this.registry.set(StoryKeys.CATS_SNATCHED, prevCount + 1);
+
+    // Decrement the dynamic colony total, clamped at the named+Mamma floor
+    // so the colony can't be narratively counted out. Keep the field and
+    // registry in lockstep (the field is the cache used by the dumping
+    // path and `spawnColonyCats`).
+    this.colonyCount = decrementColonyTotal(this.colonyCount, NAMED_AND_MAMMA_COUNT);
+    this.registry.set(StoryKeys.COLONY_COUNT, this.colonyCount);
+
+    if (near && los) {
+      const hud = this.scene.get("HUDScene") as HUDScene | undefined;
+      hud?.showNarration("A cat was here. Now it's gone.");
+    }
   }
 
   private handleSnatcherCapture(): void {
+    // Increment the lifetime capture counter and persist it *before* the
+    // scene restart. `snatcherCapture` reloads via `SaveSystem.load()` which
+    // overwrites in-memory registry state from localStorage, so a mere
+    // `registry.set` here would be discarded on reload. Saving first ensures
+    // the new value is in the save payload when it's read back.
+    const prev = this.registry.get(StoryKeys.PLAYER_SNATCHED_COUNT);
+    const prevCount = typeof prev === "number" && Number.isFinite(prev) && prev >= 0 ? Math.floor(prev) : 0;
+    this.registry.set(StoryKeys.PLAYER_SNATCHED_COUNT, prevCount + 1);
+    this.autoSave();
+
     this.cameras.main.fade(100, 0, 0, 0, false, (_cam: Phaser.Cameras.Scene2D.Camera, progress: number) => {
       if (progress >= 1) {
         this.dialogue.show(["Hands. Darkness. You can't move. You can't breathe.", "..."], () => {
@@ -2647,7 +2933,7 @@ export class GameScene extends Phaser.Scene {
     this.registry.set(StoryKeys.DUMPING_EVENTS_SEEN, eventNum);
     const hud = this.scene.get("HUDScene") as HUDScene | undefined;
     this.colonyCount++;
-    this.registry.set("COLONY_COUNT", this.colonyCount);
+    this.registry.set(StoryKeys.COLONY_COUNT, this.colonyCount);
 
     switch (eventNum) {
       case 1:
