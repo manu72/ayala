@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 import type { GameScene } from "./GameScene";
 import { DialogueSystem } from "../systems/DialogueSystem";
-import { REST_HOLD_MS } from "../config/constants";
+import { REST_HOLD_MS } from "../config/gameplayConstants";
 
 const PANEL_X = 8;
 const PANEL_Y = 8;
@@ -29,6 +29,10 @@ const BARS: BarDef[] = [
 export class HUDScene extends Phaser.Scene {
   dialogue!: DialogueSystem;
 
+  private motionReduced(): boolean {
+    return this.registry.get("MOTION_REDUCED") === true;
+  }
+
   private fills: Phaser.GameObjects.Rectangle[] = [];
   private barLabels: Phaser.GameObjects.Text[] = [];
   private clockLabel!: Phaser.GameObjects.Text;
@@ -51,6 +55,13 @@ export class HUDScene extends Phaser.Scene {
   private pauseChapterTitle!: Phaser.GameObjects.Text;
   private pauseChapterHint!: Phaser.GameObjects.Text;
   private edgePulseGraphics!: Phaser.GameObjects.Graphics;
+
+  // Tracked TimerEvents from the reduced-motion code paths. They must be
+  // cancelled before scheduling a replacement, otherwise a stale timer from a
+  // previous call will fire during the current display and hide the card/pulse
+  // prematurely. (tweens.killTweensOf() does not touch time.delayedCall.)
+  private chapterTitleFadeTimer: Phaser.Time.TimerEvent | null = null;
+  private edgePulseFadeTimer: Phaser.Time.TimerEvent | null = null;
 
   constructor() {
     super({ key: "HUDScene" });
@@ -347,7 +358,24 @@ export class HUDScene extends Phaser.Scene {
   showChapterTitle(text: string): void {
     this.chapterTitleCard.setText(text);
     this.tweens.killTweensOf(this.chapterTitleCard);
+    // Cancel any pending reduced-motion fade-out from a prior call; otherwise
+    // it could fire mid-display and hide the new card early. We do this
+    // regardless of the current branch so that a mode toggle between calls
+    // cannot leave a stale timer behind.
+    if (this.chapterTitleFadeTimer) {
+      this.chapterTitleFadeTimer.remove(false);
+      this.chapterTitleFadeTimer = null;
+    }
     this.chapterTitleCard.setAlpha(0);
+
+    if (this.motionReduced()) {
+      this.chapterTitleCard.setAlpha(1);
+      this.chapterTitleFadeTimer = this.time.delayedCall(3000, () => {
+        this.chapterTitleCard.setAlpha(0);
+        this.chapterTitleFadeTimer = null;
+      });
+      return;
+    }
 
     this.tweens.add({
       targets: this.chapterTitleCard,
@@ -373,7 +401,23 @@ export class HUDScene extends Phaser.Scene {
     this.edgePulseGraphics.fillRect(width - thickness, 0, thickness, height);
 
     this.tweens.killTweensOf(this.edgePulseGraphics);
+    // Same stale-timer guard as showChapterTitle: pulseEdge has three call
+    // sites (story beats) that can overlap within the 2–3s pulse window.
+    if (this.edgePulseFadeTimer) {
+      this.edgePulseFadeTimer.remove(false);
+      this.edgePulseFadeTimer = null;
+    }
     this.edgePulseGraphics.setAlpha(0);
+
+    if (this.motionReduced()) {
+      this.edgePulseGraphics.setAlpha(intensity);
+      this.edgePulseFadeTimer = this.time.delayedCall(durationMs, () => {
+        this.edgePulseGraphics.setAlpha(0);
+        this.edgePulseFadeTimer = null;
+      });
+      return;
+    }
+
     this.tweens.add({
       targets: this.edgePulseGraphics,
       alpha: intensity,

@@ -236,6 +236,24 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
     body.setOffset(BODY_OFFSET_X, BODY_OFFSET_Y);
   }
 
+  /**
+   * Scripted intro: frightened crouch using sit-idle (ears-low read) without keyboard.
+   */
+  enterForcedCrouchPose(): void {
+    if (this.playerState === "resting" || this.playerState === "waking") return;
+    this.playerState = "crouching";
+    this.setVelocity(0);
+    this.anims.stop();
+    this.playIdleAnimation(true);
+  }
+
+  /** Leave forced crouch from {@link enterForcedCrouchPose} back to standing. */
+  exitForcedCrouchPose(): void {
+    if (this.playerState !== "crouching") return;
+    this.playerState = "normal";
+    this.showStandFrame();
+  }
+
   update(canRun = true, delta = 0): void {
     if (!this.cursors) return;
 

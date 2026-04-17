@@ -1,4 +1,6 @@
 import Phaser from "phaser";
+import type { SpeakerPose } from "../services/DialogueService";
+import { speakerPoseToAnimMode } from "../utils/dialoguePoseAnim";
 import type { TimeOfDay } from "../systems/DayNightCycle";
 import { BaseNPC } from "./BaseNPC";
 import type { CatState, Disposition } from "./types";
@@ -110,20 +112,36 @@ export class NPCCat extends BaseNPC {
     this.currentPhase = phase;
   }
 
-  /** Freeze AI and face a dialogue partner. Optional pose overrides the default sit animation. */
-  engageDialogue(targetX: number, targetY: number, pose?: string): void {
+  /**
+   * Freeze AI and face a dialogue partner.
+   * Maps {@link SpeakerPose} to the best available sprite row (sit / walk / rest).
+   */
+  engageDialogue(targetX: number, targetY: number, pose?: SpeakerPose | string): void {
     this.dialogueEngaged = true;
     this.setVelocity(0);
     const dx = targetX - this.x;
     const dy = targetY - this.y;
     this.lastDirection = BaseNPC.directionFromComponents(dx, dy);
+    const mode = speakerPoseToAnimMode(pose as SpeakerPose | undefined);
 
-    if (pose === "sleeping") {
-      this.anims.play(`${this.animPrefix}-rest`, true);
-      this.setAlpha(0.7);
-    } else {
-      this.setAlpha(1);
-      this.anims.play(`${this.animPrefix}-sit-${this.lastDirection}`, true);
+    this.setAlpha(1);
+
+    switch (mode) {
+      case "rest_dim":
+        this.anims.play(`${this.animPrefix}-rest`, true);
+        this.setAlpha(0.7);
+        break;
+      case "rest":
+        this.anims.play(`${this.animPrefix}-rest`, true);
+        break;
+      case "walk_paused":
+        this.anims.play(`${this.animPrefix}-walk`, true);
+        this.anims.pause();
+        break;
+      case "sit":
+      default:
+        this.anims.play(`${this.animPrefix}-sit-${this.lastDirection}`, true);
+        break;
     }
   }
 

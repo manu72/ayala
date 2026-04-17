@@ -1,7 +1,7 @@
 {
   "name": "ayala",
   "private": true,
-  "version": "0.1.5",
+  "version": "0.1.7",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -15,7 +15,8 @@
     "phaser": "^3.90.0"
   },
   "devDependencies": {
-    "@vitest/coverage-v8": "^4.1.4",
+    "@vitest/coverage-v8": "^3.2.4",
+    "fake-indexeddb": "^6.2.5",
     "pngjs": "^7.0.0",
     "typescript": "^6.0.2",
     "vite": "^8.0.8",

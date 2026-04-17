@@ -5,6 +5,18 @@ export class BootScene extends Phaser.Scene {
     super({ key: "BootScene" });
   }
 
+  init(): void {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      this.registry.set("MOTION_REDUCED", false);
+      return;
+    }
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    this.registry.set("MOTION_REDUCED", mq.matches);
+    mq.addEventListener("change", () => {
+      this.registry.set("MOTION_REDUCED", mq.matches);
+    });
+  }
+
   preload(): void {
     this.load.image("park-tiles", "assets/tilesets/park-tiles.png");
     this.load.image("trees-pale", "assets/tilesets/trees-pale.png");

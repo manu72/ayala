@@ -192,4 +192,13 @@ describe('DayNightCycle', () => {
       expect(spy).not.toHaveBeenCalled()
     })
   })
+
+  describe('snapVisualToPhase', () => {
+    it('sets phase and overlay immediately without transition flag', () => {
+      const cycle = new DayNightCycle(scene as never)
+      cycle.snapVisualToPhase('night')
+      expect(cycle.currentPhase).toBe('night')
+      expect(cycle.isTransitioning).toBe(false)
+    })
+  })
 })

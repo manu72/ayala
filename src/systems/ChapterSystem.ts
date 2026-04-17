@@ -7,6 +7,7 @@
 import type { TrustSystem } from "./TrustSystem";
 import type { DayNightCycle } from "./DayNightCycle";
 import type { TerritorySystem } from "./TerritorySystem";
+import { StoryKeys } from "../registry/storyKeys";
 
 export interface ChapterDef {
   id: number;
@@ -86,7 +87,7 @@ const CHAPTERS: ChapterDef[] = [
   {
     id: 6,
     conditions: (ctx) => {
-      return ctx.registry.get("ENCOUNTER_5_COMPLETE") === true;
+      return ctx.registry.get(StoryKeys.ENCOUNTER_5_COMPLETE) === true;
     },
     narration: [],
   },
