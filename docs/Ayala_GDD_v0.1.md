@@ -561,10 +561,15 @@ Note: The project originally used RPG JS v4 but switched to Phaser 3 during Phas
 - Build epilogue and end screen with welfare message
 - Colony journal / cat-dex
 
-### Phase 5: Polish & Release
+### Phase 5: AI integration
+
+- AI agents for Tier 1 NPCs (Camille, Blacky, Tiger, Jayco) with rich personalities and deep memory
+- AI agents for Tier 2 NPCs (Jayco Jnr, Fluffy, Pedigree cat, Ginger Twins, Manu, Kish)
+- All other NPCs stay the same as they are
+
+### Phase 6: Polish & Release
 
 - Visual overhaul — real tilesets, organic paths, ATG-accurate landmarks
-- AI integration (Deepseek or Gemini) for cat-to-cat engagements TBC
 - Playtesting (Camille is primary tester!)
 - Bug fixes, balance adjustments
 - Audio implementation (sourced ambient tracks, cat sounds)

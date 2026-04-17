@@ -30,8 +30,9 @@ const SPEED_PENALTY_HUNGER_10 = 0.5;
 const SPEED_PENALTY_THIRST_20 = 0.8;
 const SPEED_PENALTY_ENERGY_20 = 0.7;
 
-/** Duration (ms) a stat must be at 0 before collapse triggers. */
-const COLLAPSE_THRESHOLD_MS = 15_000;
+/** Grace period before collapse triggers.
+ * Duration (ms) a stat must be at 0 before collapse triggers. */
+const COLLAPSE_THRESHOLD_MS = 30_000;
 
 export class StatsSystem {
   hunger = 100;
@@ -146,8 +147,7 @@ export class StatsSystem {
 
   /** Restore from save. Clamps to valid range to guard against corrupt data. */
   fromJSON(data: CatStats): void {
-    const clamp = (v: number, fallback = 100) =>
-      Number.isFinite(v) ? Math.min(100, Math.max(0, v)) : fallback;
+    const clamp = (v: number, fallback = 100) => (Number.isFinite(v) ? Math.min(100, Math.max(0, v)) : fallback);
     this.hunger = clamp(data.hunger);
     this.thirst = clamp(data.thirst);
     this.energy = clamp(data.energy);

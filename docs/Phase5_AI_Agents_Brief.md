@@ -156,18 +156,36 @@ class AIDialogueService implements DialogueService {
 Primary: **Deepseek Chat** via OpenAI-compatible API
 Fallback: **OpenAI gpt-4o-mini** (cheap, fast, high quality)
 
-Both configured via `.env`:
+**Provider API keys MUST NOT be shipped in the client bundle.** The game builds to static files (see DoD), so any `VITE_`-prefixed variable is inlined verbatim into the JavaScript served to the browser and is trivially extractable by anyone viewing the page source. A leaked provider key means metered-API abuse billed to the project owner.
+
+Calls therefore go through a thin **server-side proxy** on the same origin as the static host (e.g. a serverless function, or a small Node/Express adapter). The proxy holds the keys, selects upstream provider, injects `Authorization`, and returns (or streams) the completion. The client only ever speaks to the proxy via a relative URL.
+
+Client-side env (`.env`) — safe to embed, no secrets:
 
 ```
-VITE_DEEPSEEK_API_KEY=...
-VITE_DEEPSEEK_API_BASE=https://api.deepseek.com/v1
-VITE_OPENAI_API_KEY=...
-VITE_OPENAI_API_BASE=https://api.openai.com/v1
 VITE_AI_PRIMARY=deepseek
 VITE_AI_FALLBACK=openai
+VITE_AI_PROXY_URL=/api/ai/chat
 ```
 
-The service tries the primary model first. On failure (timeout, rate limit, error), it falls back to the secondary. Both use the same chat-completions API structure so the code path is shared.
+Server-side env (proxy host only — **never** `VITE_`-prefixed, never touched by Vite):
+
+```
+DEEPSEEK_API_KEY=...
+DEEPSEEK_API_BASE=https://api.deepseek.com/v1
+OPENAI_API_KEY=...
+OPENAI_API_BASE=https://api.openai.com/v1
+```
+
+Request flow:
+
+1. `AIDialogueService.callLLM()` → `fetch(import.meta.env.VITE_AI_PROXY_URL, { method: 'POST', body: JSON.stringify({ provider, messages, temperature, max_tokens }) })`.
+2. Proxy resolves `provider` → upstream base + key, calls the provider's chat-completions endpoint, returns the response to the client.
+3. On proxy-reported upstream failure (timeout / 429 / 5xx), the service retries the request with `provider` set to the fallback. Both providers share the chat-completions shape, so the single proxy path handles both.
+
+Before any secret lands on disk, confirm `.gitignore` contains `.env` and `.env.*.local` — the repo currently omits them, and that gap must be closed as part of this phase.
+
+For local development without deploying a proxy, a dev-only shim can sit alongside `vite dev` (Vite middleware or a tiny Express adapter) that reads keys from the developer's machine env. This dev path is explicitly not for production and must not be reachable from the built static bundle.
 
 ### Response format
 
@@ -268,7 +286,9 @@ Phase 5 is complete when:
 
 - [ ] Persona .md files exist for all Tier 1 and Tier 2 NPCs
 - [ ] `AIDialogueService` implemented using Deepseek (primary) and OpenAI (fallback)
-- [ ] API keys configured via `.env`
+- [ ] Server-side proxy deployed on the same origin; client calls it via `VITE_AI_PROXY_URL`
+- [ ] Provider API keys live only in server-side env (non-`VITE_`-prefixed); no secret appears in the built `dist/` bundle (`rg 'sk-|DEEPSEEK_API_KEY|OPENAI_API_KEY' dist/` is clean)
+- [ ] `.gitignore` lists `.env` and `.env.*.local` before any `.env` file is created
 - [ ] All Tier 1 NPCs produce AI-generated dialogue that feels in-character
 - [ ] Tier 2 NPCs produce AI-generated dialogue (lighter persona prompts acceptable)
 - [ ] Tier 3 entities continue to use scripted dialogue (unchanged)

@@ -184,6 +184,10 @@ SmallDog.png, WhiteDog.png, BrownDog.png — randomly assigned to dog walkers
 
 - Background NPCs sharing the same `npcName` causes collisions in name-keyed maps (narration cooldowns, trust proximity throttling). Always use unique identifiers.
 
+### Security — Client-side secrets
+
+- **Never put API keys in `VITE_*` env vars.** Vite inlines every `VITE_`-prefixed variable into the client bundle, and the game ships as static files — anything `VITE_*` is readable from the page source. For any third-party API (LLM providers, analytics with secret tokens, etc.), route calls through a same-origin server-side proxy that holds the key. Non-secret config (provider name, proxy URL, feature flags) may stay `VITE_*`. Also verify `.gitignore` covers `.env` / `.env.*.local` before creating any env file — the repo's historical `.gitignore` omitted them.
+
 ### Feeder Waypoint Behavior
 
 - Feeders use dynamic paths built from tilemap POIs (`poi_feeding_station_1`, `poi_feeding_station_2`) via `buildFeederConfigs()`. Paths are: entry -> station -> exit.
