@@ -608,11 +608,22 @@ export class GameScene extends Phaser.Scene {
     // silently leak past shutdown. Matches startIntroCinematic() + shutdown().
     this.clearIntroCinematicResources();
 
-    this.dayNight.snapVisualToPhase("dawn");
+    // Blend night→dawn instead of snapping so the intro bleeds into
+    // gameplay. Motion-reduced users still get a quick cross-fade rather
+    // than a jarring hard cut. `dayNight.update()` will drive the lerp now
+    // that `cinematicActive` is false.
+    const motionReduced = this.registry.get("MOTION_REDUCED") === true;
+    const dawnBlendMs = motionReduced ? 400 : 5000;
+    this.dayNight.transitionVisualToPhase("dawn", dawnBlendMs);
+
     this.player.exitForcedCrouchPose();
     const playerBody = this.player.body as Phaser.Physics.Arcade.Body | undefined;
     playerBody?.setEnable(true);
 
+    // Anchor the camera on Mamma Cat's dumped position before starting the
+    // follow lerp; otherwise the camera was centered on `spawn_player` and
+    // would visibly drift ~28px to the cat, which reads as the cat teleporting.
+    this.cameras.main.centerOn(this.player.x, this.player.y);
     this.cameras.main.startFollow(this.player, true, 0.08, 0.08);
     this.cameras.main.setDeadzone(50, 50);
 

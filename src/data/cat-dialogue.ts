@@ -64,10 +64,7 @@ const tigerScripts: DialogueScript[] = [
   {
     condition: isFirstMeeting,
     response: {
-      lines: [
-        "*The cat's ears flatten slightly. Its tail flicks once.*",
-        '"Ssss. This is my spot."',
-      ],
+      lines: ["*The cat's ears flatten slightly. Its tail flicks once.*", '"Ssss. This is my spot."'],
       speakerPose: "hostile",
       emote: "hostile",
       trustChange: 10,
@@ -119,9 +116,7 @@ const jaycoScripts: DialogueScript[] = [
   {
     condition: () => true,
     response: {
-      lines: [
-        '"The ginger ones fight over the bench near the fountain. Stay clear at dusk."',
-      ],
+      lines: ['"The ginger ones fight over the bench near the fountain. Stay clear at dusk."'],
       speakerPose: "friendly",
       emote: "heart",
       trustChange: 5,
@@ -149,9 +144,7 @@ const jaycoJrScripts: DialogueScript[] = [
   {
     condition: () => true,
     response: {
-      lines: [
-        '"Did you find the water bowls? They\'re near the big trees! I can show you!"',
-      ],
+      lines: ['"Did you find the water bowls? They\'re near the big trees! I can show you!"'],
       speakerPose: "friendly",
       emote: "heart",
       trustChange: 5,
@@ -211,7 +204,7 @@ const pedigreeScripts: DialogueScript[] = [
       lines: [
         "*This cat has a look you recognise. Well-groomed but confused. A former pet, like you.*",
         '"I had a home once. A bed. A name they called me."',
-        '"They moved away. I didn\'t."',
+        '"They moved away and left me behind."',
       ],
       speakerPose: "submissive",
       emote: "curious",
@@ -222,9 +215,7 @@ const pedigreeScripts: DialogueScript[] = [
   {
     condition: () => true,
     response: {
-      lines: [
-        '"The ones in dark clothes at night... they took my friend. Stay hidden after dark."',
-      ],
+      lines: ['"The ones in dark clothes at night... they took my friend. Stay hidden after dark."'],
       speakerPose: "wary",
       emote: "alert",
       trustChange: 5,
@@ -239,10 +230,7 @@ const gingerScripts: DialogueScript[] = [
   {
     condition: isFirstMeeting,
     response: {
-      lines: [
-        "*Two orange cats glare at you from beside the fountain. One hisses.*",
-        '"SSSS! This water is OURS."',
-      ],
+      lines: ["*Two orange cats glare at you from beside the fountain. One hisses.*", '"SSSS! This water is OURS."'],
       speakerPose: "hostile",
       emote: "hostile",
       trustChange: 10,
@@ -252,10 +240,7 @@ const gingerScripts: DialogueScript[] = [
   {
     condition: (req) => req.gameState.trustWithSpeaker >= 30,
     response: {
-      lines: [
-        "*The ginger cat flicks an ear at you.*",
-        '"...Fine. Drink. But don\'t bring anyone else."',
-      ],
+      lines: ["*The ginger cat flicks an ear at you.*", '"...Fine. Drink. But don\'t bring anyone else."'],
       speakerPose: "wary",
       emote: "curious",
       trustChange: 5,
@@ -280,9 +265,7 @@ const gingerBScripts: DialogueScript[] = [
   {
     condition: isFirstMeeting,
     response: {
-      lines: [
-        "*This one just watches. It doesn't speak. Its twin does the talking.*",
-      ],
+      lines: ["*This one just watches. It doesn't speak. Its brother does the talking.*"],
       speakerPose: "wary",
       emote: "curious",
       trustChange: 10,
