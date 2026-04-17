@@ -388,10 +388,19 @@ export class GameScene extends Phaser.Scene {
     this.cameras.main.setZoom(DEFAULT_ZOOM);
 
     const isNewGame = !data?.loadSave && !data?.newGamePlus && !data?.snatcherCapture;
-    migrateLegacyIntroFlag(
-      this.registry,
-      typeof localStorage !== "undefined" ? localStorage : undefined,
-    );
+    // Access to `localStorage` can itself throw (not just getItem) in restricted
+    // contexts — Firefox with dom.storage.enabled=false, sandboxed iframes,
+    // Safari with storage blocked for third-party contexts. `typeof` does not
+    // help here because the global is declared; evaluating the identifier
+    // triggers the getter. Fall back to `undefined` on any throw so scene boot
+    // never fails because of storage availability.
+    let legacyStorage: Storage | undefined;
+    try {
+      legacyStorage = typeof localStorage !== "undefined" ? localStorage : undefined;
+    } catch {
+      legacyStorage = undefined;
+    }
+    migrateLegacyIntroFlag(this.registry, legacyStorage);
     const shouldPlayCinematic = isNewGame && this.registry.get(StoryKeys.INTRO_SEEN) !== true;
 
     if (!shouldPlayCinematic) {
@@ -674,8 +683,7 @@ export class GameScene extends Phaser.Scene {
     } else if (this.engagedDialogueNPC && this.dialogue.isActive) {
       const cat = this.engagedDialogueNPC;
       const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, cat.x, cat.y);
-      const broken =
-        dist > DIALOGUE_BREAK_DISTANCE || cat.state === "fleeing" || !cat.active;
+      const broken = dist > DIALOGUE_BREAK_DISTANCE || cat.state === "fleeing" || !cat.active;
       if (broken) {
         this.dialogue.dismiss();
         cat.disengageDialogue();
@@ -840,10 +848,7 @@ export class GameScene extends Phaser.Scene {
       ) {
         if (this.player.isCatloaf) {
           this.player.exitCatloaf();
-        } else if (
-          this.player.playerState === "normal" ||
-          this.player.playerState === "crouching"
-        ) {
+        } else if (this.player.playerState === "normal" || this.player.playerState === "crouching") {
           this.player.enterCatloaf();
         }
       }
@@ -1114,15 +1119,9 @@ export class GameScene extends Phaser.Scene {
     if (!this.camilleNPC?.visible) return;
     if (this.dialogue.isActive) return;
 
-    const dist = Phaser.Math.Distance.Between(
-      this.player.x,
-      this.player.y,
-      this.camilleNPC.x,
-      this.camilleNPC.y,
-    );
+    const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, this.camilleNPC.x, this.camilleNPC.y);
     if (dist > GP.CAMILLE_ENCOUNTER_DIST) return;
-    if (!this.hasLineOfSight(this.player.x, this.player.y, this.camilleNPC.x, this.camilleNPC.y))
-      return;
+    if (!this.hasLineOfSight(this.player.x, this.player.y, this.camilleNPC.x, this.camilleNPC.y)) return;
 
     const encounterNum = this.pendingCamilleEncounter;
     this.pendingCamilleEncounter = 0;
@@ -1216,29 +1215,18 @@ export class GameScene extends Phaser.Scene {
    * Delayed Camille beat: re-check proximity + LOS before dialogue (Phase 4.5).
    * If conditions fail, re-arm {@link pendingCamilleEncounter} for the next 5s poll.
    */
-  private scheduleCamilleEncounterDialogue(
-    delayMs: number,
-    encounterNum: number,
-    run: () => void,
-  ): void {
+  private scheduleCamilleEncounterDialogue(delayMs: number, encounterNum: number, run: () => void): void {
     this.time.delayedCall(delayMs, () => {
       if (!this.camilleNPC?.active) {
         this.pendingCamilleEncounter = encounterNum;
         return;
       }
-      const dist = Phaser.Math.Distance.Between(
-        this.player.x,
-        this.player.y,
-        this.camilleNPC.x,
-        this.camilleNPC.y,
-      );
+      const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, this.camilleNPC.x, this.camilleNPC.y);
       if (dist > GP.CAMILLE_ENCOUNTER_DIST) {
         this.pendingCamilleEncounter = encounterNum;
         return;
       }
-      if (
-        !this.hasLineOfSight(this.player.x, this.player.y, this.camilleNPC.x, this.camilleNPC.y)
-      ) {
+      if (!this.hasLineOfSight(this.player.x, this.player.y, this.camilleNPC.x, this.camilleNPC.y)) {
         this.pendingCamilleEncounter = encounterNum;
         return;
       }
@@ -1710,6 +1698,23 @@ export class GameScene extends Phaser.Scene {
           { x: 1400, y: 1100 },
         ],
       },
+      // Jogger 3 (male): clockwise perimeter loop around the park triangle.
+      // Dawn + evenings only. Steers softly around other NPCs/cats (he
+      // ignores cats socially but must not run through them).
+      {
+        type: "jogger_male",
+        speed: 120,
+        activePhases: ["dawn", "evening"],
+        avoidanceRadius: 30,
+        loopPauseSec: 5,
+        path: [
+          { x: 16, y: 1392 }, // tile (0,43)  — SW spawn on diagonal sidewalk
+          { x: 1008, y: 432 }, // tile (31,13) — NE turn onto main N walkway
+          { x: 3024, y: 432 }, // tile (94,13) — E end, turn south
+          { x: 3024, y: 2480 }, // tile (94,77) — SE corner, turn west
+          { x: 16, y: 2480 }, // tile (0,77)  — west-edge exit along Ayala Ave
+        ],
+      },
       ...this.buildFeederConfigs(),
       // Dog walker 1: western gardens near fountain and underpass
       {
@@ -1829,9 +1834,7 @@ export class GameScene extends Phaser.Scene {
 
         // Always greet Mamma Cat when close — no "already greeted" gate.
         // The isGreeting cooldown (4-6s) prevents frame-spam naturally.
-        const playerDist = Phaser.Math.Distance.Between(
-          human.x, human.y, this.player.x, this.player.y,
-        );
+        const playerDist = Phaser.Math.Distance.Between(human.x, human.y, this.player.x, this.player.y);
         if (playerDist < GP.CAT_PERSON_PLAYER_GREET_DIST) {
           let playerLine: string | undefined;
           if (human.humanType === "camille") {
@@ -1872,12 +1875,7 @@ export class GameScene extends Phaser.Scene {
         this.camilleNPC &&
         this.kishNPC &&
         !this.kishNPC.isGreeting &&
-        Phaser.Math.Distance.Between(
-          this.kishNPC.x,
-          this.kishNPC.y,
-          this.camilleNPC.x,
-          this.camilleNPC.y,
-        ) < 80
+        Phaser.Math.Distance.Between(this.kishNPC.x, this.kishNPC.y, this.camilleNPC.x, this.camilleNPC.y) < 80
       ) {
         this.kishCamilleSlowDownShown = true;
         const bubble = this.add
@@ -1903,12 +1901,13 @@ export class GameScene extends Phaser.Scene {
         this.emotes.show(this, this.camilleNPC, "curious");
       }
 
-      // Category A: passers-through glance at nearby cats (including Mamma Cat)
-      if (human.humanType === "jogger" || human.humanType === "dogwalker") {
+      // Category A: passers-through glance at nearby cats (including Mamma Cat).
+      // Both female ("jogger") and male ("jogger_male") joggers behave the
+      // same here: they glance, and their presence mildly alerts cats.
+      const isJogger = human.humanType === "jogger" || human.humanType === "jogger_male";
+      if (isJogger || human.humanType === "dogwalker") {
         let glanced = false;
-        const playerDist = Phaser.Math.Distance.Between(
-          human.x, human.y, this.player.x, this.player.y,
-        );
+        const playerDist = Phaser.Math.Distance.Between(human.x, human.y, this.player.x, this.player.y);
         if (playerDist < GP.GLANCE_DIST) {
           human.glanceAt(this.player.x, this.player.y);
           glanced = true;
@@ -1918,7 +1917,7 @@ export class GameScene extends Phaser.Scene {
           for (const { cat } of this.npcs) {
             const dist = Phaser.Math.Distance.Between(human.x, human.y, cat.x, cat.y);
             if (dist < GP.GLANCE_DIST) {
-              if (human.humanType === "jogger") {
+              if (isJogger) {
                 if (cat.state !== "sleeping" && cat.state !== "alert") {
                   cat.triggerAlert();
                   this.emotes.show(this, cat, "alert");
@@ -1929,6 +1928,24 @@ export class GameScene extends Phaser.Scene {
             }
           }
         }
+      }
+
+      // Soft steering avoidance for opted-in humans (e.g. the male jogger).
+      // Runs after update() so we can bend the velocity pathing just set.
+      const avoidR = human.config.avoidanceRadius ?? 0;
+      if (avoidR > 0) {
+        const neighbours: Array<{ x: number; y: number }> = [];
+        for (const other of this.humans) {
+          if (other === human || !other.visible) continue;
+          neighbours.push({ x: other.x, y: other.y });
+        }
+        for (const { cat } of this.npcs) {
+          if (!cat.visible) continue;
+          neighbours.push({ x: cat.x, y: cat.y });
+        }
+        // Include the player so the jogger also weaves around them.
+        neighbours.push({ x: this.player.x, y: this.player.y });
+        human.applySteeringAvoidance(neighbours, avoidR);
       }
     }
 
@@ -1965,10 +1982,7 @@ export class GameScene extends Phaser.Scene {
     feeder: ["Hi sweetie.", "Kamusta, pusa.", "There you are.", "Good kitty."],
   };
 
-  private showGreetingBubble(
-    human: HumanNPC,
-    opts?: { line?: string; nearNpcCat?: NPCCat },
-  ): void {
+  private showGreetingBubble(human: HumanNPC, opts?: { line?: string; nearNpcCat?: NPCCat }): void {
     let line = opts?.line;
     if (!line && opts?.nearNpcCat && human.humanType === "camille") {
       const named = this.camillePersonalLines[opts.nearNpcCat.npcName];
@@ -2033,10 +2047,7 @@ export class GameScene extends Phaser.Scene {
 
   /** True when Mamma Cat is within radial distance of the Makati Ave road centreline. */
   private isNearMakatiAve(worldX: number, worldY: number): boolean {
-    return (
-      Phaser.Math.Distance.Between(worldX, worldY, GP.MAKATI_AVE_CENTER_X, worldY) <=
-      GP.MAKATI_AVE_WITNESS_DIST
-    );
+    return Phaser.Math.Distance.Between(worldX, worldY, GP.MAKATI_AVE_CENTER_X, worldY) <= GP.MAKATI_AVE_WITNESS_DIST;
   }
 
   /** Approximate line-of-sight check by raymarching through collision tiles. */
@@ -2195,7 +2206,10 @@ export class GameScene extends Phaser.Scene {
       this.engagedDialogueNPC = cat;
 
       if (response.speakerPose) {
-        const poseEmote: Record<import("../services/DialogueService").SpeakerPose, import("../systems/EmoteSystem").EmoteType> = {
+        const poseEmote: Record<
+          import("../services/DialogueService").SpeakerPose,
+          import("../systems/EmoteSystem").EmoteType
+        > = {
           friendly: "heart",
           hostile: "hostile",
           wary: "alert",
@@ -2441,8 +2455,7 @@ export class GameScene extends Phaser.Scene {
     if (!silent) {
       const hud = this.scene.get("HUDScene") as HUDScene | undefined;
       const near =
-        Phaser.Math.Distance.Between(this.player.x, this.player.y, snatcher.x, snatcher.y) <=
-        GP.SNATCHER_WITNESS_DIST;
+        Phaser.Math.Distance.Between(this.player.x, this.player.y, snatcher.x, snatcher.y) <= GP.SNATCHER_WITNESS_DIST;
       const los = this.hasLineOfSight(this.player.x, this.player.y, snatcher.x, snatcher.y);
       if (near && los) {
         hud?.showNarration("Something moves in the dark...");

@@ -37,8 +37,12 @@ export class BootScene extends Phaser.Scene {
       ["mc_stand8", "mammacat_stand_8directions"],
       ["mc_walk_e", "mammacat_walk_east"],
       ["mc_walk_w", "mammacat_walk_west"],
+      ["mc_walk_n", "mammacat_walk_north"],
+      ["mc_walk_s", "mammacat_walk_south"],
       ["mc_run_e", "mammacat_run_east"],
       ["mc_run_w", "mammacat_run_west"],
+      ["mc_run_n", "mammacat_run_north"],
+      ["mc_run_s", "mammacat_run_south"],
       ["mc_sit_idle_e", "mammacat_seated_idle_east"],
       ["mc_sit_idle_w", "mammacat_seated_idle_west"],
       ["mc_stand_idle_e", "mammacat_standing_idle_east"],
@@ -85,11 +89,26 @@ export class BootScene extends Phaser.Scene {
       });
     }
 
-    // Jogger spritesheet: 8 cols x 6 rows of 150x85 frames
+    // Jogger spritesheet: 8 cols x 6 rows of 150x85 frames (female jogger)
     this.load.spritesheet("jogger", "assets/sprites/girl.png", {
       frameWidth: 150,
       frameHeight: 85,
     });
+
+    // Male jogger directional spritesheets (48x48 frames, single-row strips of 8)
+    const mjogSheets: Array<[string, string]> = [
+      ["mjog_stand", "male_jogger_stand"],
+      ["mjog_run_e", "male_jogger_run_east"],
+      ["mjog_run_w", "male_jogger_run_west"],
+      ["mjog_run_n", "male_jogger_run_north"],
+      ["mjog_run_s", "male_jogger_run_south"],
+    ];
+    for (const [key, file] of mjogSheets) {
+      this.load.spritesheet(key, `assets/sprites/${file}.png`, {
+        frameWidth: 48,
+        frameHeight: 48,
+      });
+    }
 
     // Legacy dog walker sheet (7 cols x 3 rows, 50x45) — kept for revert.
     // To revert: restore DOGWALKER_PROFILE in HumanNPC.ts to use key "dogwalker".
