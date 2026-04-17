@@ -162,6 +162,7 @@ export class GameScene extends Phaser.Scene {
       this.engagedDialogueNPC = null;
     }
     this.lastDialoguePartner = null;
+    this.player?.stopGreeting();
     this.dialogue.dismiss();
   }
 
@@ -815,7 +816,7 @@ export class GameScene extends Phaser.Scene {
     const zJustUp = this.restKey ? Phaser.Input.Keyboard.JustUp(this.restKey) : false;
     const REST_TAP_MS = 300;
 
-    if (zDown && playerStationary && !this.dialogue.isActive) {
+    if (zDown && playerStationary && !this.dialogue.isActive && !this.player.isGreeting) {
       this.restHoldTimer += delta;
       this.restHoldActive = true;
       if (this.restHoldTimer >= REST_HOLD_MS) {
@@ -844,7 +845,8 @@ export class GameScene extends Phaser.Scene {
         this.restHoldTimer < REST_TAP_MS &&
         playerStationary &&
         !this.dialogue.isActive &&
-        !this.player.isMoving
+        !this.player.isMoving &&
+        !this.player.isGreeting
       ) {
         if (this.player.isCatloaf) {
           this.player.exitCatloaf();
@@ -2116,6 +2118,9 @@ export class GameScene extends Phaser.Scene {
   // ──────────── NPC Interaction ────────────
 
   private tryInteract(): void {
+    // Greeting locks the player; ignore re-presses until it finishes.
+    if (this.player.isGreeting) return;
+
     let nearestEntry: NPCEntry | null = null;
     let nearestDist = Infinity;
     for (const entry of this.npcs) {
@@ -2130,7 +2135,14 @@ export class GameScene extends Phaser.Scene {
         nearestDist = dist;
       }
     }
-    if (!nearestEntry) return;
+    if (!nearestEntry) {
+      // No cat in range — space becomes a free Mamma-Cat greeting action.
+      // This is NOT proximity-gated and does NOT target any NPC: the player
+      // can greet anywhere, any time. The humans' own passive proximity greet
+      // loop in updateHumans() is untouched and still runs independently.
+      this.player.startGreeting();
+      return;
+    }
     const cat = nearestEntry.cat;
     if (cat.state === "sleeping") {
       cat.triggerAlert();
