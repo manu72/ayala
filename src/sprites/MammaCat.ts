@@ -10,8 +10,12 @@ const CROUCH_TAP_THRESHOLD_MS = 180;
 const MC_STAND8 = "mc_stand8";
 const MC_WALK_E = "mc_walk_e";
 const MC_WALK_W = "mc_walk_w";
+const MC_WALK_N = "mc_walk_n";
+const MC_WALK_S = "mc_walk_s";
 const MC_RUN_E = "mc_run_e";
 const MC_RUN_W = "mc_run_w";
+const MC_RUN_N = "mc_run_n";
+const MC_RUN_S = "mc_run_s";
 const MC_SIT_IDLE_E = "mc_sit_idle_e";
 const MC_SIT_IDLE_W = "mc_sit_idle_w";
 const MC_STAND_IDLE_E = "mc_stand_idle_e";
@@ -22,8 +26,12 @@ const MC_CATLOAF = "mc_catloaf";
 // ── Animation keys ──
 const ANIM_WALK_E = "mc-walk-e";
 const ANIM_WALK_W = "mc-walk-w";
+const ANIM_WALK_N = "mc-walk-n";
+const ANIM_WALK_S = "mc-walk-s";
 const ANIM_RUN_E = "mc-run-e";
 const ANIM_RUN_W = "mc-run-w";
+const ANIM_RUN_N = "mc-run-n";
+const ANIM_RUN_S = "mc-run-s";
 const ANIM_SIT_IDLE_E = "mc-sit-idle-e";
 const ANIM_SIT_IDLE_W = "mc-sit-idle-w";
 const ANIM_STAND_IDLE_E = "mc-stand-idle-e";
@@ -343,13 +351,23 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
     }
 
     // ── Animation selection ──
+    // Pure N/S use dedicated sheets; diagonals still use E/W (horizontal
+    // component reads more clearly than a head-on silhouette when moving
+    // diagonally) so the existing 8-direction stand frames and E/W walks
+    // stay visually consistent with movement.
     if (movingX || movingY) {
       const facingEast = this.isFacingEast();
+      const pureVertical = !movingX && movingY;
 
       if (this.isRunning) {
-        this.anims.play(facingEast ? ANIM_RUN_E : ANIM_RUN_W, true);
+        let runAnim: string;
+        if (pureVertical) runAnim = up ? ANIM_RUN_N : ANIM_RUN_S;
+        else runAnim = facingEast ? ANIM_RUN_E : ANIM_RUN_W;
+        this.anims.play(runAnim, true);
       } else {
-        const walkAnim = facingEast ? ANIM_WALK_E : ANIM_WALK_W;
+        let walkAnim: string;
+        if (pureVertical) walkAnim = up ? ANIM_WALK_N : ANIM_WALK_S;
+        else walkAnim = facingEast ? ANIM_WALK_E : ANIM_WALK_W;
         this.anims.play(walkAnim, true);
         if (wantsCrouch) {
           this.anims.msPerFrame = 1000 / CROUCH_WALK_FPS;
@@ -469,6 +487,18 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
       frameRate: 8,
       repeat: -1,
     });
+    scene.anims.create({
+      key: ANIM_WALK_N,
+      frames: scene.anims.generateFrameNumbers(MC_WALK_N, { start: 0, end: 3 }),
+      frameRate: 8,
+      repeat: -1,
+    });
+    scene.anims.create({
+      key: ANIM_WALK_S,
+      frames: scene.anims.generateFrameNumbers(MC_WALK_S, { start: 0, end: 3 }),
+      frameRate: 8,
+      repeat: -1,
+    });
 
     // Run (8 frames each)
     scene.anims.create({
@@ -480,6 +510,18 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
     scene.anims.create({
       key: ANIM_RUN_W,
       frames: scene.anims.generateFrameNumbers(MC_RUN_W, { start: 0, end: 7 }),
+      frameRate: 12,
+      repeat: -1,
+    });
+    scene.anims.create({
+      key: ANIM_RUN_N,
+      frames: scene.anims.generateFrameNumbers(MC_RUN_N, { start: 0, end: 7 }),
+      frameRate: 12,
+      repeat: -1,
+    });
+    scene.anims.create({
+      key: ANIM_RUN_S,
+      frames: scene.anims.generateFrameNumbers(MC_RUN_S, { start: 0, end: 7 }),
       frameRate: 12,
       repeat: -1,
     });

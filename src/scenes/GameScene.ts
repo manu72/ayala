@@ -1701,16 +1701,16 @@ export class GameScene extends Phaser.Scene {
       // Tile → world: world = tile * 32 + 16 (centre of tile).
       {
         type: "jogger_male",
-        speed: 140,
+        speed: 120,
         activePhases: ["dawn", "evening"],
-        avoidanceRadius: 40,
+        avoidanceRadius: 30,
         loopPauseSec: 5,
         path: [
-          { x: 16, y: 1392 },   // tile (0,43)  — SW spawn on diagonal sidewalk
-          { x: 1008, y: 432 },  // tile (31,13) — NE turn onto main N walkway
-          { x: 3024, y: 432 },  // tile (94,13) — E end, turn south
+          { x: 16, y: 1392 }, // tile (0,43)  — SW spawn on diagonal sidewalk
+          { x: 1008, y: 432 }, // tile (31,13) — NE turn onto main N walkway
+          { x: 3024, y: 432 }, // tile (94,13) — E end, turn south
           { x: 3024, y: 2480 }, // tile (94,77) — SE corner, turn west
-          { x: 16, y: 2480 },   // tile (0,77)  — west-edge exit along Ayala Ave
+          { x: 16, y: 2480 }, // tile (0,77)  — west-edge exit along Ayala Ave
         ],
       },
       ...this.buildFeederConfigs(),
