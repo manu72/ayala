@@ -2339,19 +2339,20 @@ export class GameScene extends Phaser.Scene {
    * The first snatcher sighting is scripted: a snatcher walks into view,
    * nearby NPC cats flee visibly, then narration fires.
    *
-   * `FIRST_SNATCHER_SEEN` is persisted only once the player passes the
-   * proximity + LOS gate below. If it were set up-front, a player who is
-   * awake but across the map (or behind an obstacle) would silently burn
-   * their scripted first sighting: on subsequent nights `firstEligible`
-   * would be false and `resolveSnatcherSpawnAction` would return
-   * `random_spawn`, so the narrative beat would never play for that save.
-   * Shelter-rest players are handled earlier via `defer_first_sighting`.
+   * All player-facing effects (edge pulse, narration) and the persistent
+   * `FIRST_SNATCHER_SEEN` flag fire only once the player passes the
+   * proximity + LOS gate below. If any of them fired up-front, a player
+   * who is awake but across the map (or behind an obstacle) would either
+   * see a mysterious red screen pulse with no visible cause (Phase 4.5
+   * "effects only fire when Mamma Cat can perceive the source") or
+   * silently burn their scripted first sighting — on subsequent nights
+   * `firstEligible` would be false and `resolveSnatcherSpawnAction` would
+   * return `random_spawn`, so the narrative beat would never play for
+   * that save. Shelter-rest players are handled earlier via
+   * `defer_first_sighting`.
    */
   private playFirstSnatcherSighting(): void {
     this.spawnSnatcher(0, true);
-
-    const hud = this.scene.get("HUDScene") as HUDScene | undefined;
-    hud?.pulseEdge(0x220000, 0.35, 3000);
 
     const snatcher = this.snatchers[0];
     if (!snatcher) return;
@@ -2367,9 +2368,14 @@ export class GameScene extends Phaser.Scene {
       }
 
       this.time.delayedCall(1000, () => {
-        // Gate narration by the same proximity + LOS check used elsewhere for
-        // snatcher sightings (see spawnSnatcher). Without it, the player gets
-        // a "you see the cats run" line for an event they cannot perceive.
+        // Gate the full player-facing beat — edge pulse, narration, and the
+        // persistent "seen" flag — behind the same proximity + LOS check used
+        // elsewhere for snatcher sightings (see spawnSnatcher). Without it,
+        // distant players get a "you see the cats run" line AND a mysterious
+        // red screen pulse for an event they cannot perceive. Matches the
+        // Phase 4.5 convention followed by `playCamilleEncounterNarrative`
+        // (gated upstream by `checkCamilleProximity`) and `playDumpingSequence`
+        // (gated upstream by `isNearMakatiAve`).
         if (!snatcher.active) return;
         const near =
           Phaser.Math.Distance.Between(this.player.x, this.player.y, snatcher.x, snatcher.y) <=
@@ -2377,6 +2383,7 @@ export class GameScene extends Phaser.Scene {
         const los = this.hasLineOfSight(this.player.x, this.player.y, snatcher.x, snatcher.y);
         if (!near || !los) return;
         const hud = this.scene.get("HUDScene") as HUDScene | undefined;
+        hud?.pulseEdge(0x220000, 0.35, 3000);
         hud?.showNarration("Something moves in the dark. The other cats run. You should too.");
         // Only persist the "seen" flag once the player has actually perceived
         // the scripted beat. Missed first sightings retry on the next eligible
