@@ -2338,9 +2338,16 @@ export class GameScene extends Phaser.Scene {
   /**
    * The first snatcher sighting is scripted: a snatcher walks into view,
    * nearby NPC cats flee visibly, then narration fires.
+   *
+   * `FIRST_SNATCHER_SEEN` is persisted only once the player passes the
+   * proximity + LOS gate below. If it were set up-front, a player who is
+   * awake but across the map (or behind an obstacle) would silently burn
+   * their scripted first sighting: on subsequent nights `firstEligible`
+   * would be false and `resolveSnatcherSpawnAction` would return
+   * `random_spawn`, so the narrative beat would never play for that save.
+   * Shelter-rest players are handled earlier via `defer_first_sighting`.
    */
   private playFirstSnatcherSighting(): void {
-    this.registry.set(StoryKeys.FIRST_SNATCHER_SEEN, true);
     this.spawnSnatcher(0, true);
 
     const hud = this.scene.get("HUDScene") as HUDScene | undefined;
@@ -2371,6 +2378,10 @@ export class GameScene extends Phaser.Scene {
         if (!near || !los) return;
         const hud = this.scene.get("HUDScene") as HUDScene | undefined;
         hud?.showNarration("Something moves in the dark. The other cats run. You should too.");
+        // Only persist the "seen" flag once the player has actually perceived
+        // the scripted beat. Missed first sightings retry on the next eligible
+        // night instead of locking the save into random-spawn mode forever.
+        this.registry.set(StoryKeys.FIRST_SNATCHER_SEEN, true);
       });
     });
   }

@@ -230,7 +230,7 @@ SmallDog.png, WhiteDog.png, BrownDog.png — randomly assigned to dog walkers
 
 ### Phase 4.5 (visual / narrative alignment)
 
-- **Snatcher first-sighting night:** `snatcherSpawnChecked` must not be set before the "resting at shelter" guard — use `resolveSnatcherSpawnAction()` (`src/utils/snatcherSpawnLogic.ts`) so a skipped poll can retry.
+- **Snatcher first-sighting night:** `snatcherSpawnChecked` must not be set before the "resting at shelter" guard — use `resolveSnatcherSpawnAction()` (`src/utils/snatcherSpawnLogic.ts`) so a skipped poll can retry. Likewise, `FIRST_SNATCHER_SEEN` must only be persisted inside the `near && los` branch of `playFirstSnatcherSighting` — setting it up front burns the scripted beat for players who are awake but across the map, permanently downgrading future nights to `random_spawn`.
 - **Non-blocking dialogue:** If the player walks away, disengage the NPC (`DIALOGUE_BREAK_DIST`) and `dialogue.dismiss()` so `dialogueEngaged` cannot stick.
 - **Intro cinematic:** Cancel `delayedCall`/`tween` handles in `shutdown()`; `DayNightCycle.snapVisualToPhase` for night/dawn overlay only during the intro.
 - **Speaker pose:** `speakerPoseToAnimMode` maps tones to sit / walk_paused / rest — NPC sheets lack dedicated crouch/arch rows.
