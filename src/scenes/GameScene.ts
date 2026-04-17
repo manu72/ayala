@@ -99,6 +99,16 @@ export class GameScene extends Phaser.Scene {
   private engagedDialogueNPC: NPCCat | null = null;
   private dialogueRequestInFlight = false;
 
+  /**
+   * NPC the player just finished a conversation with. The player must leave
+   * the cat's interaction range before re-engaging, otherwise a single Space
+   * press (or held key) chains straight into the next scripted response —
+   * turning Blacky's first-meeting dialogue into the "Still here? Good..."
+   * return dialogue immediately, with no time having elapsed in-world.
+   * Cleared in `updateNPCs` once the player steps outside `INTERACTION_DISTANCE`.
+   */
+  private lastDialoguePartner: NPCCat | null = null;
+
   // Snatcher tracking
   private snatchers: HumanNPC[] = [];
   private snatcherSpawnChecked = false;
@@ -151,6 +161,7 @@ export class GameScene extends Phaser.Scene {
       this.engagedDialogueNPC.disengageDialogue();
       this.engagedDialogueNPC = null;
     }
+    this.lastDialoguePartner = null;
     this.dialogue.dismiss();
   }
 
@@ -1473,6 +1484,13 @@ export class GameScene extends Phaser.Scene {
 
       const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, cat.x, cat.y);
 
+      // Clear the "just spoke to" guard once the player leaves interaction
+      // range, so coming back later naturally triggers the next scripted
+      // response instead of it chaining from the last one.
+      if (this.lastDialoguePartner === cat && dist > INTERACTION_DISTANCE) {
+        this.lastDialoguePartner = null;
+      }
+
       if (!indicator.known) {
         if (dist < LEARN_NAME_DISTANCE) {
           indicator.reveal();
@@ -2074,6 +2092,11 @@ export class GameScene extends Phaser.Scene {
     let nearestEntry: NPCEntry | null = null;
     let nearestDist = Infinity;
     for (const entry of this.npcs) {
+      // Skip the cat we just finished talking to until the player has stepped
+      // out of range. Without this guard, a single Space press can both close
+      // the current dialogue (Phaser dispatches key events before update())
+      // and immediately re-open the next scripted response for the same NPC.
+      if (entry.cat === this.lastDialoguePartner) continue;
       const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, entry.cat.x, entry.cat.y);
       if (dist < INTERACTION_DISTANCE && dist < nearestDist) {
         nearestEntry = entry;
@@ -2174,6 +2197,7 @@ export class GameScene extends Phaser.Scene {
       this.dialogue.show(response.lines, () => {
         cat.disengageDialogue();
         this.engagedDialogueNPC = null;
+        this.lastDialoguePartner = cat;
         this.processDialogueResponse(cat, name, trustBefore, response);
       });
     } catch (err) {
