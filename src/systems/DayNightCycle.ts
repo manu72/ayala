@@ -20,6 +20,9 @@ export const DAY_NIGHT_PHASES: Record<TimeOfDay, DayNightPhaseConfig> = {
 
 const TRANSITION_MS = 8_000;
 
+/** Minimum transition duration used to cap absurdly-short callers. */
+const MIN_TRANSITION_MS = 1;
+
 export const DAY_NIGHT_FULL_CYCLE_MS =
   DAY_NIGHT_PHASES.dawn.durationMs +
   DAY_NIGHT_PHASES.day.durationMs +
@@ -40,6 +43,7 @@ export class DayNightCycle extends Phaser.Events.EventEmitter {
 
   private transitioning = false;
   private transitionTimer = 0;
+  private transitionDurationMs = TRANSITION_MS;
   private fromAlpha = 0;
   private toAlpha = 0;
   private fromColor = { r: 0, g: 0, b: 0 };
@@ -101,6 +105,20 @@ export class DayNightCycle extends Phaser.Events.EventEmitter {
     this.overlay.setFillStyle(cfg.color, cfg.alpha);
   }
 
+  /**
+   * Blend the overlay from its current colour/alpha to the target phase over
+   * `durationMs`. Sets logical phase immediately (so gameplay queries like
+   * `currentPhase` and `isHeatActive` reflect the target right away) while
+   * the visual lerps. Intended for handing off the intro cinematic into
+   * dawn without a hard cut.
+   */
+  transitionVisualToPhase(phase: TimeOfDay, durationMs: number = TRANSITION_MS): void {
+    this.phase = phase;
+    this.phaseTimer = 0;
+    this.transitionDurationMs = Math.max(MIN_TRANSITION_MS, durationMs);
+    this.startTransition();
+  }
+
   restore(phase: TimeOfDay, gameTimeMs: number): void {
     this.phase = phase;
     this.gameTimeMs = gameTimeMs;
@@ -132,7 +150,7 @@ export class DayNightCycle extends Phaser.Events.EventEmitter {
 
     if (this.transitioning) {
       this.transitionTimer += delta;
-      const t = Math.min(this.transitionTimer / TRANSITION_MS, 1);
+      const t = Math.min(this.transitionTimer / this.transitionDurationMs, 1);
       const easedT = t * t * (3 - 2 * t);
 
       const r = Math.round(this.fromColor.r + (this.toColor.r - this.fromColor.r) * easedT);
@@ -157,6 +175,7 @@ export class DayNightCycle extends Phaser.Events.EventEmitter {
   private cyclePhase(): void {
     const prev = this.phase;
     this.phase = DAY_NIGHT_PHASES[this.phase].next;
+    this.transitionDurationMs = TRANSITION_MS;
     this.startTransition();
 
     if (this.phase === "dawn" && prev === "night") {

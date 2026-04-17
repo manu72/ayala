@@ -201,4 +201,54 @@ describe('DayNightCycle', () => {
       expect(cycle.isTransitioning).toBe(false)
     })
   })
+
+  describe('transitionVisualToPhase', () => {
+    it('sets logical phase immediately and marks transition active', () => {
+      const cycle = new DayNightCycle(scene as never)
+      cycle.snapVisualToPhase('night')
+      cycle.transitionVisualToPhase('dawn', 5000)
+      expect(cycle.currentPhase).toBe('dawn')
+      expect(cycle.isTransitioning).toBe(true)
+    })
+
+    it('lerps overlay from current colour/alpha to the target phase over the given duration', () => {
+      const cycle = new DayNightCycle(scene as never)
+      cycle.snapVisualToPhase('night')
+      const nightCfg = DAY_NIGHT_PHASES.night
+      expect(overlay.fillColor).toBe(nightCfg.color)
+      expect(overlay.fillAlpha).toBeCloseTo(nightCfg.alpha, 5)
+
+      cycle.transitionVisualToPhase('dawn', 5000)
+
+      // Halfway through the transition the overlay should not yet match the target.
+      cycle.update(2500)
+      expect(cycle.isTransitioning).toBe(true)
+      const targetAlpha = DAY_NIGHT_PHASES.dawn.alpha
+      expect(overlay.fillAlpha).not.toBeCloseTo(targetAlpha, 5)
+
+      // After the full duration the overlay should land on the target phase
+      // and the transition flag should clear.
+      cycle.update(2500)
+      expect(cycle.isTransitioning).toBe(false)
+      expect(overlay.fillColor).toBe(DAY_NIGHT_PHASES.dawn.color)
+      expect(overlay.fillAlpha).toBeCloseTo(DAY_NIGHT_PHASES.dawn.alpha, 5)
+    })
+
+    it('does not interfere with the default transition duration for natural phase cycling', () => {
+      const cycle = new DayNightCycle(scene as never)
+      cycle.restore('dawn', 0)
+      cycle.transitionVisualToPhase('night', 100)
+      cycle.update(100)
+      expect(cycle.isTransitioning).toBe(false)
+
+      // Subsequent natural phase cycle should still use the default
+      // TRANSITION_MS (8000), not the 100ms override from the previous call.
+      cycle.restore('dawn', DAWN_MS - 1)
+      cycle.update(2)
+      expect(cycle.currentPhase).toBe('day')
+      expect(cycle.isTransitioning).toBe(true)
+      cycle.update(100)
+      expect(cycle.isTransitioning).toBe(true)
+    })
+  })
 })

@@ -37,6 +37,13 @@ export class DogNPC extends Phaser.GameObjects.Sprite {
 
     this.createAnimations(scene);
     this.anims.play(`${this.spriteKey}-idle`, true);
+
+    // Mirror HumanNPC: start hidden. The owner is constructed invisible and
+    // only activates once its first `setPhase()` runs, so the dog should be
+    // hidden until its owner appears — otherwise it sits in the grass with
+    // no walker during the intro cinematic (when `update()` is paused) and
+    // during any phase where the owner is inactive.
+    this.setVisible(false);
   }
 
   update(
