@@ -1,5 +1,12 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { StatsSystem } from '../../src/systems/StatsSystem'
+import { StatsSystem, COLLAPSE_THRESHOLD_MS } from '../../src/systems/StatsSystem'
+
+/**
+ * Seconds just above the collapse threshold. Kept in test code (not in the
+ * module under test) so tests fail loudly if COLLAPSE_THRESHOLD_MS ever
+ * changes in a way that invalidates their intent.
+ */
+const COLLAPSE_DELTA_SEC = COLLAPSE_THRESHOLD_MS / 1000 + 1
 
 describe('StatsSystem', () => {
   let stats: StatsSystem
@@ -132,8 +139,7 @@ describe('StatsSystem', () => {
       stats.hunger = 0
       stats.thirst = 0
       stats.energy = 0
-      // Force collapse
-      stats.update(16, false, false, false, false, false)
+      stats.update(COLLAPSE_DELTA_SEC, false, false, false, false, false)
       expect(stats.collapsed).toBe(true)
 
       const snapshotHunger = stats.hunger
@@ -219,15 +225,15 @@ describe('StatsSystem', () => {
       expect(stats.collapsed).toBe(false)
     })
 
-    it('does not collapse just under 15s', () => {
+    it('does not collapse just under the grace period', () => {
       stats.hunger = 0
-      stats.update(14.9, false, false, false, false, false)
+      stats.update(COLLAPSE_THRESHOLD_MS / 1000 - 0.1, false, false, false, false, false)
       expect(stats.collapsed).toBe(false)
     })
 
-    it('collapses at exactly 15s cumulative', () => {
+    it('collapses once cumulative time crosses the grace period', () => {
       stats.hunger = 0
-      stats.update(15, false, false, false, false, false)
+      stats.update(COLLAPSE_DELTA_SEC, false, false, false, false, false)
       expect(stats.collapsed).toBe(true)
     })
 
@@ -276,7 +282,7 @@ describe('StatsSystem', () => {
       stats.hunger = 0
       stats.thirst = 0
       stats.energy = 0
-      stats.update(16, false, false, false, false, false)
+      stats.update(COLLAPSE_DELTA_SEC, false, false, false, false, false)
       expect(stats.collapsed).toBe(true)
 
       stats.resetCollapse()
@@ -287,9 +293,8 @@ describe('StatsSystem', () => {
     })
 
     it('does not lower stats that are already above minimums', () => {
-      // Force collapse, then set stats to desired values before resetting
       stats.hunger = 0
-      stats.update(16, false, false, false, false, false)
+      stats.update(COLLAPSE_DELTA_SEC, false, false, false, false, false)
       expect(stats.collapsed).toBe(true)
 
       // Manually set stats above the reset minimums
@@ -318,7 +323,7 @@ describe('StatsSystem', () => {
 
     it('clears collapse state on restore', () => {
       stats.hunger = 0
-      stats.update(16, false, false, false, false, false)
+      stats.update(COLLAPSE_DELTA_SEC, false, false, false, false, false)
       expect(stats.collapsed).toBe(true)
 
       stats.fromJSON({ hunger: 50, thirst: 50, energy: 50 })

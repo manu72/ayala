@@ -31,8 +31,11 @@ const SPEED_PENALTY_THIRST_20 = 0.8;
 const SPEED_PENALTY_ENERGY_20 = 0.7;
 
 /** Grace period before collapse triggers.
- * Duration (ms) a stat must be at 0 before collapse triggers. */
-const COLLAPSE_THRESHOLD_MS = 30_000;
+ * Duration (ms) a stat must be at 0 before collapse triggers. Exported so
+ * tests and tooling stay in lockstep with the runtime value; previously hard-
+ * coded "15s" / "16s" expectations in tests drifted silently when this value
+ * was bumped to 30s. */
+export const COLLAPSE_THRESHOLD_MS = 30_000;
 
 export class StatsSystem {
   hunger = 100;
