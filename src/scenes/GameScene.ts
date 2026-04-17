@@ -253,6 +253,7 @@ export class GameScene extends Phaser.Scene {
 
     // Clear story state from any prior session before restoring
     for (const key of [
+      // Cat / chapter progression keys (not in StoryKeys — no registry typed module yet).
       "MET_BLACKY",
       "TIGER_TALKS",
       "JAYCO_TALKS",
@@ -268,16 +269,17 @@ export class GameScene extends Phaser.Scene {
       "VISITED_ZONE_6",
       "TERRITORY_CLAIMED",
       "TERRITORY_DAY",
-      "CAMILLE_ENCOUNTER",
-      "CAMILLE_ENCOUNTER_DAY",
-      "ENCOUNTER_5_COMPLETE",
       "COLONY_COUNT",
-      "DUMPING_EVENTS_SEEN",
       "CATS_SNATCHED",
-      "GAME_COMPLETED",
-      "NEW_GAME_PLUS",
-      "INTRO_SEEN",
-      "FIRST_SNATCHER_SEEN",
+      // Story / endgame keys — always use StoryKeys so typos become compile errors.
+      StoryKeys.CAMILLE_ENCOUNTER,
+      StoryKeys.CAMILLE_ENCOUNTER_DAY,
+      StoryKeys.ENCOUNTER_5_COMPLETE,
+      StoryKeys.DUMPING_EVENTS_SEEN,
+      StoryKeys.GAME_COMPLETED,
+      StoryKeys.NEW_GAME_PLUS,
+      StoryKeys.INTRO_SEEN,
+      StoryKeys.FIRST_SNATCHER_SEEN,
     ]) {
       this.registry.remove(key);
     }
@@ -392,7 +394,7 @@ export class GameScene extends Phaser.Scene {
 
     // New Game+ setup: full trust, all cats known, territory claimed
     if (data?.newGamePlus) {
-      this.registry.set("NEW_GAME_PLUS", true);
+      this.registry.set(StoryKeys.NEW_GAME_PLUS, true);
       this.registry.set("CH1_RESTED", true);
       this.registry.set("MET_BLACKY", true);
       this.registry.set("TIGER_TALKS", 2);
@@ -456,8 +458,8 @@ export class GameScene extends Phaser.Scene {
     // leaves pendingCamilleEncounter orphaned with no NPC to trigger proximity.
     if (
       data?.loadSave &&
-      (this.registry.get("CAMILLE_ENCOUNTER") as number) >= 5 &&
-      this.registry.get("ENCOUNTER_5_COMPLETE") !== true
+      (this.registry.get(StoryKeys.CAMILLE_ENCOUNTER) as number) >= 5 &&
+      this.registry.get(StoryKeys.ENCOUNTER_5_COMPLETE) !== true
     ) {
       this.time.delayedCall(500, () => this.startCamilleEncounter(5));
     }
@@ -1064,11 +1066,11 @@ export class GameScene extends Phaser.Scene {
     }
     if (this.camilleEncounterActive) return;
 
-    const currentEncounter = (this.registry.get("CAMILLE_ENCOUNTER") as number) ?? 0;
+    const currentEncounter = (this.registry.get(StoryKeys.CAMILLE_ENCOUNTER) as number) ?? 0;
     if (currentEncounter >= 5) return;
 
     // One encounter per game day — check if we've already done one today
-    const lastDay = (this.registry.get("CAMILLE_ENCOUNTER_DAY") as number) ?? 0;
+    const lastDay = (this.registry.get(StoryKeys.CAMILLE_ENCOUNTER_DAY) as number) ?? 0;
     if (lastDay >= this.dayNight.dayCount) return;
 
     // Roll once per evening, not every periodic check
@@ -1232,8 +1234,8 @@ export class GameScene extends Phaser.Scene {
 
     switch (encounterNum) {
       case 1:
-        this.registry.set("CAMILLE_ENCOUNTER", encounterNum);
-        this.registry.set("CAMILLE_ENCOUNTER_DAY", this.dayNight.dayCount);
+        this.registry.set(StoryKeys.CAMILLE_ENCOUNTER, encounterNum);
+        this.registry.set(StoryKeys.CAMILLE_ENCOUNTER_DAY, this.dayNight.dayCount);
         hud?.showNarration(
           "A new human. She moves differently from the others. Slowly. Gently. She smells like... kindness?",
         );
@@ -1241,8 +1243,8 @@ export class GameScene extends Phaser.Scene {
 
       case 2:
         this.scheduleCamilleEncounterDialogue(8000, 2, () => {
-          this.registry.set("CAMILLE_ENCOUNTER", encounterNum);
-          this.registry.set("CAMILLE_ENCOUNTER_DAY", this.dayNight.dayCount);
+          this.registry.set(StoryKeys.CAMILLE_ENCOUNTER, encounterNum);
+          this.registry.set(StoryKeys.CAMILLE_ENCOUNTER_DAY, this.dayNight.dayCount);
           this.camilleNPC?.playCrouchToward(this.player.x);
           this.dialogue.show(
             [
@@ -1259,8 +1261,8 @@ export class GameScene extends Phaser.Scene {
 
       case 3:
         this.scheduleCamilleEncounterDialogue(10000, 3, () => {
-          this.registry.set("CAMILLE_ENCOUNTER", encounterNum);
-          this.registry.set("CAMILLE_ENCOUNTER_DAY", this.dayNight.dayCount);
+          this.registry.set(StoryKeys.CAMILLE_ENCOUNTER, encounterNum);
+          this.registry.set(StoryKeys.CAMILLE_ENCOUNTER_DAY, this.dayNight.dayCount);
           this.camilleNPC?.playCrouchToward(this.player.x);
           this.dialogue.show(
             [
@@ -1279,8 +1281,8 @@ export class GameScene extends Phaser.Scene {
 
       case 4:
         this.scheduleCamilleEncounterDialogue(10000, 4, () => {
-          this.registry.set("CAMILLE_ENCOUNTER", encounterNum);
-          this.registry.set("CAMILLE_ENCOUNTER_DAY", this.dayNight.dayCount);
+          this.registry.set(StoryKeys.CAMILLE_ENCOUNTER, encounterNum);
+          this.registry.set(StoryKeys.CAMILLE_ENCOUNTER_DAY, this.dayNight.dayCount);
           this.camilleNPC?.playCrouchToward(this.player.x);
           this.dialogue.show(
             [
@@ -1298,8 +1300,8 @@ export class GameScene extends Phaser.Scene {
 
       case 5:
         this.scheduleCamilleEncounterDialogue(12000, 5, () => {
-          this.registry.set("CAMILLE_ENCOUNTER", encounterNum);
-          this.registry.set("CAMILLE_ENCOUNTER_DAY", this.dayNight.dayCount);
+          this.registry.set(StoryKeys.CAMILLE_ENCOUNTER, encounterNum);
+          this.registry.set(StoryKeys.CAMILLE_ENCOUNTER_DAY, this.dayNight.dayCount);
           this.dialogue.show(
             [
               "She has a box. You've seen boxes before. Cats go in. They don't come back.",
@@ -1309,7 +1311,7 @@ export class GameScene extends Phaser.Scene {
               "But the hand on the carrier is warm. And for the first time in a long time... you're not afraid.",
             ],
             () => {
-              this.registry.set("ENCOUNTER_5_COMPLETE", true);
+              this.registry.set(StoryKeys.ENCOUNTER_5_COMPLETE, true);
               this.autoSave();
               this.startChapter6Sequence();
             },
@@ -1345,7 +1347,7 @@ export class GameScene extends Phaser.Scene {
         "You are home.",
       ],
       () => {
-        this.registry.set("GAME_COMPLETED", true);
+        this.registry.set(StoryKeys.GAME_COMPLETED, true);
         this.autoSave();
         this.startEpilogue();
       },
@@ -1804,7 +1806,7 @@ export class GameScene extends Phaser.Scene {
         if (playerDist < GP.CAT_PERSON_PLAYER_GREET_DIST) {
           let playerLine: string | undefined;
           if (human.humanType === "camille") {
-            const enc = (this.registry.get("CAMILLE_ENCOUNTER") as number) ?? 0;
+            const enc = (this.registry.get(StoryKeys.CAMILLE_ENCOUNTER) as number) ?? 0;
             if (enc < 2) {
               playerLine = "And who are you, sweetheart?";
             }
@@ -2276,7 +2278,7 @@ export class GameScene extends Phaser.Scene {
     const action = resolveSnatcherSpawnAction({
       isNight: this.dayNight.currentPhase === "night",
       snatcherSpawnChecked: this.snatcherSpawnChecked,
-      firstSnatcherSeen: this.registry.get("FIRST_SNATCHER_SEEN") as boolean | undefined,
+      firstSnatcherSeen: this.registry.get(StoryKeys.FIRST_SNATCHER_SEEN) as boolean | undefined,
       chapter: this.chapters.chapter,
       isResting: this.player.isResting,
       isNearShelter: this.isNearShelter(this.player.x, this.player.y),
@@ -2309,7 +2311,7 @@ export class GameScene extends Phaser.Scene {
    * nearby NPC cats flee visibly, then narration fires.
    */
   private playFirstSnatcherSighting(): void {
-    this.registry.set("FIRST_SNATCHER_SEEN", true);
+    this.registry.set(StoryKeys.FIRST_SNATCHER_SEEN, true);
     this.spawnSnatcher(0, true);
 
     const hud = this.scene.get("HUDScene") as HUDScene | undefined;
@@ -2463,7 +2465,7 @@ export class GameScene extends Phaser.Scene {
    */
   private checkColonyDynamics(): void {
     if (this.dialogue.isActive || this.dumpingInProgress) return;
-    const dumpingSeen = (this.registry.get("DUMPING_EVENTS_SEEN") as number) ?? 0;
+    const dumpingSeen = (this.registry.get(StoryKeys.DUMPING_EVENTS_SEEN) as number) ?? 0;
     const chapter = this.chapters.chapter;
 
     if (this.dumpingArmed === 0) {
@@ -2486,7 +2488,7 @@ export class GameScene extends Phaser.Scene {
    */
   private playDumpingSequence(eventNum: number): void {
     this.dumpingInProgress = true;
-    this.registry.set("DUMPING_EVENTS_SEEN", eventNum);
+    this.registry.set(StoryKeys.DUMPING_EVENTS_SEEN, eventNum);
     this.generateCarTextures();
 
     const hud = this.scene.get("HUDScene") as HUDScene | undefined;
