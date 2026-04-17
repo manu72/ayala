@@ -177,6 +177,10 @@ SmallDog.png, WhiteDog.png, BrownDog.png — randomly assigned to dog walkers
 
 - When a game object is both position-tracked (e.g. dog following owner) and tweened (e.g. lunge), the per-frame `setPosition()` overwrites the tween. Use a boolean flag (`isLunging`) to pause position tracking while the tween is active.
 
+### Position-dependent checks across a teleport
+
+- Any recovery / warp / respawn flow that calls `setPosition()` on the player mid-function has a footgun: subsequent reads of `this.player.x/y` reflect the *destination*, not the origin. If a range/LOS/witness check is conceptually "at the place the event happened", compute it *before* the `setPosition()` call (or snapshot `{x, y}` into locals up-front). See `recoverFromCollapse` — the witness-range recheck has to run pre-teleport so it measures "did the witness stay close to the collapse spot?" rather than "is the witness near `poi_safe_sleep`?" (which is almost always false at 150 px). Add a comment at the check site documenting the ordering requirement; tidy-up passes otherwise tend to "group all the state writes" and silently reintroduce the bug.
+
 ### Persistence
 
 - **Met-day randomization bug:** Never use `Math.random()` for data that should be stable across views. Store deterministic values (like first-met day) at the moment they're created, not when they're displayed.

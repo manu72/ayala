@@ -1491,17 +1491,17 @@ export class GameScene extends Phaser.Scene {
     const safeX = safeSleep?.x ?? this.map.widthInPixels / 2;
     const safeY = safeSleep?.y ?? this.map.heightInPixels / 2;
 
-    this.player.setPosition(safeX, safeY);
-    this.stats.resetCollapse();
-    this.collapseRecovering = false;
-    this.collapseRecoveryTimer = 0;
-
-    this.cameras.main.flash(500, 0, 0, 0);
-
-    // Witness-aware recovery narration. If a friendly cat is still active and
-    // within range at the moment we teleport to safe sleep, credit them with
-    // the "stayed close" trust bump. Otherwise, a neutral line.
-    const hud = this.scene.get("HUDScene") as HUDScene | undefined;
+    // Witness-aware recovery narration. Must be evaluated BEFORE the teleport
+    // below: the intent of `witnessStillHere` is "did the witness stay close
+    // to where Mamma Cat collapsed during the 3 s blackout?" If we compute the
+    // distance after `setPosition(safeX, safeY)`, we measure from the safe-
+    // sleep POI instead — and since the POI is a dedicated map location and
+    // witnesses are ordinary colony cats scattered across the map, the range
+    // check at GP.NARRATION_WITNESS_DIST (~150 px) would almost always fail
+    // and the witness-aware branch would become unreachable. The player is
+    // velocity-pinned for the full blackout (see the `stats.collapsed` guard
+    // in update()), so `this.player.x/y` here still reflects the collapse
+    // location.
     const witness = this.collapseWitness;
     const witnessStillHere =
       witness !== null &&
@@ -1509,6 +1509,14 @@ export class GameScene extends Phaser.Scene {
       Phaser.Math.Distance.Between(this.player.x, this.player.y, witness.x, witness.y) <=
         GP.NARRATION_WITNESS_DIST;
 
+    this.player.setPosition(safeX, safeY);
+    this.stats.resetCollapse();
+    this.collapseRecovering = false;
+    this.collapseRecoveryTimer = 0;
+
+    this.cameras.main.flash(500, 0, 0, 0);
+
+    const hud = this.scene.get("HUDScene") as HUDScene | undefined;
     if (witnessStillHere && witness) {
       hud?.showNarration?.(`You wake. ${witness.npcName} stayed close.`);
       this.trust.supportedDuringCollapse(witness.npcName);
