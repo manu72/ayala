@@ -1,0 +1,10 @@
+name = "ayala-ai-proxy"
+main = "src/worker.ts"
+compatibility_date = "2025-04-01"
+
+# Secrets: wrangler secret put DEEPSEEK_API_KEY / OPENAI_API_KEY
+# Optional vars (defaults in code):
+# [vars]
+# DEEPSEEK_MODEL = "deepseek-chat"
+# OPENAI_MODEL = "gpt-4.1-mini"
+# ALLOWED_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173"

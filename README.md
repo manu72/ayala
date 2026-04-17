@@ -14,7 +14,7 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 
 ## Project Status
 
-**Version 0.1.10** -- Phases 1 through 4 and **Phase 4.5 (visual & narrative alignment)** are complete. The game is playable from start to finish: survival mechanics, social systems, 6 story chapters, territory claiming, snatchers, the full adoption story arc through to the epilogue, plus intro cinematic, grounded narration hooks, and human/cat engagement polish.
+**Version 0.2.0** -- Phases 1 through 4, **Phase 4.5**, and **Phase 5 (AI-powered named cat dialogue)** are complete for the core loop. The game is playable from start to finish: survival mechanics, social systems, 6 story chapters, territory claiming, snatchers, the full adoption story arc through to the epilogue, plus intro cinematic, grounded narration hooks, and human/cat engagement polish. **Named colony cats** (Blacky through Ginger B) use LLM-backed dialogue when a same-origin proxy is configured; scripted dialogue remains the fallback if the network or API fails.
 
 ### Development Roadmap
 
@@ -26,7 +26,8 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 | 3. Social & Story      | Named NPC cats, trust system, emotes, chapters 1-3, humans, dogs, journal                 | Complete    |
 | 4. Cam & Endgame       | Cam encounters, Chapters 4-6, snatchers, territory, epilogue, NG+                         | Complete    |
 | 4.5 Visual & Narrative | Intro cinematic, dialogue poses, cat-person circuits, witness-gated events, chapter cards | Complete    |
-| 5. Polish & Release    | Playtesting, audio, PWA/offline, deployment                                               | Not started |
+| 5. AI cat dialogue + proxy | LLM personas, Cloudflare Worker proxy, scripted fallback, dist leak checks              | Complete (v0.2.0) |
+| 5b. Polish & Release   | Playtesting, audio, PWA/offline, deployment                                               | Not started |
 
 ### What exists now
 
@@ -53,8 +54,8 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 - **Camille encounter sequence** (5 encounters over multiple game days) building the human-cat relationship
 - **Snatchers** (night threat) with detection radius, crouching/cover evasion, capture-reload mechanic for Mamma Cat, and a colony-cat capture sweep. Eligibility rule mirrors Mamma Cat's: any active cat is vulnerable unless sleeping near a shelter POI. Named cats can also be taken if caught napping unsafely, though they usually stay close to their home POIs
 - **Colony dynamics** with 3 dumping events and fluctuating background population
-- **Centralized DialogueService** routing all NPC dialogue through a service interface (designed for AI swap in Phase 5)
-- **IndexedDB conversation history** persisting every NPC interaction for future AI context
+- **Centralized DialogueService** with `AIDialogueService` + `FallbackDialogueService` — named cats use AI lines when `VITE_AI_PROXY_URL` is set; story flags still come from scripted condition matching; **IndexedDB** stores up to 100 turns per cat (pruned automatically) with optional game-state snapshots
+- **Cloudflare Worker** (`proxy/`) holds Deepseek/OpenAI keys and exposes `POST /api/ai/chat` — see [proxy/README.md](proxy/README.md)
 - **Epilogue and end screen** with welfare information, links to CARA Philippines and @atgcats, and credits
 - **New Game+** (cozy mode) unlocked after completing the story -- replay with full trust and territory
 - **Phase 4.5:** Opening abandonment cinematic; NPC dialogue engagement with `speakerPose`-driven animations; Category A/B human behaviour (glances vs circuits); witness-gated dumping and snatcher narration; Camille encounter re-validation on delayed dialogue; chapter title cards + pause-menu chapter hint; `prefers-reduced-motion` support for decorative HUD/emote/intro tweens; gameplay radii centralised in `src/config/gameplayConstants.ts`
@@ -124,6 +125,14 @@ npm run dev
 
 Vite will start a dev server (default port 5173, or the next available port). Open the URL shown in the terminal.
 
+### AI dialogue (optional)
+
+1. Copy [.env.example](.env.example) to `.env` and set `VITE_AI_PROXY_URL=/api/ai/chat` (no secrets in this file).
+2. In `proxy/`, copy `proxy/.dev.vars.example` to `proxy/.dev.vars` and add `DEEPSEEK_API_KEY` / `OPENAI_API_KEY`.
+3. Run two terminals: `npm run dev` (game) and `npm run dev:proxy` (Worker on port 8787). Vite proxies `/api/ai/chat` to the Worker.
+
+Without a proxy, the game uses **scripted dialogue only** (same as Phase 4). Production: deploy the Worker on the **same origin** as the static site so keys never reach the browser bundle. Run `npm run verify:dist` after `npm run build` to ensure no secret patterns leaked into `dist/`.
+
 ### Production Build
 
 ```bash
@@ -186,6 +195,8 @@ ayala/
 │   ├── config/
 │   │   ├── GameConfig.ts               #   Resolution, physics, scenes, scaling
 │   │   └── gameplayConstants.ts        #   Shared gameplay radii, witness distances, input timings
+│   ├── ai/
+│   │   └── personas/                   #   Markdown LLM personas (?raw) for named cats
 │   ├── data/
 │   │   └── cat-dialogue.ts             #   Named cat dialogue scripts (condition/response data)
 │   ├── registry/
@@ -204,7 +215,9 @@ ayala/
 │   │   ├── JournalScene.ts             #   Colony journal overlay
 │   │   └── EpilogueScene.ts            #   End-game sequence with credits and welfare links
 │   ├── services/
-│   │   ├── DialogueService.ts          #   Dialogue interface + ScriptedDialogueService
+│   │   ├── DialogueService.ts          #   Dialogue interface + scripted + AI + fallback wiring
+│   │   ├── AIDialogueService.ts        #   Proxy-backed LLM dialogue + JSON parse
+│   │   ├── FallbackDialogueService.ts  #   AI then scripted fallback
 │   │   └── ConversationStore.ts        #   IndexedDB conversation history persistence
 │   ├── sprites/
 │   │   ├── BaseNPC.ts                  #   Abstract base for physics NPCs
@@ -228,17 +241,21 @@ ayala/
 │       ├── SnatcherSystem.ts           #   Facade re-exporting snatcher spawn policy
 │       └── ThreatIndicator.ts          #   NPC disposition indicators
 │
+├── proxy/                               # Cloudflare Worker — POST /api/ai/chat (see proxy/README.md)
+├── scripts/
+│   └── check-dist-leaks.mjs            #   CI: fail if secret-like patterns in dist/
 ├── index.html                           # Vite entry page
 ├── package.json                         # npm manifest
 ├── tsconfig.json                        # TypeScript config (strict)
-├── vite.config.ts                       # Vite config (relative base, dist output)
+├── vite.config.ts                       # Vite config (relative base, dev proxy to Worker)
 ├── tests/                               # Unit tests (Vitest)
 │   ├── systems/                        #   StatsSystem, TrustSystem, SaveSystem, etc.
-│   ├── services/                       #   DialogueService
+│   ├── services/                       #   DialogueService, AIDialogueService, ConversationStore
+│   ├── ai/                             #   Persona loader
 │   ├── data/                           #   cat-dialogue script conditions
 │   └── sprites/                        #   BaseNPC helpers, SpriteProfiles
 ├── vitest.config.ts                     # Vitest configuration
-└── VERSION                              # 0.1.10
+└── VERSION                              # 0.2.0
 ```
 
 ## Asset Generation

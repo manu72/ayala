@@ -13,12 +13,25 @@ const STORE_NAME = "conversations";
 export interface ConversationRecord {
   id?: number;
   speaker: string;
+  /** Game-time ms (DayNightCycle). */
   timestamp: number;
+  /** Wall clock for debugging / ordering. */
+  realTimestamp?: number;
   gameDay: number;
   lines: string[];
   trustBefore: number;
   trustAfter: number;
   chapter: number;
+  /** Optional label for what Mamma Cat did this beat (future use). */
+  playerAction?: string;
+  gameStateSnapshot?: {
+    trustWithSpeaker: number;
+    trustGlobal: number;
+    timeOfDay: string;
+    hunger: number;
+    thirst: number;
+    energy: number;
+  };
 }
 
 function openDB(): Promise<IDBDatabase> {
@@ -52,15 +65,47 @@ export async function storeConversation(record: ConversationRecord): Promise<voi
       tx.onerror = () => reject(tx.error);
     });
     db.close();
+    await pruneConversations(record.speaker, 100);
   } catch {
     // IndexedDB may be unavailable in some contexts (private browsing, etc.)
     // Fail silently — conversation storage is non-critical for gameplay.
   }
 }
 
+/** Keeps at most `maxKeep` newest records per speaker (by game `timestamp`). */
+export async function pruneConversations(speaker: string, maxKeep = 100): Promise<void> {
+  try {
+    const db = await openDB();
+    const tx = db.transaction(STORE_NAME, "readonly");
+    const index = tx.objectStore(STORE_NAME).index("speaker");
+    const request = index.getAll(speaker);
+    const records = await new Promise<ConversationRecord[]>((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result as ConversationRecord[]);
+      request.onerror = () => reject(request.error);
+    });
+    db.close();
+    if (records.length <= maxKeep) return;
+    const sorted = [...records].sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
+    const toDrop = sorted.slice(0, sorted.length - maxKeep).filter((r) => r.id !== undefined);
+    const db2 = await openDB();
+    const tx2 = db2.transaction(STORE_NAME, "readwrite");
+    const store = tx2.objectStore(STORE_NAME);
+    for (const r of toDrop) {
+      store.delete(r.id!);
+    }
+    await new Promise<void>((resolve, reject) => {
+      tx2.oncomplete = () => resolve();
+      tx2.onerror = () => reject(tx2.error);
+    });
+    db2.close();
+  } catch {
+    // Non-critical
+  }
+}
+
 export async function getRecentConversations(
   speaker: string,
-  limit = 10,
+  limit = 20,
 ): Promise<ConversationRecord[]> {
   try {
     const db = await openDB();

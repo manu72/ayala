@@ -75,14 +75,21 @@ describe('ConversationStore — IndexedDB happy path', () => {
     expect(last3.map((r) => r.lines[0])).toEqual(['L2', 'L3', 'L4'])
   })
 
-  it('getRecentConversations defaults to the most recent 10 when no limit is given', async () => {
-    for (let i = 0; i < 12; i++) {
+  it('getRecentConversations defaults to the most recent 20 when no limit is given', async () => {
+    for (let i = 0; i < 22; i++) {
       await storeConversation(buildRecord({ speaker: 'mamma', timestamp: i, lines: [`L${i}`] }))
     }
     const defaultLimit = await getRecentConversations('mamma')
-    expect(defaultLimit).toHaveLength(10)
+    expect(defaultLimit).toHaveLength(20)
     expect(defaultLimit[0]!.lines[0]).toBe('L2')
-    expect(defaultLimit[defaultLimit.length - 1]!.lines[0]).toBe('L11')
+    expect(defaultLimit[defaultLimit.length - 1]!.lines[0]).toBe('L21')
+  })
+
+  it('prune keeps at most 100 records per speaker after many writes', async () => {
+    for (let i = 0; i < 101; i++) {
+      await storeConversation(buildRecord({ speaker: 'mamma', timestamp: i, lines: [`L${i}`] }))
+    }
+    expect(await getConversationCount('mamma')).toBe(100)
   })
 
   it('getRecentConversations returns [] for an unknown speaker', async () => {

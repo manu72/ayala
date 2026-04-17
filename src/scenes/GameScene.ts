@@ -32,7 +32,10 @@ import {
   type DialogueResponse,
   type ConversationEntry,
 } from "../services/DialogueService";
+import { AIDialogueService } from "../services/AIDialogueService";
+import { FallbackDialogueService } from "../services/FallbackDialogueService";
 import { storeConversation, getRecentConversations } from "../services/ConversationStore";
+import { CAT_PERSONAS } from "../ai/personas";
 import { CAT_DIALOGUE_SCRIPTS, getRandomColonyLine } from "../data/cat-dialogue";
 import { resolveSnatcherSpawnAction } from "../systems/SnatcherSystem";
 import { hasLineOfSightTiles } from "../utils/lineOfSight";
@@ -119,6 +122,8 @@ export class GameScene extends Phaser.Scene {
   /** NPC currently locked in dialogue with the player. */
   private engagedDialogueNPC: NPCCat | null = null;
   private dialogueRequestInFlight = false;
+  /** Fires a subtle "thinking" emote if AI dialogue is slow to return. */
+  private aiThinkingTimer: Phaser.Time.TimerEvent | null = null;
 
   /**
    * NPC the player just finished a conversation with. The player must leave
@@ -194,6 +199,8 @@ export class GameScene extends Phaser.Scene {
     this.collapseRecovering = false;
     this.collapseRecoveryTimer = 0;
     this.dialogue.dismiss();
+    this.aiThinkingTimer?.remove(false);
+    this.aiThinkingTimer = null;
   }
 
   /** Remove pending intro delayed calls and tweens (idempotent). */
@@ -284,7 +291,29 @@ export class GameScene extends Phaser.Scene {
     this.chapters = new ChapterSystem();
     this.chapterCheckTimer = 0;
     this.narrationShown = new Set();
-    this.dialogueService = new ScriptedDialogueService(CAT_DIALOGUE_SCRIPTS);
+    const scripted = new ScriptedDialogueService(CAT_DIALOGUE_SCRIPTS);
+    const proxyUrl = import.meta.env.VITE_AI_PROXY_URL;
+    const primary =
+      import.meta.env.VITE_AI_PRIMARY === "openai" ? ("openai" as const) : ("deepseek" as const);
+    const fb = import.meta.env.VITE_AI_FALLBACK;
+    const secondary: "deepseek" | "openai" =
+      fb === "openai" || fb === "deepseek"
+        ? fb
+        : primary === "deepseek"
+          ? "openai"
+          : "deepseek";
+    this.dialogueService =
+      typeof proxyUrl === "string" && proxyUrl.length > 0
+        ? new FallbackDialogueService(
+            new AIDialogueService({
+              proxyUrl,
+              personas: CAT_PERSONAS,
+              primaryProvider: primary,
+              secondaryProvider: secondary,
+            }),
+            scripted,
+          )
+        : scripted;
     this.territory = new TerritorySystem();
     this.camilleNPC = null;
     this.manuNPC = null;
@@ -2345,12 +2374,16 @@ export class GameScene extends Phaser.Scene {
   private async requestCatDialogue(cat: NPCCat): Promise<void> {
     if (this.dialogueRequestInFlight) return;
     this.dialogueRequestInFlight = true;
+    this.aiThinkingTimer = this.time.delayedCall(400, () => {
+      if (!this.dialogueRequestInFlight) return;
+      this.emotes.show(this, cat, "curious");
+    });
 
     try {
       const name = cat.npcName;
       const trustBefore = this.trust.getCatTrust(name);
 
-      const history = await getRecentConversations(name, 10);
+      const history = await getRecentConversations(name, 20);
       const conversationHistory: ConversationEntry[] = history.map((r) => ({
         timestamp: r.timestamp,
         speaker: r.speaker,
@@ -2432,6 +2465,8 @@ export class GameScene extends Phaser.Scene {
       const hud = this.scene.get("HUDScene") as HUDScene | undefined;
       hud?.showNarration("Words fail. The moment passes.");
     } finally {
+      this.aiThinkingTimer?.remove(false);
+      this.aiThinkingTimer = null;
       this.dialogueRequestInFlight = false;
     }
   }
@@ -2446,66 +2481,75 @@ export class GameScene extends Phaser.Scene {
       this.emotes.show(this, cat, response.emote as EmoteType);
     }
 
-    // Persist to IndexedDB for Phase 5 AI context
-    storeConversation({
+    const event = response.event;
+    const isFirst = event ? event.endsWith("_first") : false;
+
+    if (event) {
+      if (isFirst) {
+        this.addKnownCat(catName);
+        this.npcs.find((e) => e.cat === cat)?.indicator.reveal();
+        this.awardFirstConversation(catName);
+      } else if (event.endsWith("_return") || event.endsWith("_warmup")) {
+        this.awardReturnConversation(catName);
+      }
+
+      switch (event) {
+        case "blacky_first":
+          this.registry.set("MET_BLACKY", true);
+          break;
+        case "tiger_first":
+          this.registry.set("TIGER_TALKS", 1);
+          break;
+        case "tiger_warmup":
+          this.registry.set("TIGER_TALKS", 2);
+          cat.disposition = "friendly";
+          this.npcs.find((e) => e.cat === cat)?.indicator.setDisposition("friendly");
+          break;
+        case "jayco_first":
+          this.registry.set("JAYCO_TALKS", 1);
+          cat.disposition = "friendly";
+          {
+            const entry = this.npcs.find((e) => e.cat === cat);
+            entry?.indicator.setDisposition("friendly");
+          }
+          break;
+        case "jaycojr_first":
+          this.registry.set("JAYCO_JR_TALKS", 1);
+          break;
+        case "fluffy_first":
+          this.registry.set("FLUFFY_TALKS", 1);
+          break;
+        case "pedigree_first":
+          this.registry.set("PEDIGREE_TALKS", 1);
+          break;
+        case "ginger_first":
+          this.registry.set("MET_GINGER_A", true);
+          break;
+        case "gingerb_first":
+          this.registry.set("MET_GINGER_B", true);
+          break;
+      }
+    }
+
+    // Persist after trust awards so trustAfter matches gameplay state.
+    void storeConversation({
       speaker: catName,
       timestamp: this.dayNight.totalGameTimeMs,
+      realTimestamp: Date.now(),
       gameDay: this.dayNight.dayCount,
       lines: response.lines,
       trustBefore,
       trustAfter: this.trust.getCatTrust(catName),
       chapter: this.chapters.chapter,
+      gameStateSnapshot: {
+        trustWithSpeaker: this.trust.getCatTrust(catName),
+        trustGlobal: this.trust.global,
+        timeOfDay: this.dayNight.currentPhase,
+        hunger: this.stats.hunger,
+        thirst: this.stats.thirst,
+        energy: this.stats.energy,
+      },
     });
-
-    const event = response.event;
-    if (!event) return;
-
-    const isFirst = event.endsWith("_first");
-
-    if (isFirst) {
-      this.addKnownCat(catName);
-      this.npcs.find((e) => e.cat === cat)?.indicator.reveal();
-      this.awardFirstConversation(catName);
-    } else if (event.endsWith("_return") || event.endsWith("_warmup")) {
-      this.awardReturnConversation(catName);
-    }
-
-    switch (event) {
-      case "blacky_first":
-        this.registry.set("MET_BLACKY", true);
-        break;
-      case "tiger_first":
-        this.registry.set("TIGER_TALKS", 1);
-        break;
-      case "tiger_warmup":
-        this.registry.set("TIGER_TALKS", 2);
-        cat.disposition = "friendly";
-        this.npcs.find((e) => e.cat === cat)?.indicator.setDisposition("friendly");
-        break;
-      case "jayco_first":
-        this.registry.set("JAYCO_TALKS", 1);
-        cat.disposition = "friendly";
-        {
-          const entry = this.npcs.find((e) => e.cat === cat);
-          entry?.indicator.setDisposition("friendly");
-        }
-        break;
-      case "jaycojr_first":
-        this.registry.set("JAYCO_JR_TALKS", 1);
-        break;
-      case "fluffy_first":
-        this.registry.set("FLUFFY_TALKS", 1);
-        break;
-      case "pedigree_first":
-        this.registry.set("PEDIGREE_TALKS", 1);
-        break;
-      case "ginger_first":
-        this.registry.set("MET_GINGER_A", true);
-        break;
-      case "gingerb_first":
-        this.registry.set("MET_GINGER_B", true);
-        break;
-    }
 
     if (isFirst) {
       this.autoSave();

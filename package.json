@@ -1,13 +1,17 @@
 {
   "name": "ayala",
   "private": true,
-  "version": "0.1.10",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:proxy": "cd proxy && npx wrangler dev",
+    "deploy:proxy": "cd proxy && npx wrangler deploy",
     "build": "tsc && vite build",
+    "verify:dist": "node scripts/check-dist-leaks.mjs",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:proxy": "cd proxy && npm test",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
   },

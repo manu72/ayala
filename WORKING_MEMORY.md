@@ -1,8 +1,8 @@
 # WORKING_MEMORY
 
 > Persistent memory layer for AI-assisted development sessions.
-> Last Updated: 2026-04-17
-> Version: 0.1.10
+> Last Updated: 2026-04-18
+> Version: 0.2.0
 
 ---
 
@@ -26,7 +26,8 @@
 | 3. Social & Story    | Complete    | Trust, emotes, chapters 1-3, named cats, humans, dogs, journal |
 | 4. Camille & Endgame | Complete    | DialogueService, Chs 4-6, snatchers, territory, epilogue, NG+  |
 | 4.5 Visual & Narrative | Complete  | Intro cinematic, dialogue poses, human circuits, witness gates, chapter cards, reduced-motion |
-| 5. Polish & Release  | Not started | Audio, PWA, playtesting, deployment                            |
+| 5. AI cat dialogue + proxy | Complete | AIDialogueService, Cloudflare Worker proxy, personas, scripted fallback |
+| 5b. Polish & Release | Not started | Audio, PWA, playtesting, deployment                            |
 
 ---
 
@@ -78,8 +79,10 @@ BootScene -> StartScene -> GameScene + HUDScene (overlay) + JournalScene (overla
 
 | File                   | Purpose                                                                    |
 | ---------------------- | -------------------------------------------------------------------------- |
-| `DialogueService.ts`   | Centralized dialogue interface: ScriptedDialogueService (Phase 5: AI swap) |
-| `ConversationStore.ts` | IndexedDB persistence for conversation history (Phase 5: AI context feed)  |
+| `DialogueService.ts`   | Centralized dialogue interface; `ScriptedDialogueService` + `AIDialogueService` + `FallbackDialogueService` |
+| `ConversationStore.ts` | IndexedDB persistence; prune at 100/cat; snapshots for AI context            |
+| `proxy/` (Worker)      | Same-origin `POST /api/ai/chat` — Deepseek/OpenAI keys server-side only     |
+| `src/ai/personas/`     | Markdown personas (`?raw` imports) for system prompts                         |
 
 ### Data
 
@@ -235,6 +238,15 @@ SmallDog.png, WhiteDog.png, BrownDog.png — randomly assigned to dog walkers
 - **Backward compatibility:** Scripted dialogue conditions use a hybrid of `conversationHistory.length` (from IndexedDB) and `gameState.trustWithSpeaker` (from TrustSystem) to handle saves that predate the conversation store.
 - **Event-driven side effects:** Each `DialogueResponse.event` string (e.g. `"blacky_first"`, `"tiger_warmup"`) maps to specific side effects in `GameScene.processDialogueResponse()`: registry updates, trust awards, indicator reveals, disposition changes, auto-saves.
 
+### Phase 5 — AI dialogue (named cats only)
+
+- **No client secrets:** `VITE_AI_PROXY_URL` is a path only (e.g. `/api/ai/chat`). Provider keys live in the Cloudflare Worker (`proxy/`) or `proxy/.dev.vars` locally — never in `VITE_*` or `dist/`. CI runs `npm run verify:dist` after build to grep common leak patterns.
+- **Authoritative events:** `AIDialogueService` generates lines/narration/emote/pose from the LLM but **`event` is always derived from the same scripted condition match** as `ScriptedDialogueService` (`CAT_DIALOGUE_SCRIPTS`) so story flags and trust awards stay deterministic.
+- **Fallback chain:** Provider retry (Deepseek → OpenAI) inside `AIDialogueService`; if parsing or network fails entirely, `FallbackDialogueService` uses full scripted dialogue.
+- **Personas:** Markdown in `src/ai/personas/*.md`, bundled with `?raw`; map keys must match `npcName` strings in `GameScene` / `CAT_PERSONAS`.
+- **Dev UX:** If AI is slow (>400ms), `GameScene` shows a one-shot `curious` emote on the cat; `requestCatDialogue` uses an 8s client abort inside `AIDialogueService`.
+- **Conversation cap:** `storeConversation` triggers `pruneConversations(speaker, 100)` to bound IndexedDB growth.
+
 ### Scene Restart Data Passing
 
 - When restarting a scene (e.g. after snatcher capture), pass flags through the `data` parameter rather than using `delayedCall`, which won't survive the restart. The pattern is: `this.scene.restart({ loadSave: true, snatcherCapture: true })` and check in `create()`.
@@ -324,8 +336,8 @@ SmallDog.png, WhiteDog.png, BrownDog.png — randomly assigned to dog walkers
 
 ## Technical Debt
 
-- **Test coverage is partial:** Vitest unit tests cover pure systems and most leaf modules — StatsSystem, TrustSystem, TerritorySystem, SaveSystem, ChapterSystem, DialogueService, DialogueSystem, DayNightCycle, FoodSource, BaseNPC helpers, HumanNPC, SpriteProfiles, ConversationStore, cat-dialogue, storyKeys, plus pure utils (`lineOfSight`, `snatcherSpawnLogic`, `dialoguePoseAnim`). ~18 test files, ~315 tests at the time of writing (count drifts; re-run `npx vitest run` for the current number). Remaining gaps are the Phaser-coupled scene glue (GameScene, HUDScene, JournalScene, EpilogueScene, BootScene, StartScene) and the NPCCat/GuardNPC/DogNPC state-machine update loops. CI runs tests before build.
-- **No audio:** Planned for Phase 5.
+- **Test coverage is partial:** Vitest unit tests cover pure systems and most leaf modules — StatsSystem, TrustSystem, TerritorySystem, SaveSystem, ChapterSystem, DialogueService, AIDialogueService, DialogueSystem, DayNightCycle, FoodSource, BaseNPC helpers, HumanNPC, SpriteProfiles, ConversationStore, cat-dialogue, storyKeys, personas loader, plus pure utils (`lineOfSight`, `snatcherSpawnLogic`, `dialoguePoseAnim`). Count drifts; re-run `npx vitest run` for the current number. Remaining gaps are the Phaser-coupled scene glue (GameScene, HUDScene, JournalScene, EpilogueScene, BootScene, StartScene) and the NPCCat/GuardNPC/DogNPC state-machine update loops. CI runs tests before build and `verify:dist` after build.
+- **No audio:** Planned for Phase 5b / polish.
 - **Tilemap POI names are hardcoded:** Spawn points, food sources, shelter POIs use string names matched between Tiled JSON and GameScene. No validation that map contains expected POIs.
 - **GameScene is ~2900+ lines:** Camille encounters, snatchers, colony dynamics, and territory should be extracted into dedicated systems; `SnatcherSystem.ts` is a thin re-export for spawn policy only.
 - **Colony cat random positions:** Not tied to map POIs; positions are hardcoded zone coordinates with random offsets. May clip into objects.
