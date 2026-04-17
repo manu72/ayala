@@ -19,6 +19,12 @@ export const StoryKeys = {
   // `handleSnatcherCapture` before the save-and-restart flow so the bump
   // survives the scene reload. Surfaced in the journal footer.
   PLAYER_SNATCHED_COUNT: "PLAYER_SNATCHED_COUNT",
+  // Total cat population of the colony (named + Mamma + unseen background).
+  // Seeded on a fresh game from `INITIAL_COLONY_TOTAL`, bumped by dumping
+  // events, decremented by snatcher captures, floored at
+  // `NAMED_AND_MAMMA_COUNT`. Drives the `JournalScene` colony count and the
+  // derived visible background spawn in `GameScene.spawnColonyCats`.
+  COLONY_COUNT: "COLONY_COUNT",
 } as const;
 
 export type StoryKey = (typeof StoryKeys)[keyof typeof StoryKeys];
