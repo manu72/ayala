@@ -14,7 +14,7 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 
 ## Project Status
 
-**Version 0.1.9** -- Phases 1 through 4 and **Phase 4.5 (visual & narrative alignment)** are complete. The game is playable from start to finish: survival mechanics, social systems, 6 story chapters, territory claiming, snatchers, the full adoption story arc through to the epilogue, plus intro cinematic, grounded narration hooks, and human/cat engagement polish.
+**Version 0.1.10** -- Phases 1 through 4 and **Phase 4.5 (visual & narrative alignment)** are complete. The game is playable from start to finish: survival mechanics, social systems, 6 story chapters, territory claiming, snatchers, the full adoption story arc through to the epilogue, plus intro cinematic, grounded narration hooks, and human/cat engagement polish.
 
 ### Development Roadmap
 
@@ -51,7 +51,7 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 - **Story chapters 4-6** completing the full narrative arc from territory claiming through adoption
 - **Territory system** at The Shops / Pyramid Steps with safe sleep, food proximity, and a home-base heart indicator
 - **Camille encounter sequence** (5 encounters over multiple game days) building the human-cat relationship
-- **Snatchers** (night threat) with detection radius, crouching/cover evasion, capture-reload mechanic for Mamma Cat, and a background colony-cat capture sweep (named story cats are immune; sleeping cats are treated as sheltered)
+- **Snatchers** (night threat) with detection radius, crouching/cover evasion, capture-reload mechanic for Mamma Cat, and a colony-cat capture sweep. Eligibility rule mirrors Mamma Cat's: any active cat is vulnerable unless sleeping near a shelter POI. Named cats can also be taken if caught napping unsafely, though they usually stay close to their home POIs
 - **Colony dynamics** with 3 dumping events and fluctuating background population
 - **Centralized DialogueService** routing all NPC dialogue through a service interface (designed for AI swap in Phase 5)
 - **IndexedDB conversation history** persisting every NPC interaction for future AI context
@@ -62,7 +62,8 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 - **Mamma Cat greeting action** -- press Space when no food or cat is in range to play a directional greeting animation (east/west sheets); non-interruptible for the ~1s play duration
 - **Male jogger circuit** running a clockwise loop complementing the existing counter-clockwise female jogger
 - **Collapse narrative consequences:** collapse triggers HUD narration, a global-trust penalty, and a lifetime collapse counter; recovery is witness-aware, awarding per-cat trust when a nearby friendly cat has line-of-sight. Total "times you've fallen" is surfaced in the colony journal footer once it is above zero
-- **Snatcher life-stat counters:** lifetime "Times you've been snatched" (Mamma Cat captures) and "Cats lost to snatchers" (background colony cats lost) surfaced in the colony journal footer alongside the collapse count, each row only appears once its counter is above zero. Colony-cat loss narrates *"A cat was here. Now it's gone."* only when Mamma Cat is within range and has line-of-sight to the event
+- **Snatcher life-stat counters:** lifetime "Times you've been snatched" (Mamma Cat captures) and "Cats lost to snatchers" (colony cats lost, named or background) surfaced in the colony journal footer alongside the collapse count, each row only appears once its counter is above zero. Colony-cat loss narrates *"A cat was here. Now it's gone."* only when Mamma Cat is within range and has line-of-sight to the event
+- **Dynamic colony population:** the colony total (shown in the journal) is now a real running count that includes named cats, Mamma Cat, and the unseen background. Dumping events add to it; snatcher captures subtract from it. A floor equal to the named roster + Mamma Cat prevents total narrative collapse. Once the total thins enough, the visible background roster shrinks with it so the world actually feels smaller after heavy losses
 
 ## How to Play
 
@@ -190,6 +191,7 @@ ayala/
 │   ├── registry/
 │   │   └── storyKeys.ts                #   Typed registry keys for story/endgame flags
 │   ├── utils/
+│   │   ├── colonySpawn.ts              #   Pure helpers for dynamic COLONY_COUNT (visible-spawn derivation, floored decrement) — unit tested
 │   │   ├── dialoguePoseAnim.ts         #   Maps SpeakerPose tones to NPC animation rows
 │   │   ├── lifetimeCount.ts            #   Defensive registry reader for lifetime life-stat counters (unit tested)
 │   │   ├── lineOfSight.ts              #   Pure raymarch through tile collision for LOS checks
@@ -236,7 +238,7 @@ ayala/
 │   ├── data/                           #   cat-dialogue script conditions
 │   └── sprites/                        #   BaseNPC helpers, SpriteProfiles
 ├── vitest.config.ts                     # Vitest configuration
-└── VERSION                              # 0.1.9
+└── VERSION                              # 0.1.10
 ```
 
 ## Asset Generation

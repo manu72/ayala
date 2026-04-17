@@ -2,7 +2,7 @@
 
 > Persistent memory layer for AI-assisted development sessions.
 > Last Updated: 2026-04-17
-> Version: 0.1.9
+> Version: 0.1.10
 
 ---
 
@@ -130,7 +130,8 @@ SmallDog.png, WhiteDog.png, BrownDog.png — randomly assigned to dog walkers
 - Phase 4.5+ life-stat keys (all lifetime counters surfaced in the journal footer once > 0; all read via the shared `readLifetimeCount` helper in `src/utils/lifetimeCount.ts`):
   - `COLLAPSE_COUNT` — times Mamma Cat has fallen
   - `PLAYER_SNATCHED_COUNT` — times Mamma Cat was captured by a snatcher (incremented before the save-and-restart flow in `handleSnatcherCapture`)
-  - `CATS_SNATCHED` — background colony cats lost to snatchers (incremented from v0.1.9 via `handleColonyCatSnatch`; was a dead scaffolded key before)
+  - `CATS_SNATCHED` — colony cats (named or background) lost to snatchers (incremented from v0.1.9 via `handleColonyCatSnatch`; was a dead scaffolded key before)
+- `COLONY_COUNT` (promoted to `StoryKeys.COLONY_COUNT` in v0.1.10) — **total** cat population (named + Mamma + unseen background). Seeded from `INITIAL_COLONY_TOTAL = 42` on fresh game, bumped `+1` per dumping event, decremented `-1` per snatch, floored at `NAMED_AND_MAMMA_COUNT = 9`. Source of truth is the registry; `GameScene` mirrors it in a field (`this.colonyCount`) to avoid per-frame registry round-trips. See "Colony population model" lesson below.
 - Legacy: `localStorage["ayala_intro_seen"]` is migrated to registry `INTRO_SEEN` on load; both may be set on intro completion for older clients
 - Also persists: player position, stats, timeOfDay, gameTimeMs, sourceStates, trust data, territory data
 - Conversation history stored separately in IndexedDB (`ayala_conversations`)
@@ -238,6 +239,20 @@ SmallDog.png, WhiteDog.png, BrownDog.png — randomly assigned to dog walkers
 
 - When restarting a scene (e.g. after snatcher capture), pass flags through the `data` parameter rather than using `delayedCall`, which won't survive the restart. The pattern is: `this.scene.restart({ loadSave: true, snatcherCapture: true })` and check in `create()`.
 
+### Colony population model — COLONY_COUNT is dynamic and symmetric
+
+- `StoryKeys.COLONY_COUNT` is the **total** cat population (named + Mamma + unseen background), not the visible roster. Three mutations, all live in `GameScene`:
+  - seed: `INITIAL_COLONY_TOTAL = 42` on fresh game (written to the registry at the end of the new-game clear block, immediately after `registry.remove`; the `save.variables` restore loop overwrites it on load paths).
+  - bump: `playDumpingSequence` does `+1` at reveal-time (inside the existing witness + LOS gate — see the scripted-reveal lesson). Capped implicitly by `DUMPING_EVENTS_SEEN` (3 events).
+  - decrement: `handleColonyCatSnatch` does `-1` via the `decrementColonyTotal` helper with floor `NAMED_AND_MAMMA_COUNT = 9`.
+- The visible background roster (`Colony Cat N` entities) is derived, not stored: `spawnColonyCats` calls `computeBackgroundSpawnCount(total, named+mamma, cap)` (see `src/utils/colonySpawn.ts`). On a healthy colony the `VISIBLE_BACKGROUND_CAP = 12` cap binds and today's behaviour is unchanged; once the total thins below `named+mamma+cap = 21`, the visible roster shrinks in lockstep so the world actually feels smaller.
+- Snatch eligibility rule in `checkSnatcherDetection`: any `active` NPC cat inside 16 px of a visible snatcher is eligible **unless** they're sleeping *and* `isNearShelter(cat.x, cat.y)`. Named cats are no longer hard-coded immune — a named cat caught napping outside shelter can be taken. In practice named cats live near their home POIs which are near shelter, so named-cat snatches are rare but not impossible; the `COLONY_COUNT` floor prevents total narrative annihilation.
+- The field `this.colonyCount` caches the registry value. All mutation paths (seed / load / bump / decrement) update both in the same statement; treat any drift as a bug.
+
+### Follow-ups (known limitations, not yet fixed)
+
+- **Named-cat snatch persistence.** Within a session, a named cat snatched by a snatcher is destroyed and spliced from `this.npcs`, and `COLONY_COUNT` is decremented + saved. Across a scene boundary (player capture + reload, or a fresh `create()` after a save), the named-cat spawn list in `create()` unconditionally re-runs `spawnNPC("Blacky", …)` etc., so the cat visually comes back while the counter stays decremented. The clean fix is a `SNATCHED_NAMED_CATS` registry list (array of names) + spawn guards + a chapter-progression audit (e.g. `JAYCO_TALKS` / `CH1_RESTED` gates need graceful handling if the gated cat is already gone). Deferred to a dedicated PR because the story-system ripples are non-trivial.
+
 ### Persisting counters across save-based scene restarts
 
 - Any registry value you bump just before a `scene.restart({ loadSave: true })` will be overwritten on reload, because `SaveSystem.load()` writes the on-disk `save.variables` back into the registry. The pattern for lifetime counters that need to span a capture/restart flow is: (1) mutate the registry, (2) call `this.autoSave()` so the new value reaches localStorage, (3) *then* trigger the fade/restart. See `GameScene.handleSnatcherCapture` for `PLAYER_SNATCHED_COUNT`. Colony-side counters that don't go through a restart (e.g. `COLLAPSE_COUNT`, `CATS_SNATCHED`) don't need the intermediate save — the normal autosave cadence is enough.
@@ -268,7 +283,16 @@ SmallDog.png, WhiteDog.png, BrownDog.png — randomly assigned to dog walkers
 
 ---
 
-## Recent Features (v0.1.8 - v0.1.9)
+## Recent Features (v0.1.8 - v0.1.10)
+
+### v0.1.10 — Dynamic colony population + named-cat snatch eligibility
+
+- **`COLONY_COUNT` is now a true dynamic total** (named + Mamma + background). Seeded from `INITIAL_COLONY_TOTAL = 42`, bumped by dumping (+1, max 3 events), decremented by snatching (-1, floored at `NAMED_AND_MAMMA_COUNT = 9`). Previously it only moved on dumping — the snatcher half of the realism loop was missing. See the "Colony population model" lesson for the full contract.
+- **Visible `Colony Cat N` roster is derived, not fixed.** `spawnColonyCats` now calls the pure `computeBackgroundSpawnCount(total, named+mamma, cap)` helper in `src/utils/colonySpawn.ts` (unit tested — 9 cases). On a healthy colony the `VISIBLE_BACKGROUND_CAP = 12` cap binds and today's experience is unchanged; once the total thins below 21, the visible roster shrinks so snatcher losses show up in the world, not just the journal.
+- **Named cats are now snatcher-eligible.** Removed the `npcName.startsWith("Colony Cat")` immunity guard in `checkSnatcherDetection`. New rule: `active && !(sleeping && isNearShelter(cat.x, cat.y))` — sleeping safely is the only immunity, mirroring Mamma Cat's rule. Named cats near their home POIs (most of which are near shelter) remain rarely caught; a named cat caught napping unsafely can be taken.
+- **Floor clamp** (`NAMED_AND_MAMMA_COUNT = 9`) prevents total narrative annihilation; even under pathological snatching the counter bottoms out at "just the story regulars".
+- **`StoryKeys.COLONY_COUNT`** — promoted from raw string literal. Closes one more item off the partial-registry-typing tech debt.
+- **Known limitation flagged as follow-up:** named-cat snatches don't persist across scene boundaries (spawn list re-runs on reload). See "Follow-ups" above.
 
 ### v0.1.9 — Snatcher counters + colony-cat capture mechanic
 
@@ -309,4 +333,4 @@ SmallDog.png, WhiteDog.png, BrownDog.png — randomly assigned to dog walkers
 - **Camille/Manu/Kish use generic HumanNPC:** No dedicated sprites yet. They use the feeder profile/sprite. Custom sprites needed for visual distinction.
 - **Snatchers use jogger type with dark tint:** A dedicated snatcher sprite (silhouette) would improve visual impact.
 - **Dumping events fire probabilistically:** Could be more deterministic with a day-counter to avoid very long waits or double-fires.
-- **Partial registry-key typing:** `StoryKeys` (`src/registry/storyKeys.ts`) covers story/endgame + life-stat keys (`INTRO_SEEN`, `FIRST_SNATCHER_SEEN`, `CAMILLE_ENCOUNTER`(`_DAY`), `DUMPING_EVENTS_SEEN`, `ENCOUNTER_5_COMPLETE`, `NEW_GAME_PLUS`, `GAME_COMPLETED`, `COLLAPSE_COUNT`, `CATS_SNATCHED`, `PLAYER_SNATCHED_COUNT`). Cat/chapter progression keys (`MET_BLACKY`, `TIGER_TALKS`, `JAYCO_TALKS`, `KNOWN_CATS`, `CHAPTER`, `CH1_RESTED`, `FLUFFY_TALKS`, `PEDIGREE_TALKS`, `MET_GINGER_A`/`_B`, `JAYCO_JR_TALKS`, `JOURNAL_MET_DAYS`, `VISITED_ZONE_6`, `TERRITORY_CLAIMED`, `TERRITORY_DAY`, `COLONY_COUNT`) are still raw string literals in `GameScene` and `SaveSystem.TRACKED_KEYS`. Follow-up: introduce a sibling `ProgressionKeys` module and retrofit the clear-list in `GameScene.create` plus `SaveSystem.TRACKED_KEYS` so typos become compile errors everywhere.
+- **Partial registry-key typing:** `StoryKeys` (`src/registry/storyKeys.ts`) covers story/endgame + life-stat + colony keys (`INTRO_SEEN`, `FIRST_SNATCHER_SEEN`, `CAMILLE_ENCOUNTER`(`_DAY`), `DUMPING_EVENTS_SEEN`, `ENCOUNTER_5_COMPLETE`, `NEW_GAME_PLUS`, `GAME_COMPLETED`, `COLLAPSE_COUNT`, `CATS_SNATCHED`, `PLAYER_SNATCHED_COUNT`, `COLONY_COUNT`). Cat/chapter progression keys (`MET_BLACKY`, `TIGER_TALKS`, `JAYCO_TALKS`, `KNOWN_CATS`, `CHAPTER`, `CH1_RESTED`, `FLUFFY_TALKS`, `PEDIGREE_TALKS`, `MET_GINGER_A`/`_B`, `JAYCO_JR_TALKS`, `JOURNAL_MET_DAYS`, `VISITED_ZONE_6`, `TERRITORY_CLAIMED`, `TERRITORY_DAY`) are still raw string literals in `GameScene` and `SaveSystem.TRACKED_KEYS`. Follow-up: introduce a sibling `ProgressionKeys` module and retrofit the clear-list in `GameScene.create` plus `SaveSystem.TRACKED_KEYS` so typos become compile errors everywhere.

@@ -136,8 +136,16 @@ export class JournalScene extends Phaser.Scene {
       yOffset += LINE_HEIGHT + 12;
     }
 
-    // Footer stats: use dynamic colony count from registry, fallback to 42
-    const colonyCount = (gameScene?.registry.get("COLONY_COUNT") as number) ?? 42;
+    // Footer stats: dynamic colony total (named + Mamma + background) from
+    // the registry. The number moves during play — dumping events bump it up,
+    // snatcher captures bring it down (floored at NAMED_AND_MAMMA_COUNT).
+    // Fallback of 42 matches INITIAL_COLONY_TOTAL for the brief window on a
+    // fresh boot before GameScene.create() seeds the registry.
+    const rawColonyCount = gameScene?.registry.get(StoryKeys.COLONY_COUNT);
+    const colonyCount =
+      typeof rawColonyCount === "number" && Number.isFinite(rawColonyCount) && rawColonyCount > 0
+        ? Math.floor(rawColonyCount)
+        : 42;
     this.container.add(
       this.add.text(0, yOffset, `Colony count: ~${colonyCount} cats`, {
         fontFamily: FONT_FAMILY,
