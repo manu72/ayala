@@ -2040,7 +2040,11 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * Sensory narration: only if source is within range. Inner monologue: omit `source`.
+   * Sensory narration: only fires when the source is within range AND the
+   * player has line-of-sight to it. Inner monologue: omit `source` to bypass
+   * both checks. LOS matters because these narrations describe visual cues
+   * ("Jayco watches you from the steps", cat body-language lines); firing
+   * them through a wall or building would lie about what the player can see.
    */
   private narrateIfPerceivable(
     line: string,
@@ -2054,6 +2058,7 @@ export class GameScene extends Phaser.Scene {
     }
     const d = Phaser.Math.Distance.Between(this.player.x, this.player.y, source.x, source.y);
     if (d > radius) return;
+    if (!this.hasLineOfSight(this.player.x, this.player.y, source.x, source.y)) return;
     hud?.showNarration(line);
   }
 
