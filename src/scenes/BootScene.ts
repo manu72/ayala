@@ -85,11 +85,26 @@ export class BootScene extends Phaser.Scene {
       });
     }
 
-    // Jogger spritesheet: 8 cols x 6 rows of 150x85 frames
+    // Jogger spritesheet: 8 cols x 6 rows of 150x85 frames (female jogger)
     this.load.spritesheet("jogger", "assets/sprites/girl.png", {
       frameWidth: 150,
       frameHeight: 85,
     });
+
+    // Male jogger directional spritesheets (48x48 frames, single-row strips of 8)
+    const mjogSheets: Array<[string, string]> = [
+      ["mjog_stand", "male_jogger_stand"],
+      ["mjog_run_e", "male_jogger_run_east"],
+      ["mjog_run_w", "male_jogger_run_west"],
+      ["mjog_run_n", "male_jogger_run_north"],
+      ["mjog_run_s", "male_jogger_run_south"],
+    ];
+    for (const [key, file] of mjogSheets) {
+      this.load.spritesheet(key, `assets/sprites/${file}.png`, {
+        frameWidth: 48,
+        frameHeight: 48,
+      });
+    }
 
     // Legacy dog walker sheet (7 cols x 3 rows, 50x45) — kept for revert.
     // To revert: restore DOGWALKER_PROFILE in HumanNPC.ts to use key "dogwalker".

@@ -21,6 +21,13 @@ export interface HumanConfig {
   lingerWaypointIndex?: number;
   /** If true, deactivate after completing one full path traversal. */
   exitAfterLinger?: boolean;
+  /**
+   * If set (>0), the NPC will softly steer around neighbours (cats and
+   * other humans) within this many world pixels of its current position.
+   * Only nudges laterally; does not override pathing. See
+   * {@link HumanNPC.applySteeringAvoidance}.
+   */
+  avoidanceRadius?: number;
 }
 
 /** Park exit waypoints — on the road perimeter, avoiding interior obstacles. */
@@ -343,6 +350,70 @@ export class HumanNPC extends BaseNPC {
     this.scratchVec.set(this.exitTarget.x - this.x, this.exitTarget.y - this.y).normalize();
     this.setVelocity(this.scratchVec.x * speed, this.scratchVec.y * speed);
     this.playWalkAnim(this.scratchVec);
+  }
+
+  /**
+   * Soft steering nudge away from nearby neighbours (cats, other humans).
+   *
+   * Called AFTER {@link update} each tick by the scene so we can observe the
+   * velocity that pathing just produced and bend it sideways. Neighbours that
+   * are not broadly ahead of us are ignored (we never swerve for things
+   * behind), and neighbours directly in front cause us to sidestep to the
+   * less-crowded side. The forward component is slightly reduced when
+   * swerving hard, giving a "slow as you dodge" feel without ever stopping.
+   *
+   * Cheap: O(n) over the provided list; no physics overlap checks. Intended
+   * for NPCs opted in via {@link HumanConfig.avoidanceRadius}.
+   */
+  applySteeringAvoidance(
+    neighbours: Iterable<{ x: number; y: number }>,
+    radius: number,
+  ): void {
+    if (!this.isActive || this.greetingActive || this.lingering) return;
+    const body = this.body as Phaser.Physics.Arcade.Body | undefined;
+    if (!body) return;
+    const vx = body.velocity.x;
+    const vy = body.velocity.y;
+    const speed = Math.hypot(vx, vy);
+    if (speed < 1) return;
+
+    const fx = vx / speed;
+    const fy = vy / speed;
+    // Right-hand perpendicular in screen space (y grows downward).
+    const rx = -fy;
+    const ry = fx;
+
+    let lateral = 0;
+    for (const n of neighbours) {
+      const dx = n.x - this.x;
+      const dy = n.y - this.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist < 1 || dist > radius) continue;
+      const nx = dx / dist;
+      const ny = dy / dist;
+      // Dot with forward: >0 means neighbour is ahead of us.
+      const forwardDot = nx * fx + ny * fy;
+      if (forwardDot < 0.15) continue;
+      // Sign with right-vector: >0 means on our right → steer left (negative).
+      const sideDot = nx * rx + ny * ry;
+      const proximity = 1 - dist / radius;
+      // Stronger weight when directly ahead and close.
+      lateral += (sideDot >= 0 ? -1 : 1) * proximity * forwardDot;
+    }
+
+    if (lateral === 0) return;
+
+    const nudge = Phaser.Math.Clamp(lateral, -1, 1);
+    // Slow slightly when swerving hard so we don't blur into targets.
+    const forwardScale = 1 - Math.abs(nudge) * 0.35;
+    const newFx = fx * forwardScale + rx * nudge;
+    const newFy = fy * forwardScale + ry * nudge;
+    const mag = Math.hypot(newFx, newFy) || 1;
+    this.setVelocity((newFx / mag) * speed, (newFy / mag) * speed);
+    this.scratchVec.set(newFx, newFy).normalize();
+    if (this.glanceTimer <= 0) {
+      this.playWalkAnim(this.scratchVec);
+    }
   }
 
   /**

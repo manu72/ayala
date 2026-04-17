@@ -1,7 +1,15 @@
 import Phaser from "phaser";
 import { BaseNPC } from "./BaseNPC";
 
-export type HumanType = "jogger" | "feeder" | "dogwalker" | "camille" | "manu" | "kish" | "snatcher";
+export type HumanType =
+  | "jogger"
+  | "jogger_male"
+  | "feeder"
+  | "dogwalker"
+  | "camille"
+  | "manu"
+  | "kish"
+  | "snatcher";
 
 export interface SpriteProfile {
   key: string;
@@ -93,6 +101,31 @@ const JOGGER_PROFILE: SpriteProfile = {
     walkLeft: { row: 2, count: 8 },
     walkUp: { row: 3, count: 8 },
     idle: { row: 0, count: 1 },
+  },
+};
+
+// Male jogger: 48x48 frames, 4 directional run sheets + stand sheet.
+// Uses the directionalKeys pattern like feeder/camille.
+const JOGGER_MALE_PROFILE: SpriteProfile = {
+  key: "jogger_male",
+  cols: 8,
+  frameW: 48,
+  frameH: 48,
+  bodyW: 16,
+  bodyH: 14,
+  directionalKeys: {
+    walkDown: "mjog_run_s",
+    walkLeft: "mjog_run_w",
+    walkRight: "mjog_run_e",
+    walkUp: "mjog_run_n",
+    idle: "mjog_stand",
+  },
+  anims: {
+    walkDown: { row: 0, count: 8 },
+    walkRight: { row: 0, count: 8 },
+    walkLeft: { row: 0, count: 8 },
+    walkUp: { row: 0, count: 8 },
+    idle: { row: 0, count: 8 },
   },
 };
 
@@ -235,6 +268,8 @@ export function profileForType(type: HumanType): SpriteProfile {
   switch (type) {
     case "jogger":
       return JOGGER_PROFILE;
+    case "jogger_male":
+      return JOGGER_MALE_PROFILE;
     case "feeder":
       return FEEDER_PROFILE;
     case "dogwalker":
