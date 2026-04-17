@@ -20,6 +20,8 @@ const MC_SIT_IDLE_E = "mc_sit_idle_e";
 const MC_SIT_IDLE_W = "mc_sit_idle_w";
 const MC_STAND_IDLE_E = "mc_stand_idle_e";
 const MC_STAND_IDLE_W = "mc_stand_idle_w";
+const MC_GREET_E = "mc_greet_e";
+const MC_GREET_W = "mc_greet_w";
 const MC_SLEEP = "mc_sleep";
 const MC_CATLOAF = "mc_catloaf";
 
@@ -36,6 +38,11 @@ const ANIM_SIT_IDLE_E = "mc-sit-idle-e";
 const ANIM_SIT_IDLE_W = "mc-sit-idle-w";
 const ANIM_STAND_IDLE_E = "mc-stand-idle-e";
 const ANIM_STAND_IDLE_W = "mc-stand-idle-w";
+const ANIM_GREET_E = "mc-greet-e";
+const ANIM_GREET_W = "mc-greet-w";
+
+// Greeting plays once per press. 11 frames at 8 fps ≈ 1.375 s.
+const GREET_FPS = 8;
 
 // ── 8-direction stand frame indices (S, SW, W, NW, N, NE, E, SE) ──
 type Direction8 = "s" | "sw" | "w" | "nw" | "n" | "ne" | "e" | "se";
@@ -77,7 +84,7 @@ const LABEL_OFFSET_Y = -12;
 
 const CROUCH_WALK_FPS = 4;
 
-export type PlayerState = "normal" | "crouching" | "catloaf" | "resting" | "waking";
+export type PlayerState = "normal" | "crouching" | "catloaf" | "resting" | "waking" | "greeting";
 
 export class MammaCat extends Phaser.Physics.Arcade.Sprite {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
@@ -115,6 +122,10 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
 
   get isCatloaf(): boolean {
     return this.playerState === "catloaf";
+  }
+
+  get isGreeting(): boolean {
+    return this.playerState === "greeting";
   }
 
   get isMoving(): boolean {
@@ -262,6 +273,63 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
     this.showStandFrame();
   }
 
+  /**
+   * Play the greeting animation once as a player-initiated action.
+   * Not targeted and not proximity-gated — Mamma Cat simply greets in her
+   * current facing direction (east or west variant chosen from `lastHorizontal`).
+   * Non-interruptible by directional input: movement is frozen for the
+   * duration of the animation. Callable only from the `normal`, `crouching`,
+   * or `catloaf` states; no-op otherwise (resting / waking / already greeting).
+   *
+   * Returns `true` if the greeting started, `false` if the call was ignored.
+   */
+  startGreeting(): boolean {
+    if (
+      this.playerState === "resting" ||
+      this.playerState === "waking" ||
+      this.playerState === "greeting"
+    ) {
+      return false;
+    }
+
+    // Greeting cancels catloaf/crouch — the player visibly stands to greet.
+    if (this.playerState === "catloaf") {
+      this.setScale(NORMAL_SCALE);
+      const body = this.body as Phaser.Physics.Arcade.Body;
+      body.setOffset(BODY_OFFSET_X, BODY_OFFSET_Y);
+    }
+    this.crouchLatched = false;
+    this.crouchKeyDownTime = 0;
+    this.crouchHoldActive = false;
+
+    this.playerState = "greeting";
+    this.setVelocity(0);
+
+    const anim = this.isFacingEast() ? ANIM_GREET_E : ANIM_GREET_W;
+    if (!this.scene.anims.exists(anim)) {
+      // Fallback: no greeting asset registered; just hold a stand frame briefly.
+      this.showStandFrame();
+      this.scene.time.delayedCall(800, () => this.stopGreeting());
+      return true;
+    }
+
+    // `ignoreIfPlaying: false` so a re-press restarts the animation cleanly.
+    this.anims.play(anim, false);
+    this.once(
+      Phaser.Animations.Events.ANIMATION_COMPLETE_KEY + anim,
+      this.stopGreeting,
+      this,
+    );
+    return true;
+  }
+
+  /** End the greeting pose and return to normal. Safe to call multiple times. */
+  stopGreeting(): void {
+    if (this.playerState !== "greeting") return;
+    this.playerState = "normal";
+    this.showStandFrame();
+  }
+
   update(canRun = true, delta = 0): void {
     if (!this.cursors) return;
 
@@ -283,6 +351,16 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
 
     if (this.playerState === "catloaf") {
       this.setVelocity(0);
+      this.nameLabel.setPosition(this.x, this.y + LABEL_OFFSET_Y);
+      return;
+    }
+
+    if (this.playerState === "greeting") {
+      // Greeting is locked in for the animation duration — movement input is
+      // ignored until ANIMATION_COMPLETE fires in stopGreeting(). The anim
+      // itself drives the sprite texture; we just hold position.
+      this.setVelocity(0);
+      this.isRunning = false;
       this.nameLabel.setPosition(this.x, this.y + LABEL_OFFSET_Y);
       return;
     }
@@ -538,6 +616,20 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
       frames: scene.anims.generateFrameNumbers(MC_STAND_IDLE_W, { start: 0, end: 7 }),
       frameRate: 6,
       repeat: -1,
+    });
+
+    // Greeting (11 frames each, plays once per press — not looping)
+    scene.anims.create({
+      key: ANIM_GREET_E,
+      frames: scene.anims.generateFrameNumbers(MC_GREET_E, { start: 0, end: 10 }),
+      frameRate: GREET_FPS,
+      repeat: 0,
+    });
+    scene.anims.create({
+      key: ANIM_GREET_W,
+      frames: scene.anims.generateFrameNumbers(MC_GREET_W, { start: 0, end: 10 }),
+      frameRate: GREET_FPS,
+      repeat: 0,
     });
 
     // Seated idle (10 frames each)
