@@ -388,7 +388,19 @@ export class GameScene extends Phaser.Scene {
     this.cameras.main.setZoom(DEFAULT_ZOOM);
 
     const isNewGame = !data?.loadSave && !data?.newGamePlus && !data?.snatcherCapture;
-    migrateLegacyIntroFlag(this.registry, typeof localStorage !== "undefined" ? localStorage : undefined);
+    // Access to `localStorage` can itself throw (not just getItem) in restricted
+    // contexts — Firefox with dom.storage.enabled=false, sandboxed iframes,
+    // Safari with storage blocked for third-party contexts. `typeof` does not
+    // help here because the global is declared; evaluating the identifier
+    // triggers the getter. Fall back to `undefined` on any throw so scene boot
+    // never fails because of storage availability.
+    let legacyStorage: Storage | undefined;
+    try {
+      legacyStorage = typeof localStorage !== "undefined" ? localStorage : undefined;
+    } catch {
+      legacyStorage = undefined;
+    }
+    migrateLegacyIntroFlag(this.registry, legacyStorage);
     const shouldPlayCinematic = isNewGame && this.registry.get(StoryKeys.INTRO_SEEN) !== true;
 
     if (!shouldPlayCinematic) {
@@ -1689,16 +1701,6 @@ export class GameScene extends Phaser.Scene {
       // Jogger 3 (male): clockwise perimeter loop around the park triangle.
       // Dawn + evenings only. Steers softly around other NPCs/cats (he
       // ignores cats socially but must not run through them).
-      //
-      // Route (tile coordinates from the user's Tiled screenshot):
-      //   (0,43)  SW  — spawn on the Paseo de Roxas diagonal sidewalk (west edge)
-      //   (31,13) NE  — top of the diagonal where it meets the main N walkway
-      //   (94,13) E   — east end of the N walkway (turns south)
-      //   (94,77) SE  — bottom of the Makati Ave sidewalk (turns west)
-      //   (0,77)  SW  — runs off the west edge along Ayala Ave, then pauses
-      //                 before respawning at (0,43) for the next loop.
-      //
-      // Tile → world: world = tile * 32 + 16 (centre of tile).
       {
         type: "jogger_male",
         speed: 120,
