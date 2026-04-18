@@ -48,6 +48,7 @@ import {
   CAMILLE_ENCOUNTER_5_JOURNEY_STEPS,
   CAMILLE_BEAT5_ACCEPT_LINE,
   CAMILLE_BEAT5_TIMEOUT_LINE,
+  mergeCamilleBeatSteps,
   type EncounterStep,
 } from "../data/camille-encounter-beats";
 import { resolveSnatcherSpawnAction } from "../systems/SnatcherSystem";
@@ -1681,17 +1682,71 @@ export class GameScene extends Phaser.Scene {
       this.resumeCamilleEraHumans();
     };
 
+    // `runBeatWith` drives a single beat render + persist pass. It is
+    // called with either the AI-returned spoken lines (success path) or
+    // `null` (AI failed / unavailable — scripted fallback only).
+    //
+    // Persistence MUST happen here rather than in
+    // `requestCamilleEncounterLines` because the AI payload and the
+    // merged render surface can diverge: `mergeCamilleBeatSteps` maps
+    // AI lines only into authored-spoken slots (narrator-only steps stay
+    // silent), drops surplus AI lines, and substitutes authored
+    // fallbacks when AI lines are missing. Persisting the raw AI payload
+    // would therefore misrepresent what Camille actually said to Mamma
+    // Cat on screen — and future LLM calls, which condition on this
+    // history, would be grounded in a fiction.
     const runBeatWith = (spokenOverrides: string[] | null): void => {
-      const steps = beat.steps.map((s, idx) => ({
-        narrator: s.narrator,
-        spoken: spokenOverrides?.[idx] ?? s.spoken,
-      }));
+      const { steps, spokenRendered } = mergeCamilleBeatSteps(beat.steps, spokenOverrides);
       this.playPairedBeat(steps, this.camilleNPC, onComplete);
+      if (spokenRendered.length > 0) {
+        void this.persistCamilleBeatHistory(n, spokenRendered);
+      }
     };
 
     void this.requestCamilleEncounterLines(n, beat.objective)
       .then((lines) => runBeatWith(lines))
       .catch(() => runBeatWith(null));
+  }
+
+  /**
+   * Persist the spoken lines Camille was actually seen saying during a
+   * middle encounter beat (2/3/4). Called from `runCamilleEncounterBeat`
+   * after the render surface has been computed by `mergeCamilleBeatSteps`,
+   * so the stored record matches what the player saw — not the raw AI
+   * payload, which may be reshaped by the merge.
+   *
+   * Errors are swallowed: conversation history is best-effort context for
+   * future LLM calls, not a source of truth, and an IDB hiccup should
+   * never break a Camille beat.
+   */
+  private async persistCamilleBeatHistory(
+    n: 2 | 3 | 4,
+    spokenRendered: string[],
+  ): Promise<void> {
+    try {
+      const snapshotTrust = this.trust.global;
+      await storeConversation({
+        speaker: "Camille",
+        timestamp: this.dayNight.totalGameTimeMs,
+        realTimestamp: Date.now(),
+        gameDay: this.dayNight.dayCount,
+        lines: spokenRendered,
+        trustBefore: snapshotTrust,
+        trustAfter: snapshotTrust,
+        chapter: this.chapters.chapter,
+        playerAction: `camille_encounter_${n}`,
+        gameStateSnapshot: {
+          trustWithSpeaker: snapshotTrust,
+          trustGlobal: this.trust.global,
+          timeOfDay: this.dayNight.currentPhase,
+          hunger: this.stats.hunger,
+          thirst: this.stats.thirst,
+          energy: this.stats.energy,
+        },
+      });
+    } catch {
+      // Best-effort persistence; deliberately silent.
+    }
   }
 
   // ──────────── Camille Beat 5 (three-phase decision gate) ────────────
@@ -1909,9 +1964,17 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * Ask Camille's AI persona for beat-appropriate lines. Returns the lines on
-   * success, or `null` on any failure (so the caller can substitute authored
-   * fallback text without error propagation).
+   * Ask Camille's AI persona for beat-appropriate spoken lines. Returns the
+   * trimmed lines on success, or `null` on any failure (the caller then
+   * substitutes authored fallback text without error propagation).
+   *
+   * This method is intentionally SIDE-EFFECT-FREE — it does not persist
+   * conversation history. Persistence happens in
+   * {@link persistCamilleBeatHistory} after the caller has merged the AI
+   * lines with the authored beat via {@link mergeCamilleBeatSteps}, so the
+   * stored record reflects what Camille actually said on screen rather
+   * than the raw AI payload (which may be reshaped or partially dropped
+   * by the merge).
    */
   private async requestCamilleEncounterLines(
     n: 2 | 3 | 4,
@@ -1960,30 +2023,7 @@ export class GameScene extends Phaser.Scene {
       const lines = response.lines
         .map((l) => l.trim())
         .filter((l) => l.length > 0);
-      if (lines.length === 0) return null;
-
-      const snapshotTrust = this.trust.global;
-      await storeConversation({
-        speaker: "Camille",
-        timestamp: this.dayNight.totalGameTimeMs,
-        realTimestamp: Date.now(),
-        gameDay: this.dayNight.dayCount,
-        lines,
-        trustBefore: snapshotTrust,
-        trustAfter: snapshotTrust,
-        chapter: this.chapters.chapter,
-        playerAction: `camille_encounter_${n}`,
-        gameStateSnapshot: {
-          trustWithSpeaker: snapshotTrust,
-          trustGlobal: this.trust.global,
-          timeOfDay: this.dayNight.currentPhase,
-          hunger: this.stats.hunger,
-          thirst: this.stats.thirst,
-          energy: this.stats.energy,
-        },
-      });
-
-      return lines;
+      return lines.length === 0 ? null : lines;
     } catch {
       return null;
     }

@@ -149,3 +149,52 @@ export const CAMILLE_ENCOUNTER_5_STEPS: EncounterStep[] = [
   ...CAMILLE_ENCOUNTER_5_PREDECISION_STEPS,
   ...CAMILLE_ENCOUNTER_5_JOURNEY_STEPS,
 ];
+
+/**
+ * Merge AI-generated spoken lines into an authored beat, producing the
+ * exact `steps` array that {@link ../scenes/GameScene.GameScene.playPairedBeat}
+ * will render AND the `spokenRendered` list that will be persisted to the
+ * conversation store.
+ *
+ * Mapping rules (contract — covered by tests in
+ * `tests/data/camille-encounter-beats.test.ts`):
+ *
+ *  - AI lines fill authored-spoken slots in step order. A step is an
+ *    "authored-spoken slot" iff `s.spoken` is a non-empty string in the
+ *    source beat.
+ *  - Narrator-only steps (no authored `spoken`) NEVER receive an AI
+ *    line — they represent Mamma Cat's inner POV and must stay silent.
+ *    The previous purely-positional merge could leak AI lines into
+ *    these slots (see v0.3.x bug: beat 3 step [1] "You've seen other
+ *    cats do this" accidentally rendered Camille speaking).
+ *  - Missing AI lines fall back to the authored `s.spoken` at that slot.
+ *  - Surplus AI lines (more responses than authored slots) are dropped.
+ *  - Blank / whitespace-only AI lines fall back to the authored slot so
+ *    an upstream regression cannot render an empty bubble.
+ *
+ * `spokenRendered` is the ground truth for persistence: it lists what
+ * the player will see Camille say, in order, authored fallbacks
+ * included. Persisting this (rather than the raw AI payload) keeps
+ * conversation history consistent with gameplay — the LLM's next call
+ * is then grounded in what Camille actually said on screen.
+ */
+export function mergeCamilleBeatSteps(
+  sourceSteps: ReadonlyArray<EncounterStep>,
+  aiSpokenLines: ReadonlyArray<string> | null,
+): { steps: EncounterStep[]; spokenRendered: string[] } {
+  let aiIdx = 0;
+  const steps: EncounterStep[] = sourceSteps.map((s) => {
+    if (s.spoken === undefined) {
+      return { narrator: s.narrator };
+    }
+    const aiLine = aiSpokenLines?.[aiIdx++];
+    const useAi = typeof aiLine === "string" && aiLine.trim().length > 0;
+    return {
+      narrator: s.narrator,
+      spoken: useAi ? aiLine : s.spoken,
+    };
+  });
+
+  const spokenRendered = steps.flatMap((s) => (s.spoken ? [s.spoken] : []));
+  return { steps, spokenRendered };
+}

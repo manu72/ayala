@@ -14,6 +14,8 @@ import {
   CAMILLE_ENCOUNTER_5_JOURNEY_STEPS,
   CAMILLE_BEAT5_ACCEPT_LINE,
   CAMILLE_BEAT5_TIMEOUT_LINE,
+  mergeCamilleBeatSteps,
+  type EncounterStep,
 } from "../../src/data/camille-encounter-beats";
 
 describe("CAMILLE_ENCOUNTER_BEATS (beats 2–4)", () => {
@@ -116,5 +118,122 @@ describe("CAMILLE_ENCOUNTER_5 predecision / journey split (v0.3.2 decision gate)
 
   it("timeout line is non-empty and reads gently (Camille stands down; beat re-arms)", () => {
     expect(CAMILLE_BEAT5_TIMEOUT_LINE.trim().length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * `mergeCamilleBeatSteps` produces the final step list that
+ * `GameScene.playPairedBeat` consumes AND the `spokenRendered` list that
+ * `GameScene.runCamilleEncounterBeat` persists to the conversation store.
+ *
+ * Invariants under test:
+ *
+ *  1. AI spoken lines map ONLY to steps where the author left a `spoken`
+ *     slot. Narrator-only steps must stay narrator-only — otherwise
+ *     Camille would speak over a beat the author intended to be her
+ *     inner POV (e.g. beat 3 step [1] "You've seen other cats do this").
+ *
+ *  2. `spokenRendered` contains exactly the spoken lines the player will
+ *     see bubble up, in order, authored fallbacks included. The
+ *     conversation store writes this, so persisted history matches the
+ *     on-screen experience byte-for-byte.
+ *
+ *  3. Missing AI lines (fewer AI responses than authored spoken slots)
+ *     fall back to the authored `s.spoken`.
+ *
+ *  4. Surplus AI lines (more responses than authored slots) are dropped
+ *     — the modal + bubble channel has a fixed length per beat.
+ */
+describe("mergeCamilleBeatSteps", () => {
+  const beat3Steps: EncounterStep[] = CAMILLE_ENCOUNTER_BEATS[3].steps;
+
+  it("null overrides → pure authored run, spokenRendered mirrors authored spoken slots", () => {
+    const { steps, spokenRendered } = mergeCamilleBeatSteps(beat3Steps, null);
+    expect(steps).toEqual(beat3Steps);
+    expect(spokenRendered).toEqual(["There you are.", "Good girl."]);
+  });
+
+  it("empty overrides array behaves like null (pure authored run)", () => {
+    const { steps, spokenRendered } = mergeCamilleBeatSteps(beat3Steps, []);
+    expect(steps).toEqual(beat3Steps);
+    expect(spokenRendered).toEqual(["There you are.", "Good girl."]);
+  });
+
+  it("AI lines fill authored-spoken slots positionally and NEVER bleed into narrator-only slots", () => {
+    // Beat 3 asks AI for 2 spoken lines. Middle step is narrator-only;
+    // both AI lines must land in the two AUTHORED-spoken slots (0 and 2),
+    // not the narrator-only slot (1). Old positional merge collapsed
+    // spoken and rendered the second AI line in the narrator-only slot.
+    const { steps, spokenRendered } = mergeCamilleBeatSteps(beat3Steps, [
+      "AI hello.",
+      "AI goodbye.",
+    ]);
+    expect(steps[0]!.spoken).toBe("AI hello.");
+    expect(steps[1]!.spoken).toBeUndefined();
+    expect(steps[2]!.spoken).toBe("AI goodbye.");
+    expect(spokenRendered).toEqual(["AI hello.", "AI goodbye."]);
+  });
+
+  it("narrator-only step narrators are preserved verbatim even with overrides present", () => {
+    const { steps } = mergeCamilleBeatSteps(beat3Steps, ["x", "y"]);
+    expect(steps.map((s) => s.narrator)).toEqual(beat3Steps.map((s) => s.narrator));
+  });
+
+  it("partial AI overrides → leading authored slots use AI, trailing ones fall back", () => {
+    // AI returned only 1 line but beat 3 has 2 authored spoken slots.
+    const { steps, spokenRendered } = mergeCamilleBeatSteps(beat3Steps, ["Just one."]);
+    expect(steps[0]!.spoken).toBe("Just one.");
+    expect(steps[1]!.spoken).toBeUndefined();
+    expect(steps[2]!.spoken).toBe("Good girl.");
+    expect(spokenRendered).toEqual(["Just one.", "Good girl."]);
+  });
+
+  it("surplus AI lines beyond authored-spoken capacity are dropped", () => {
+    // Beat 3 has 2 authored spoken slots; AI returned 4 lines.
+    const { steps, spokenRendered } = mergeCamilleBeatSteps(beat3Steps, [
+      "a",
+      "b",
+      "c",
+      "d",
+    ]);
+    expect(spokenRendered).toEqual(["a", "b"]);
+    expect(steps[0]!.spoken).toBe("a");
+    expect(steps[1]!.spoken).toBeUndefined();
+    expect(steps[2]!.spoken).toBe("b");
+  });
+
+  it("blank / whitespace-only AI lines fall back to authored spoken at the same slot", () => {
+    // AIDialogueService already trims+filters empties before calling in,
+    // but guard defensively so a regression upstream can't produce an
+    // empty bubble.
+    const { steps, spokenRendered } = mergeCamilleBeatSteps(beat3Steps, ["", "AI two."]);
+    expect(steps[0]!.spoken).toBe("There you are.");
+    expect(steps[2]!.spoken).toBe("AI two.");
+    expect(spokenRendered).toEqual(["There you are.", "AI two."]);
+  });
+
+  it("all-narrator beat → spokenRendered is empty regardless of overrides", () => {
+    const narratorOnly: EncounterStep[] = [
+      { narrator: "a" },
+      { narrator: "b" },
+    ];
+    const { steps, spokenRendered } = mergeCamilleBeatSteps(narratorOnly, ["x", "y"]);
+    expect(steps).toEqual(narratorOnly);
+    expect(spokenRendered).toEqual([]);
+  });
+
+  it("spokenRendered is always in the same order the bubbles will render (step order)", () => {
+    // Regression guard: if the helper is ever refactored to collect
+    // authored-spoken slots separately, ordering must still match
+    // step index so persisted history reads left-to-right.
+    const { steps, spokenRendered } = mergeCamilleBeatSteps(beat3Steps, ["first"]);
+    const expected = steps.flatMap((s) => (s.spoken ? [s.spoken] : []));
+    expect(spokenRendered).toEqual(expected);
+  });
+
+  it("returns a new steps array (does not mutate the authored source)", () => {
+    const before = JSON.parse(JSON.stringify(beat3Steps));
+    mergeCamilleBeatSteps(beat3Steps, ["a", "b"]);
+    expect(beat3Steps).toEqual(before);
   });
 });
