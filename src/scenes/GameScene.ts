@@ -1046,7 +1046,13 @@ export class GameScene extends Phaser.Scene {
         time,
       );
       if (usedSource) {
-        // Eating near other cats builds trust
+        // Play the directional drinking / eating animation as feedback.
+        // Shared by every FoodSource type (water_bowl, fountain,
+        // feeding_station, restaurant_scraps, bugs); startConsuming() is a
+        // no-op while resting/waking/greeting/already-consuming so it can't
+        // stack or restart a half-played beat.
+        this.player.startConsuming();
+
         for (const { cat } of this.npcs) {
           if (Phaser.Math.Distance.Between(this.player.x, this.player.y, cat.x, cat.y) < LEARN_NAME_DISTANCE) {
             this.trust.seenEating();
@@ -1070,6 +1076,7 @@ export class GameScene extends Phaser.Scene {
       playerStationary &&
       !this.dialogue.isActive &&
       !this.player.isGreeting &&
+      !this.player.isConsuming &&
       !this.playerInputFrozen
     ) {
       this.restHoldTimer += delta;
@@ -1101,7 +1108,8 @@ export class GameScene extends Phaser.Scene {
         playerStationary &&
         !this.dialogue.isActive &&
         !this.player.isMoving &&
-        !this.player.isGreeting
+        !this.player.isGreeting &&
+        !this.player.isConsuming
       ) {
         if (this.player.isCatloaf) {
           this.player.exitCatloaf();

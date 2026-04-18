@@ -22,6 +22,8 @@ const MC_STAND_IDLE_E = "mc_stand_idle_e";
 const MC_STAND_IDLE_W = "mc_stand_idle_w";
 const MC_GREET_E = "mc_greet_e";
 const MC_GREET_W = "mc_greet_w";
+const MC_DRINK_E = "mc_drink_e";
+const MC_DRINK_W = "mc_drink_w";
 const MC_SLEEP = "mc_sleep";
 const MC_CATLOAF = "mc_catloaf";
 
@@ -40,9 +42,17 @@ const ANIM_STAND_IDLE_E = "mc-stand-idle-e";
 const ANIM_STAND_IDLE_W = "mc-stand-idle-w";
 const ANIM_GREET_E = "mc-greet-e";
 const ANIM_GREET_W = "mc-greet-w";
+const ANIM_DRINK_E = "mc-drink-e";
+const ANIM_DRINK_W = "mc-drink-w";
 
 // Greeting plays once per press. 11 frames at 8 fps ≈ 1.375 s.
 const GREET_FPS = 8;
+
+// Consuming (eating/drinking) plays once per food/water interaction.
+// 6 frames at 8 fps = 750 ms — long enough to read as a distinct beat
+// without stalling traversal through bug-dense areas (10 s bug cooldown).
+const CONSUME_FPS = 8;
+const CONSUME_FRAMES = 6;
 
 // ── 8-direction stand frame indices (S, SW, W, NW, N, NE, E, SE) ──
 type Direction8 = "s" | "sw" | "w" | "nw" | "n" | "ne" | "e" | "se";
@@ -84,7 +94,14 @@ const LABEL_OFFSET_Y = -12;
 
 const CROUCH_WALK_FPS = 4;
 
-export type PlayerState = "normal" | "crouching" | "catloaf" | "resting" | "waking" | "greeting";
+export type PlayerState =
+  | "normal"
+  | "crouching"
+  | "catloaf"
+  | "resting"
+  | "waking"
+  | "greeting"
+  | "consuming";
 
 export class MammaCat extends Phaser.Physics.Arcade.Sprite {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
@@ -126,6 +143,10 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
 
   get isGreeting(): boolean {
     return this.playerState === "greeting";
+  }
+
+  get isConsuming(): boolean {
+    return this.playerState === "consuming";
   }
 
   get isMoving(): boolean {
@@ -330,6 +351,67 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
     this.showStandFrame();
   }
 
+  /**
+   * Play the drinking / eating animation once as feedback for a successful
+   * food or water interaction (feeding stations, restaurant scraps, bugs,
+   * fountains, water bowls). The animation is directional (east / west
+   * variant chosen from `lastHorizontal`) and plays in place — movement is
+   * frozen for the duration, matching greeting behaviour.
+   *
+   * No-op (returns `false`) while resting, waking, greeting, or already
+   * consuming so rapid-fire Space presses don't restart a half-played beat.
+   *
+   * Returns `true` if the animation started.
+   */
+  startConsuming(): boolean {
+    if (
+      this.playerState === "resting" ||
+      this.playerState === "waking" ||
+      this.playerState === "greeting" ||
+      this.playerState === "consuming"
+    ) {
+      return false;
+    }
+
+    // Consuming reads as "stand and eat/drink" — cancel catloaf/crouch so
+    // the sprite pose matches the drinking sheet's standing frame.
+    if (this.playerState === "catloaf") {
+      this.setScale(NORMAL_SCALE);
+      const body = this.body as Phaser.Physics.Arcade.Body;
+      body.setOffset(BODY_OFFSET_X, BODY_OFFSET_Y);
+    }
+    this.crouchLatched = false;
+    this.crouchKeyDownTime = 0;
+    this.crouchHoldActive = false;
+
+    this.playerState = "consuming";
+    this.setVelocity(0);
+
+    const anim = this.isFacingEast() ? ANIM_DRINK_E : ANIM_DRINK_W;
+    if (!this.scene.anims.exists(anim)) {
+      // Fallback: no drink asset registered; hold a stand frame briefly so
+      // the state machine still returns to normal via stopConsuming().
+      this.showStandFrame();
+      this.scene.time.delayedCall(400, () => this.stopConsuming());
+      return true;
+    }
+
+    this.anims.play(anim, false);
+    this.once(
+      Phaser.Animations.Events.ANIMATION_COMPLETE_KEY + anim,
+      this.stopConsuming,
+      this,
+    );
+    return true;
+  }
+
+  /** End the consuming pose and return to normal. Safe to call multiple times. */
+  stopConsuming(): void {
+    if (this.playerState !== "consuming") return;
+    this.playerState = "normal";
+    this.showStandFrame();
+  }
+
   update(canRun = true, delta = 0): void {
     if (!this.cursors) return;
 
@@ -359,6 +441,15 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
       // Greeting is locked in for the animation duration — movement input is
       // ignored until ANIMATION_COMPLETE fires in stopGreeting(). The anim
       // itself drives the sprite texture; we just hold position.
+      this.setVelocity(0);
+      this.isRunning = false;
+      this.nameLabel.setPosition(this.x, this.y + LABEL_OFFSET_Y);
+      return;
+    }
+
+    if (this.playerState === "consuming") {
+      // Same lock-in contract as greeting — the drink/eat anim owns the
+      // sprite until ANIMATION_COMPLETE fires in stopConsuming().
       this.setVelocity(0);
       this.isRunning = false;
       this.nameLabel.setPosition(this.x, this.y + LABEL_OFFSET_Y);
@@ -629,6 +720,29 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
       key: ANIM_GREET_W,
       frames: scene.anims.generateFrameNumbers(MC_GREET_W, { start: 0, end: 10 }),
       frameRate: GREET_FPS,
+      repeat: 0,
+    });
+
+    // Drinking / eating (6 frames each, plays once per food-source interaction).
+    // Shared by every consumable — water_bowl, fountain, feeding_station,
+    // restaurant_scraps, and bugs — triggered from GameScene after a
+    // successful FoodSourceManager.tryInteract.
+    scene.anims.create({
+      key: ANIM_DRINK_E,
+      frames: scene.anims.generateFrameNumbers(MC_DRINK_E, {
+        start: 0,
+        end: CONSUME_FRAMES - 1,
+      }),
+      frameRate: CONSUME_FPS,
+      repeat: 0,
+    });
+    scene.anims.create({
+      key: ANIM_DRINK_W,
+      frames: scene.anims.generateFrameNumbers(MC_DRINK_W, {
+        start: 0,
+        end: CONSUME_FRAMES - 1,
+      }),
+      frameRate: CONSUME_FPS,
       repeat: 0,
     });
 
