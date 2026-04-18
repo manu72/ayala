@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   handleRequest,
   isOriginAllowed,
@@ -123,5 +123,144 @@ describe("handleRequest", () => {
     });
     const res = await handleRequest(req, {});
     expect(res.status).toBe(500);
+  });
+});
+
+describe("CORS", () => {
+  const ALLOWED = "https://manu72.github.io";
+  const env = { ALLOWED_ORIGINS: ALLOWED };
+
+  it("answers preflight from an allowed origin with 204 + CORS headers", async () => {
+    const req = new Request("https://example.com/api/ai/chat", {
+      method: "OPTIONS",
+      headers: {
+        Origin: ALLOWED,
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "Content-Type",
+      },
+    });
+    const res = await handleRequest(req, env);
+    expect(res.status).toBe(204);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe(ALLOWED);
+    expect(res.headers.get("Access-Control-Allow-Methods")).toBe("POST, OPTIONS");
+    expect(res.headers.get("Access-Control-Allow-Headers")).toBe(
+      "Content-Type, Authorization",
+    );
+    expect(res.headers.get("Access-Control-Max-Age")).toBe("86400");
+    expect(res.headers.get("Vary")).toBe("Origin");
+  });
+
+  it("rejects preflight from a disallowed origin with 403 and no CORS headers", async () => {
+    const req = new Request("https://example.com/api/ai/chat", {
+      method: "OPTIONS",
+      headers: { Origin: "https://evil.test" },
+    });
+    const res = await handleRequest(req, env);
+    expect(res.status).toBe(403);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
+  });
+
+  it("rejects preflight with no Origin header", async () => {
+    const req = new Request("https://example.com/api/ai/chat", {
+      method: "OPTIONS",
+    });
+    const res = await handleRequest(req, env);
+    expect(res.status).toBe(403);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
+  });
+
+  it("returns 405 with Allow + CORS headers for GET from an allowed origin", async () => {
+    const req = new Request("https://example.com/api/ai/chat", {
+      method: "GET",
+      headers: { Origin: ALLOWED },
+    });
+    const res = await handleRequest(req, env);
+    expect(res.status).toBe(405);
+    expect(res.headers.get("Allow")).toBe("POST, OPTIONS");
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe(ALLOWED);
+    expect(res.headers.get("Vary")).toBe("Origin");
+  });
+
+  it("returns 404 with CORS headers for an unknown path from an allowed origin", async () => {
+    const req = new Request("https://example.com/api/unknown", {
+      method: "POST",
+      headers: { Origin: ALLOWED, "Content-Type": "application/json" },
+      body: "{}",
+    });
+    const res = await handleRequest(req, env);
+    expect(res.status).toBe(404);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe(ALLOWED);
+  });
+
+  it("includes CORS headers on 400 invalid-JSON response for an allowed origin", async () => {
+    const req = new Request("https://example.com/api/ai/chat", {
+      method: "POST",
+      headers: { Origin: ALLOWED, "Content-Type": "application/json" },
+      body: "{not json",
+    });
+    const res = await handleRequest(req, env);
+    expect(res.status).toBe(400);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe(ALLOWED);
+    expect(res.headers.get("Vary")).toBe("Origin");
+  });
+
+  it("does not leak CORS headers on 403 for a disallowed origin POST", async () => {
+    const req = new Request("https://example.com/api/ai/chat", {
+      method: "POST",
+      headers: { Origin: "https://evil.test", "Content-Type": "application/json" },
+      body: JSON.stringify({
+        provider: "deepseek",
+        messages: [{ role: "user", content: "hi" }],
+      }),
+    });
+    const res = await handleRequest(req, env);
+    expect(res.status).toBe(403);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
+  });
+});
+
+describe("upstream failure semantics", () => {
+  const ALLOWED = "http://localhost:5173";
+  const env = {
+    ALLOWED_ORIGINS: ALLOWED,
+    DEEPSEEK_API_KEY: "test-key",
+  };
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function buildPost(): Request {
+    return new Request("https://example.com/api/ai/chat", {
+      method: "POST",
+      headers: { Origin: ALLOWED, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        provider: "deepseek",
+        messages: [{ role: "user", content: "hi" }],
+        max_tokens: 16,
+      }),
+    });
+  }
+
+  it("returns 502 when upstream fetch rejects with a non-abort error", async () => {
+    vi.stubGlobal("fetch", () => Promise.reject(new TypeError("fetch failed")));
+    const res = await handleRequest(buildPost(), env);
+    expect(res.status).toBe(502);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe(ALLOWED);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("upstream error");
+  });
+
+  it("returns 504 when the upstream call is aborted (timeout)", async () => {
+    vi.stubGlobal("fetch", () => {
+      const err = new Error("aborted");
+      err.name = "AbortError";
+      return Promise.reject(err);
+    });
+    const res = await handleRequest(buildPost(), env);
+    expect(res.status).toBe(504);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe(ALLOWED);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("upstream timeout");
   });
 });
