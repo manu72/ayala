@@ -999,22 +999,17 @@ export class GameScene extends Phaser.Scene {
 
     // ──── Interact (Space tap) ────
     const spaceJust = this.spaceKey && Phaser.Input.Keyboard.JustDown(this.spaceKey);
-    if (spaceJust && (this.dialogue.isActive || this.playerInputFrozen)) {
-      // Play the happy meow even when the press is absorbed by the outer
-      // gate (dialogue open / player frozen), so every Space tap has audio
-      // feedback and the mute state is consistent across all [interact]
-      // outcomes.
-      this.audio.playMeow();
-      if (import.meta.env.DEV) {
-        // console.log (not .debug) so the diagnostic shows at Chrome's
-        // "Default levels" filter — .debug maps to Verbose which is hidden
-        // by default, making Space-press bugs impossible to self-diagnose.
-        console.log("[interact]", {
-          outcome: "space blocked at outer gate",
-          dialogueActive: this.dialogue.isActive,
-          frozen: this.playerInputFrozen,
-        });
-      }
+    if (spaceJust && (this.dialogue.isActive || this.playerInputFrozen) && import.meta.env.DEV) {
+      // console.log (not .debug) so the diagnostic shows at Chrome's
+      // "Default levels" filter — .debug maps to Verbose which is hidden
+      // by default, making Space-press bugs impossible to self-diagnose.
+      // No meow here: the press was absorbed by an open dialogue / input
+      // freeze, so firing audio feedback would be confusing.
+      console.log("[interact]", {
+        outcome: "space blocked at outer gate",
+        dialogueActive: this.dialogue.isActive,
+        frozen: this.playerInputFrozen,
+      });
     }
     if (spaceJust && !this.dialogue.isActive && !this.playerInputFrozen) {
       const usedSource = this.foodSources.tryInteract(
@@ -3171,11 +3166,6 @@ export class GameScene extends Phaser.Scene {
   // ──────────── NPC Interaction ────────────
 
   private tryInteract(): void {
-    // Every Space press that reaches this handler gets a happy meow, regardless
-    // of outcome (free greet, engage, alert a sleeper). JustDown gating upstream
-    // guarantees this fires exactly once per key press.
-    this.audio.playMeow();
-
     // Greeting locks the player; ignore re-presses until it finishes.
     if (this.player.isGreeting) {
       this.logInteractDiag("skipped: player mid-greeting", null, Infinity, null, Infinity);
@@ -3213,6 +3203,7 @@ export class GameScene extends Phaser.Scene {
       // early here and do NOT double-trigger startGreeting().
       if (this.tryAcceptBeat5Decision()) {
         this.logInteractDiag("consumed by Beat-5 decision", null, Infinity, nearestRawEntry, nearestRawDist);
+        this.audio.playMeow();
         return;
       }
       // No cat in range — space becomes a free Mamma-Cat greeting action.
@@ -3221,16 +3212,40 @@ export class GameScene extends Phaser.Scene {
       // loop in updateHumans() is untouched and still runs independently.
       this.logInteractDiag("free greet (no cat in range)", null, Infinity, nearestRawEntry, nearestRawDist);
       this.player.startGreeting();
+      // Only meow on a free greet if Mamma is actually greeting *someone* —
+      // i.e. a human NPC is within the player-initiated greet range. A free
+      // greet in empty space is silent.
+      if (this.isHumanInGreetRange()) {
+        this.audio.playMeow();
+      }
       return;
     }
     const cat = nearestEntry.cat;
     if (cat.state === "sleeping") {
       this.logInteractDiag("alerted sleeping cat", nearestEntry, nearestDist, nearestRawEntry, nearestRawDist);
       cat.triggerAlert();
+      this.audio.playMeow();
       return;
     }
     this.logInteractDiag("engaging dialogue", nearestEntry, nearestDist, nearestRawEntry, nearestRawDist);
+    this.audio.playMeow();
     this.showCatDialogue(cat);
+  }
+
+  /**
+   * True when at least one visible human NPC is within the player-initiated
+   * greet radius. Used to gate the meow SFX for "free greet (no cat in
+   * range)" — without a target cat AND without a nearby human, the press is
+   * a silent idle greet rather than a social interaction.
+   */
+  private isHumanInGreetRange(): boolean {
+    const range = GP.CAT_PERSON_PLAYER_GREET_DIST;
+    for (const human of this.humans) {
+      if (!human.active || !human.visible) continue;
+      const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, human.x, human.y);
+      if (dist <= range) return true;
+    }
+    return false;
   }
 
   /**
