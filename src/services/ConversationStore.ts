@@ -72,7 +72,7 @@ export async function storeConversation(record: ConversationRecord): Promise<voi
   }
 }
 
-/** Keeps at most `maxKeep` newest records per speaker (by game `timestamp`). */
+/** Keeps at most `maxKeep` newest records per speaker by INSERTION order. */
 export async function pruneConversations(speaker: string, maxKeep = 100): Promise<void> {
   try {
     const db = await openDB();
@@ -85,7 +85,16 @@ export async function pruneConversations(speaker: string, maxKeep = 100): Promis
     });
     db.close();
     if (records.length <= maxKeep) return;
-    const sorted = [...records].sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
+    // Sort by auto-increment `id` (reliable write-order key) rather than game
+    // `timestamp`, which can run backwards relative to insertion — e.g. after
+    // New Game+ the game clock resets to 0 while prior-run records persist in
+    // IDB. Falling back to `timestamp` preserves ordering for any legacy rows
+    // written before the schema assigned ids (shouldn't occur, defensive).
+    const sorted = [...records].sort((a, b) => {
+      const aKey = a.id ?? a.timestamp ?? 0;
+      const bKey = b.id ?? b.timestamp ?? 0;
+      return aKey - bKey;
+    });
     const toDrop = sorted.slice(0, sorted.length - maxKeep).filter((r) => r.id !== undefined);
     const db2 = await openDB();
     const tx2 = db2.transaction(STORE_NAME, "readwrite");

@@ -92,6 +92,35 @@ describe('ConversationStore — IndexedDB happy path', () => {
     expect(await getConversationCount('mamma')).toBe(100)
   })
 
+  it('prune evicts the oldest by write order and keeps the newest record (ascending timestamps)', async () => {
+    for (let i = 0; i < 101; i++) {
+      await storeConversation(buildRecord({ speaker: 'mamma', timestamp: i, lines: [`L${i}`] }))
+    }
+    expect(await getConversationCount('mamma')).toBe(100)
+    const all = await getRecentConversations('mamma', 1000)
+    const lines = all.map((r) => r.lines[0])
+    expect(lines).not.toContain('L0')
+    expect(lines).toContain('L100')
+  })
+
+  // Adversarial: simulate a save-based scenario where game-clock `timestamp`
+  // does NOT reflect write order (e.g. New Game+ resets gameTimeMs to 0 while
+  // prior-run conversations with much higher timestamps still live in IDB).
+  // Pruning by game-clock here would evict the NEWEST records; pruning by
+  // insertion order (auto-increment `id`) must still drop the oldest writes.
+  it('prune evicts the oldest WRITTEN record even when game-clock timestamps go backwards', async () => {
+    await storeConversation(buildRecord({ speaker: 'mamma', timestamp: 10_000, lines: ['OLD_FROM_PRIOR_RUN'] }))
+    for (let i = 0; i < 100; i++) {
+      await storeConversation(buildRecord({ speaker: 'mamma', timestamp: i, lines: [`NEW_${i}`] }))
+    }
+    expect(await getConversationCount('mamma')).toBe(100)
+    const all = await getRecentConversations('mamma', 1000)
+    const lines = all.map((r) => r.lines[0])
+    expect(lines).not.toContain('OLD_FROM_PRIOR_RUN')
+    expect(lines).toContain('NEW_0')
+    expect(lines).toContain('NEW_99')
+  })
+
   it('getRecentConversations returns [] for an unknown speaker', async () => {
     await storeConversation(buildRecord({ speaker: 'mamma' }))
     expect(await getRecentConversations('nobody')).toEqual([])

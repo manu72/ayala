@@ -37,19 +37,35 @@ interface ChatRequestBody {
   max_tokens?: number;
 }
 
+/**
+ * Normalize a single origin string for comparison:
+ *   - trim surrounding whitespace
+ *   - strip a single trailing slash
+ *   - lowercase (Origin scheme + host are case-insensitive per RFC 6454)
+ *
+ * Browsers already send canonical Origin headers, but operators edit
+ * `ALLOWED_ORIGINS` by hand and casing/trailing-slash typos are a common
+ * foot-gun that otherwise produces a silent 403 forbidden-origin.
+ */
+function normalizeOrigin(raw: string): string {
+  const trimmed = raw.trim();
+  const noTrailingSlash = trimmed.endsWith("/") ? trimmed.slice(0, -1) : trimmed;
+  return noTrailingSlash.toLowerCase();
+}
+
 export function parseAllowedOrigins(raw: string | undefined): string[] {
   if (!raw || raw.trim() === "") {
     return ["http://localhost:5173", "http://127.0.0.1:5173"];
   }
   return raw
     .split(",")
-    .map((s) => s.trim())
+    .map(normalizeOrigin)
     .filter(Boolean);
 }
 
 export function isOriginAllowed(origin: string | null, allowed: string[]): boolean {
   if (!origin) return false;
-  return allowed.includes(origin);
+  return allowed.includes(normalizeOrigin(origin));
 }
 
 export function validateChatBody(body: unknown):

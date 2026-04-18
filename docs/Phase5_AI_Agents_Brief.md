@@ -158,7 +158,7 @@ class AIDialogueService implements DialogueService {
 ### Model configuration
 
 Primary: **Deepseek deepseek-chat** via chat completions API https://api-docs.deepseek.com/api/create-chat-completion
-Fallback: **OpenAI gpt-4.1-mini** cheap, fast, non-reasoning, high quality using Responses API https://developers.openai.com/api/docs/guides/text
+Fallback: **OpenAI gpt-4.1-mini** cheap, fast, non-reasoning, high quality using the Chat Completions API https://platform.openai.com/docs/api-reference/chat (not the newer Responses API — the proxy speaks a single `messages`/`max_tokens` schema to both providers so the client stays provider-agnostic)
 Additional: **Inception Labs mercury-2** super fast diffusion model https://docs.inceptionlabs.ai/capabilities/chat-completions
 
 **Provider API keys MUST NOT be shipped in the client bundle.** The game builds to static files (see DoD), so any `VITE_`-prefixed variable is inlined verbatim into the JavaScript served to the browser and is trivially extractable by anyone viewing the page source. A leaked provider key means metered-API abuse billed to the project owner.

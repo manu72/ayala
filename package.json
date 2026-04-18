@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:proxy": "cd proxy && npx wrangler dev",
-    "deploy:proxy": "cd proxy && npx wrangler deploy",
+    "dev:proxy": "npm --prefix proxy run dev",
+    "deploy:proxy": "npm --prefix proxy run deploy",
     "build": "tsc && vite build",
     "verify:dist": "node scripts/check-dist-leaks.mjs",
     "preview": "vite preview",

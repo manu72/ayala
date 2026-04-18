@@ -215,6 +215,70 @@ describe("AIDialogueService.getDialogue", () => {
     expect(bodies[1]!.provider).toBe("openai");
   });
 
+  // Regression: a pure network error (DNS, TLS, connection refused) on the
+  // primary provider used to propagate straight past the secondary-provider
+  // retry. The documented provider-failover contract should cover this too —
+  // the secondary provider uses a different upstream host so it may well work.
+  it("retries secondary provider when primary fetch rejects with a network error", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError("fetch failed"))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            choices: [
+              { message: { content: '{"lines":["Retry ok"],"speakerPose":"friendly","emote":"heart"}' } },
+            ],
+          }),
+          { status: 200 },
+        ),
+      );
+    const svc = new AIDialogueService({
+      proxyUrl: "/api/ai/chat",
+      personas: { Blacky: "# x" },
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      primaryProvider: "deepseek",
+      secondaryProvider: "openai",
+    });
+    const req = baseReq();
+    req.conversationHistory = [];
+    req.gameState.trustWithSpeaker = 0;
+    const out = await svc.getDialogue(req);
+    expect(out.lines).toEqual(["Retry ok"]);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    const bodies = fetchImpl.mock.calls.map((c) => JSON.parse(c[1]!.body as string));
+    expect(bodies[0]!.provider).toBe("deepseek");
+    expect(bodies[1]!.provider).toBe("openai");
+  });
+
+  // External aborts are caller intent ("stop now"). We must NOT burn the
+  // secondary provider on them — the caller either walked away from the NPC
+  // or set a tight budget that's already elapsed.
+  it("does not retry secondary when the external caller aborts the request", async () => {
+    const fetchImpl = vi.fn().mockImplementation((_url, init: RequestInit) => {
+      return new Promise((_resolve, reject) => {
+        init.signal?.addEventListener("abort", () => {
+          reject(new DOMException("aborted", "AbortError"));
+        });
+      });
+    });
+    const svc = new AIDialogueService({
+      proxyUrl: "/api/ai/chat",
+      personas: { Blacky: "# x" },
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      primaryProvider: "deepseek",
+      secondaryProvider: "openai",
+    });
+    const req = baseReq();
+    req.conversationHistory = [];
+    req.gameState.trustWithSpeaker = 0;
+    const controller = new AbortController();
+    const p = svc.getDialogue(req, { signal: controller.signal });
+    controller.abort();
+    await expect(p).rejects.toThrow();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   // Regression: a bad DEEPSEEK_API_KEY makes the proxy forward the upstream
   // 401 verbatim. The documented provider-retry contract (README "Provider
   // retry" step) requires that this failover to the secondary provider, not

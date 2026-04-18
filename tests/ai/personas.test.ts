@@ -27,6 +27,15 @@ describe("AI_PERSONAS", () => {
     }
   });
 
+  // Guard against drift in both directions: a missing key (added to registry
+  // but not the test) AND a leftover key (persona removed from the game but
+  // still imported). Set-equality is the cheap way to detect either.
+  it("exposes exactly the expected set of persona keys (no missing, no extras)", () => {
+    const actual = new Set(Object.keys(AI_PERSONAS));
+    const expected = new Set<string>([...CAT_KEYS, ...HUMAN_KEYS]);
+    expect(actual).toEqual(expected);
+  });
+
   it("exposes the cat-only alias for backward compatibility", () => {
     expect(CAT_PERSONAS).toBe(AI_PERSONAS);
   });

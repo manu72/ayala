@@ -468,10 +468,11 @@ ayala/
 │   └── tilesets/
 │       └── park-tiles.png              #   40-tile textured tileset (generated)
 │
-├── scripts/                             # Dev-time asset generators (Node.js)
+├── scripts/                             # Dev-time asset generators + CI helpers (Node.js)
 │   ├── generate-tileset.mjs            #   Generates park-tiles.png + tile-indices.json
 │   ├── generate-map.mjs               #   Generates atg.json from tile indices
-│   └── tile-indices.json               #   Named tile ID map (generated output)
+│   ├── tile-indices.json               #   Named tile ID map (generated output)
+│   └── check-dist-leaks.mjs            #   CI: fail if secret-like patterns in dist/
 │
 ├── src/                                 # Game source (TypeScript)
 │   ├── main.ts                         #   Entry point -- creates Phaser.Game
@@ -529,8 +530,6 @@ ayala/
 │   ├── tests/worker.test.ts            #   Vitest suite (npm run test:proxy)
 │   ├── wrangler.toml                   #   Worker config
 │   └── .dev.vars.example               #   Copy to .dev.vars (gitignored) with real keys
-├── scripts/
-│   └── check-dist-leaks.mjs            #   CI: fail if secret-like patterns in dist/
 ├── index.html                           # Vite entry page
 ├── package.json                         # npm manifest
 ├── tsconfig.json                        # TypeScript config (strict)

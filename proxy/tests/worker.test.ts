@@ -17,6 +17,13 @@ describe("parseAllowedOrigins", () => {
       "https://b.test",
     ]);
   });
+
+  it("normalizes trailing slash and casing (operator-typo tolerance)", () => {
+    expect(parseAllowedOrigins("HTTPS://Example.com/, https://b.TEST ")).toEqual([
+      "https://example.com",
+      "https://b.test",
+    ]);
+  });
 });
 
 describe("isOriginAllowed", () => {
@@ -27,6 +34,12 @@ describe("isOriginAllowed", () => {
 
   it("rejects missing origin", () => {
     expect(isOriginAllowed(null, ["http://localhost:5173"])).toBe(false);
+  });
+
+  it("matches regardless of trailing slash or case differences between config and header", () => {
+    const allowed = parseAllowedOrigins("https://Example.com/");
+    expect(isOriginAllowed("https://example.com", allowed)).toBe(true);
+    expect(isOriginAllowed("https://EXAMPLE.com/", allowed)).toBe(true);
   });
 });
 

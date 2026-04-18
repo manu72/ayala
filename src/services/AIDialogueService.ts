@@ -109,7 +109,21 @@ export class AIDialogueService implements DialogueService {
       max_tokens: 150,
     };
 
-    let res = await this.postProvider(this.primaryProvider, payloadBase, callOpts);
+    // Primary → secondary failover covers two distinct failure modes:
+    //  1. Primary resolved with a retriable HTTP status (5xx / 429 / 401) — see
+    //     `shouldRetryWithFallback`.
+    //  2. Primary rejected with a non-abort error (DNS, TLS, connection
+    //     refused, etc.) — the different upstream host behind the secondary
+    //     provider may still be reachable.
+    // Abort errors (internal timeout OR external caller signal) are preserved
+    // as caller intent and propagate without burning the secondary provider.
+    let res: Response;
+    try {
+      res = await this.postProvider(this.primaryProvider, payloadBase, callOpts);
+    } catch (err) {
+      if (isAbortError(err)) throw err;
+      res = await this.postProvider(this.secondaryProvider, payloadBase, callOpts);
+    }
     if (shouldRetryWithFallback(res.status)) {
       res = await this.postProvider(this.secondaryProvider, payloadBase, callOpts);
     }
@@ -156,6 +170,11 @@ export class AIDialogueService implements DialogueService {
       }
     }
   }
+}
+
+function isAbortError(err: unknown): boolean {
+  if (err instanceof DOMException && err.name === "AbortError") return true;
+  return err instanceof Error && err.name === "AbortError";
 }
 
 function shouldRetryWithFallback(status: number): boolean {
