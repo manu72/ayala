@@ -2,7 +2,7 @@
 
 > Persistent memory layer for AI-assisted development sessions.
 > Last Updated: 2026-04-18
-> Version: 0.3.1
+> Version: 0.3.3
 
 ---
 
@@ -202,6 +202,14 @@ SmallDog.png, WhiteDog.png, BrownDog.png — randomly assigned to dog walkers
 
 - **Never put API keys in `VITE_*` env vars.** Vite inlines every `VITE_`-prefixed variable into the client bundle, and the game ships as static files — anything `VITE_*` is readable from the page source. For any third-party API (LLM providers, analytics with secret tokens, etc.), route calls through a same-origin server-side proxy that holds the key. Non-secret config (provider name, proxy URL, feature flags) may stay `VITE_*`. Also verify `.gitignore` covers `.env` / `.env.*.local` before creating any env file — the repo's historical `.gitignore` omitted them.
 
+### Proxy — CORS preflight + gateway status semantics (Cloudflare Worker)
+
+- **OPTIONS is a method, not a bypass.** The proxy lives at `proxy/src/worker.ts` and is served cross-origin to `https://manu72.github.io`. The browser will emit a **preflight** `OPTIONS /api/ai/chat` before any real `POST` with a non-simple header (`Content-Type: application/json` counts). If the worker returns anything other than 2xx with the right `Access-Control-Allow-*` headers, the whole POST is blocked and DevTools surfaces only an opaque CORS failure — the POST never reaches the server. Must-haves on an allowed-origin preflight: status 204, `Access-Control-Allow-Origin: <exact echoed Origin>` (never `*`), `Access-Control-Allow-Methods: POST, OPTIONS`, `Access-Control-Allow-Headers: Content-Type, Authorization`, `Access-Control-Max-Age: 86400`, `Vary: Origin`.
+- **Attach CORS headers to every same-origin response — including error responses — and omit them entirely for disallowed origins.** If the origin is allow-listed, `400` / `404` / `405` / `500` / `502` / `504` all need `Access-Control-Allow-Origin` + `Vary: Origin` so the browser surfaces the real status. If the origin is not allow-listed, return a bare `403` with no CORS headers — do not reflect the origin, do not wildcard. This is a deliberate security/UX split: visible failures for trusted callers, opaque failures for untrusted ones. `Vary: Origin` is mandatory so caches don't serve one origin's allow-headers to a different origin. `Access-Control-Allow-Headers` is a fixed allow-list; do NOT reflect arbitrary `Access-Control-Request-Headers` unless there's a concrete need — it erodes the allow-list.
+- **`wrangler.toml` `[vars]` are not inherited, they're written.** An allow-listed origin that works locally via `.dev.vars` will silently 403 in prod if `ALLOWED_ORIGINS` was left commented out in `wrangler.toml` — `parseAllowedOrigins` falls back to the Vite dev defaults (`localhost:5173` / `127.0.0.1:5173`), and `https://manu72.github.io` is no longer in the set. Uncomment the `[vars]` block with the production origins before deploy; `ALLOWED_ORIGINS` is not sensitive and belongs in version control. API keys stay as secrets via `npx wrangler secret put`.
+- **502 vs 504 gateway semantics.** `AbortError` from our own `AbortController` timeout → 504 Gateway Timeout. Any other `fetch()` rejection (DNS, TLS, connection refused, TCP reset) → 502 Bad Gateway. Returning 504 for a refused connection wastes debugging time by pointing at "upstream is slow" when the upstream is actually down. Only classify as 504 when we *know* we timed out — which in this code means `e.name === "AbortError"` on the catch, because the only `AbortController` wired into the outbound `fetch` is the internal timeout controller (no client abort signal is plumbed through). The body strings (`"upstream timeout"` / `"upstream error"`) are stable and part of any log-greps — don't rename them.
+- **Deploy smoke test.** Run six curl probes against the deployed URL after each proxy deploy: preflight from allowed origin (expect 204 + full CORS header set), preflight from disallowed origin (expect 403 no CORS), GET from allowed origin (expect 405 + `Allow: POST, OPTIONS` + CORS), 404 on an unknown path (with CORS for allow-listed callers), 400 on malformed JSON (with CORS), real POST (expect 200 + upstream JSON + CORS). Browser verification: the DevTools Network panel must show **two** entries per interaction (OPTIONS 204 then POST 200); if the OPTIONS row is missing it means a previously-successful preflight is cached for up to 24h (`Max-Age: 86400`) — hard reload or disable cache to retest.
+
 ### Feeder Waypoint Behavior
 
 - Feeders use dynamic paths built from tilemap POIs (`poi_feeding_station_1`, `poi_feeding_station_2`) via `buildFeederConfigs()`. Paths are: entry -> station -> exit.
@@ -333,7 +341,17 @@ SmallDog.png, WhiteDog.png, BrownDog.png — randomly assigned to dog walkers
 
 ---
 
-## Recent Features (v0.2.0 - v0.3.2)
+## Recent Features (v0.2.0 - v0.3.3)
+
+### v0.3.3 — Proxy production deploy + CORS preflight + gateway semantics
+
+- Cloudflare Worker (`proxy/src/worker.ts`) deployed to `https://ayala-ai-proxy.ayalacats.workers.dev`. `wrangler.toml` `[vars]` block uncommented with production `ALLOWED_ORIGINS` (`https://manu72.github.io` + Vite dev origins). API keys remain as wrangler secrets.
+- Added explicit `OPTIONS` preflight branch: 204 + `Access-Control-Allow-Origin` (exact echo of `Origin`, no wildcard) + `Access-Control-Allow-Methods: POST, OPTIONS` + `Access-Control-Allow-Headers: Content-Type, Authorization` + `Access-Control-Max-Age: 86400` + `Vary: Origin` for allow-listed origins; bare 403 with no CORS headers for everyone else. Previously `OPTIONS` returned 405, blocking every browser POST from GitHub Pages.
+- Every allow-listed-origin response path (200 / 400 / 404 / 405 / 500 / 502 / 504) now carries the CORS header set so errors are visible in DevTools instead of masquerading as opaque CORS failures. 405 on non-POST methods also includes `Allow: POST, OPTIONS` for RFC 9110 correctness. Disallowed origins still get strict bare responses.
+- `forwardChat` catch block now returns **502 Bad Gateway** for network/DNS/TLS failures and **504 Gateway Timeout** only when the internal `AbortController` fires. Disambiguates "upstream down" from "upstream slow" in production logs.
+- Test coverage raised from 13 → 22 worker tests: preflight allow/deny/no-origin, 405 on GET, 404 on unknown path, 400 with CORS headers, disallowed-origin 403 with no CORS leak, plus regression tests for the 502/504 split via `vi.stubGlobal("fetch", …)`. `npx tsc --noEmit` clean.
+- Music and ambient sound assets added under `public/assets/sounds/` (luminous rain ambient loop, snatcher "stay the course" loop, meow variants, cat growl warning). Phase 5b audio wiring still pending.
+- See the new "Proxy — CORS preflight + gateway status semantics" lesson for the full contract.
 
 ### v0.3.2 — Beat-5 player-consent decision gate + stationary greeting cap
 

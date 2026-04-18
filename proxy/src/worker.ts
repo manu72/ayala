@@ -240,8 +240,9 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   // Non-null assertion is safe: isOriginAllowed returns false when origin is null.
   const cors = originAllowed ? corsHeaders(origin as string) : null;
 
-  // 1) CORS preflight. Must be answered before any routing so browsers can
-  //    complete their preflight cache even for not-yet-existent sub-paths.
+  // 1) CORS preflight. Must be answered before any other check so browsers
+  //    can complete their preflight cache; preflight has its own strict
+  //    origin gate.
   if (request.method === "OPTIONS") {
     if (!cors) {
       return new Response(null, { status: 403 });
@@ -249,24 +250,28 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     return new Response(null, { status: 204, headers: cors });
   }
 
-  // 2) Route: only /api/ai/chat is served. Everything else is 404.
-  //    `endsWith` keeps parity with the original behaviour (accounts for
-  //    deployments behind a path-stripping proxy).
-  if (!url.pathname.endsWith(CHAT_PATH)) {
+  // 2) Origin is the primary security boundary for non-preflight requests.
+  //    Reject disallowed origins (and any request without an Origin header)
+  //    with a bare 403 before any routing or method inspection — they must
+  //    not learn which paths exist or which methods are allowed.
+  if (!cors) {
+    return jsonResponse({ error: "forbidden origin" }, 403, null);
+  }
+
+  // 3) Route: only the exact chat path is served. `endsWith` would admit
+  //    arbitrary prefixes (`/foo/api/ai/chat`); we want a single canonical
+  //    endpoint.
+  if (url.pathname !== CHAT_PATH) {
     return jsonResponse({ error: "not found" }, 404, cors);
   }
 
-  // 3) Method gate: preflight handled above, POST below, nothing else.
+  // 4) Method gate: preflight handled above, POST below, nothing else.
+  //    Reached only by allow-listed origins, so CORS headers + Allow are
+  //    both emitted.
   if (request.method !== "POST") {
     return jsonResponse({ error: "method not allowed" }, 405, cors, {
       Allow: ALLOWED_METHODS,
     });
-  }
-
-  // 4) Origin check for the actual request. Disallowed origins get a bare
-  //    403 with no CORS headers (strict, per spec).
-  if (!cors) {
-    return jsonResponse({ error: "forbidden origin" }, 403, null);
   }
 
   // 5) JSON body.

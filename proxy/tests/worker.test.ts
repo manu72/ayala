@@ -217,6 +217,39 @@ describe("CORS", () => {
     expect(res.status).toBe(403);
     expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
   });
+
+  it("returns 403 (not 405) for a disallowed origin GET — origin gates before method", async () => {
+    const req = new Request("https://example.com/api/ai/chat", {
+      method: "GET",
+      headers: { Origin: "https://evil.test" },
+    });
+    const res = await handleRequest(req, env);
+    expect(res.status).toBe(403);
+    expect(res.headers.get("Allow")).toBeNull();
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
+  });
+
+  it("returns 403 (not 404) for a disallowed origin on an unknown path — origin gates before routing", async () => {
+    const req = new Request("https://example.com/api/anything", {
+      method: "POST",
+      headers: { Origin: "https://evil.test", "Content-Type": "application/json" },
+      body: "{}",
+    });
+    const res = await handleRequest(req, env);
+    expect(res.status).toBe(403);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
+  });
+
+  it("rejects prefix-matched paths (exact route match only)", async () => {
+    const req = new Request("https://example.com/foo/api/ai/chat", {
+      method: "POST",
+      headers: { Origin: ALLOWED, "Content-Type": "application/json" },
+      body: "{}",
+    });
+    const res = await handleRequest(req, env);
+    expect(res.status).toBe(404);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe(ALLOWED);
+  });
 });
 
 describe("upstream failure semantics", () => {
