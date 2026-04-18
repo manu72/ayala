@@ -174,6 +174,100 @@ Set secrets via the Cloudflare dashboard or `wrangler secret put DEEPSEEK_API_KE
 
 Bind the Worker to the **same hostname** as your static site so the browser calls `/api/ai/chat` same-origin, or configure a route like `yourdomain.com/api/*` → this Worker. After each production build, run `npm run verify:dist` to confirm no secret patterns leaked into `dist/`.
 
+## AI Prompts & Cat Personalities
+
+The system prompt is **assembled per request** — it's not a static string. The persona files are the single source of truth for character; everything else (scene facts, output contract) is injected in code so the contract stays consistent across cats.
+
+### Where things live
+
+| Concern | File | Notes |
+| --- | --- | --- |
+| Prompt assembly (`buildSystemPrompt`, `buildMessages`) | [src/services/AIDialogueService.ts](src/services/AIDialogueService.ts) | One prompt per `getDialogue()` call; `max_tokens` 150 |
+| Cat persona markdown (one file per cat) | [src/ai/personas/*.md](src/ai/personas/) | Source of truth for character — edit these to change voice |
+| Persona → speaker map | [src/ai/personas/index.ts](src/ai/personas/index.ts) | `CAT_PERSONAS`, imported via `?raw` and keyed by exact `NPCCat.npcName` |
+| Scripted anchors (trust, story flags) | [src/data/cat-dialogue.ts](src/data/cat-dialogue.ts) | Authoritative `trustChange` + `event` — AI never controls these |
+
+### System prompt structure
+
+`buildSystemPrompt(personaMarkdown, request)` concatenates three blocks, in this order, every call:
+
+1. **`## Current scene`** — live facts from `DialogueRequest.gameState`: speaker, target, chapter, time of day, `trustWithSpeaker`, `trustGlobal`, Mamma Cat's hunger / thirst / energy, days survived, known cats. This block is **rebuilt on every turn** so the cat always reasons about current state.
+2. **`## Your persona`** — the full markdown for that speaker, inserted verbatim (trimmed) from `CAT_PERSONAS[request.speaker]`.
+3. **`## Output format`** — the JSON contract (`lines`, `speakerPose`, `emote`, optional `narration`), the cat-speak reminder, and a one-line example.
+
+Prior conversation turns are **not** in the system prompt. They go in as alternating `user` / `assistant` chat messages via `buildMessages()`, capped at the **last 20 turns** pulled from `ConversationStore` (IndexedDB, pruned to 100 per cat).
+
+Per-request knobs live next to `getDialogue()`:
+
+- `temperature`: `0.6` for speakers in `HARSHER_TEMP_SPEAKERS` (tighter, colder), `0.8` for the rest.
+- `max_tokens`: `150` — keeps responses short and cheap.
+- 8-second client-side `AbortController` timeout; on 429/5xx the service retries once against the fallback provider before surfacing the error to `FallbackDialogueService`.
+
+### What the persona markdown controls (and what it doesn't)
+
+The persona drives **voice and behaviour only**. Game-state progression stays deterministic.
+
+| Controlled by persona markdown | Controlled by `cat-dialogue.ts` (scripted) |
+| --- | --- |
+| `lines` — what the cat actually says | `trustChange` — trust deltas applied to the speaker and colony |
+| `speakerPose` — friendly / wary / hostile / sleeping / curious / submissive | `event` — story flags, chapter progression, Camille triggers, etc. |
+| `emote` — heart / alert / curious / sleep / hostile / danger | (falls back to provide `speakerPose`, `emote`, `narration` if AI omits them) |
+| `narration` — optional body-language line | — |
+
+This split is enforced in `AIDialogueService.getDialogue()`: the AI JSON is parsed, then `trustChange` and `event` are always pulled from `matchScriptedResponse(request)`. An AI hallucinating a big trust jump or story flag cannot break the game.
+
+### Persona markdown format
+
+Every persona follows the same seven-section structure so prompts stay comparable:
+
+```markdown
+# <Cat Name>
+
+## Identity
+- Species, age, appearance (one-line bullets)
+
+## Backstory
+Short paragraph — what do they remember, where do they usually sit
+
+## Personality
+- 3 bullets, behaviour-led (not adjectives alone)
+
+## Speech Style
+- Cat-speak examples ("Mrrp", "Prrp"), length rules
+- "Never long human monologues" or similar constraint
+
+## Knowledge
+- What they know about the park, humans, threats, the colony
+
+## Relationship to Mamma Cat
+- How they treat her at low vs high trust
+
+## Rules of Engagement
+- When to approach / retreat
+- What warms them, what cools them
+```
+
+See [src/ai/personas/blacky.md](src/ai/personas/blacky.md) as the canonical example.
+
+### Editing or adding a cat
+
+**Editing an existing cat's voice.** Edit the `.md` file. No code change, no rebuild config. Vite hot-reloads the raw import and the next conversation turn uses the updated markdown — previous turns in the history still reflect the old voice (they're replayed from IndexedDB).
+
+**Adding a new AI-backed cat.**
+
+1. Create `src/ai/personas/<slug>.md` using the seven-section format above.
+2. Register it in [src/ai/personas/index.ts](src/ai/personas/index.ts) with the `?raw` import, keyed by the **exact** `NPCCat.npcName` set in [GameScene.ts](src/scenes/GameScene.ts). A mismatch throws `No AI persona loaded for speaker: <name>` and the service falls back to scripted dialogue.
+3. Add the expected key to [tests/ai/personas.test.ts](tests/ai/personas.test.ts) so the persona file is guaranteed to load with non-trivial content.
+4. If the cat should read as colder or more clipped, add the name to `HARSHER_TEMP_SPEAKERS` in [AIDialogueService.ts](src/services/AIDialogueService.ts) to drop their temperature to `0.6`.
+5. Add scripted anchor entries to [src/data/cat-dialogue.ts](src/data/cat-dialogue.ts) for any trust deltas or story events this cat should drive — AI alone cannot create them.
+
+### Tuning tips
+
+- **Too rambly?** Reinforce the "one sentence per line, two at most" rule in the persona's `Speech Style`. `max_tokens=150` is already a hard ceiling.
+- **Out of character?** Tighten `Personality` and `Rules of Engagement` with concrete do/don't bullets; persona markdown is prompt-weight, so specific beats abstract.
+- **Ignoring the scene?** The `## Current scene` block already surfaces chapter / trust / stats; if you want the cat to react to more, extend `DialogueRequest.gameState` in [DialogueService.ts](src/services/DialogueService.ts) and add a line to `buildSystemPrompt`.
+- **Breaking JSON?** `parseAIJson` strips markdown fences and validates enums; on parse failure `FallbackDialogueService` delivers the scripted line instead, so a malformed reply degrades gracefully rather than crashing.
+
 ## Local Development & Testing
 
 The repo ships two npm projects — the game (root) and the Worker (`proxy/`). Tests and dev servers for each are separate.
