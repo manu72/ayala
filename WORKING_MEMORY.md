@@ -83,7 +83,7 @@ BootScene -> StartScene -> GameScene + HUDScene (overlay) + JournalScene (overla
 | ---------------------- | -------------------------------------------------------------------------- |
 | `DialogueService.ts`   | Centralized dialogue interface; `ScriptedDialogueService` + `AIDialogueService` + `FallbackDialogueService` |
 | `ConversationStore.ts` | IndexedDB persistence; prune at 100/cat; snapshots for AI context            |
-| `proxy/` (Worker)      | Same-origin `POST /api/ai/chat` — Deepseek/OpenAI keys server-side only     |
+| `proxy/` (Worker)      | `POST /api/ai/chat` — Deepseek/OpenAI keys server-side only. Same-origin in dev (Vite proxy) and on hosts that route `/api/*` to the Worker; cross-origin on GitHub Pages (`.env.production` points at the absolute workers.dev URL). |
 | `src/ai/personas/`     | Markdown personas (`?raw` imports) for system prompts                         |
 
 ### Data
@@ -250,7 +250,8 @@ SmallDog.png, WhiteDog.png, BrownDog.png — randomly assigned to dog walkers
 
 ### Phase 5 — AI dialogue (named cats only)
 
-- **No client secrets:** `VITE_AI_PROXY_URL` is a path only (e.g. `/api/ai/chat`). Provider keys live in the Cloudflare Worker (`proxy/`) or `proxy/.dev.vars` locally — never in `VITE_*` or `dist/`. CI runs `npm run verify:dist` after build to grep common leak patterns.
+- **No client secrets:** `VITE_AI_PROXY_URL` is a URL (same-origin path in dev / Pages-routed hosts; absolute workers.dev URL in GitHub Pages builds via `.env.production`). Provider keys live in the Cloudflare Worker (`proxy/`) or `proxy/.dev.vars` locally — never in `VITE_*` or `dist/`. CI runs `npm run verify:dist` after build to grep common leak patterns.
+- **GitHub Pages cannot do path-level routing to a Worker.** Historical docs claimed the client "uses the same relative URL in dev and prod." That only holds when the static host can route `/api/*` (Cloudflare Pages, or a zone with a Worker route) — on `*.github.io` a relative `/api/ai/chat` resolves to `https://<you>.github.io/<repo>/api/ai/chat` and GitHub serves its own 404 HTML. The client's `await res.json()` then throws on the HTML body, `FallbackDialogueService` swallows the error, and every engagement silently drops to scripted dialogue. Fix is a committed `.env.production` with `VITE_AI_PROXY_URL` set to the absolute `https://<name>.workers.dev/api/ai/chat`; the Worker already CORS-allow-lists `https://manu72.github.io`. `AIDialogueService.callLLMWithFallback` now logs a distinct `[AIDialogueService] Proxy returned HTML (...)` warning when the response body is HTML, so future misrouting is loud instead of being absorbed by the generic AI-failure log.
 - **Authoritative events:** `AIDialogueService` generates lines/narration/emote/pose from the LLM but **`event` is always derived from the same scripted condition match** as `ScriptedDialogueService` (`CAT_DIALOGUE_SCRIPTS`) so story flags and trust awards stay deterministic.
 - **Fallback chain:** Provider retry (Deepseek → OpenAI) inside `AIDialogueService`; if parsing or network fails entirely, `FallbackDialogueService` uses full scripted dialogue.
 - **Personas:** Markdown in `src/ai/personas/*.md`, bundled with `?raw`; map keys must match `npcName` strings in `GameScene` / `AI_PERSONAS`.

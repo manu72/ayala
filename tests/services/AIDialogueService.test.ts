@@ -215,6 +215,35 @@ describe("AIDialogueService.getDialogue", () => {
     expect(bodies[1]!.provider).toBe("openai");
   });
 
+  // Regression: on GitHub Pages, a mis-set `VITE_AI_PROXY_URL` means the POST
+  // never reaches the Worker and the static host serves its own 404 HTML page
+  // instead. The generic `AI failed; using scripted fallback` log line hid the
+  // true cause for weeks. `callLLMWithFallback` now emits a distinct warning
+  // whenever the proxy responds with an HTML body so ops can spot the misroute
+  // immediately. See README § AI Dialogue Proxy (hosting shapes A/B).
+  it("logs a distinct warning when the proxy returns an HTML body (misrouted URL)", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const htmlBody = "<!DOCTYPE html><html><head><title>404</title></head></html>";
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(htmlBody, {
+          status: 404,
+          headers: { "Content-Type": "text/html; charset=utf-8" },
+        }),
+      );
+    const svc = new AIDialogueService({
+      proxyUrl: "/api/ai/chat",
+      personas: { Blacky: "# x" },
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    await expect(svc.getDialogue(baseReq())).rejects.toThrow(/AI proxy error 404/);
+    const joined = warn.mock.calls.map((c) => c.join(" ")).join("\n");
+    expect(joined).toMatch(/\[AIDialogueService\] Proxy returned HTML/);
+    expect(joined).toMatch(/VITE_AI_PROXY_URL is likely misrouted/);
+    warn.mockRestore();
+  });
+
   // Regression: a pure network error (DNS, TLS, connection refused) on the
   // primary provider used to propagate straight past the secondary-provider
   // retry. The documented provider-failover contract should cover this too —

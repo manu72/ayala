@@ -146,7 +146,9 @@ Serves the `dist/` folder locally to verify the production build before deployin
 
 ## AI Dialogue Proxy
 
-Named colony cats use LLM-backed dialogue when a same-origin proxy is configured. The proxy (`proxy/`, a Cloudflare Worker) forwards `POST /api/ai/chat` to Deepseek (primary) or OpenAI (fallback) using **server-held API keys only** — no secret ever ships to the browser. Scripted dialogue (`src/data/cat-dialogue.ts`) remains the automatic fallback if the proxy is unreachable or the model returns malformed output.
+Named colony cats use LLM-backed dialogue when a proxy URL is configured. The proxy (`proxy/`, a Cloudflare Worker) forwards `POST /api/ai/chat` to Deepseek (primary) or OpenAI (fallback) using **server-held API keys only** — no secret ever ships to the browser. Scripted dialogue (`src/data/cat-dialogue.ts`) remains the automatic fallback if the proxy is unreachable or the model returns malformed output.
+
+The client reads `VITE_AI_PROXY_URL` at build time. In dev it is a relative path (`/api/ai/chat`) proxied by Vite to `wrangler dev` — effectively same-origin. In production the value depends on how the static site is hosted: on Cloudflare Pages (or any zone that routes `/api/*` → this Worker) it can stay relative; on GitHub Pages it must be the absolute Worker URL, because `*.github.io` cannot route a path to a Worker.
 
 ### One-time setup
 
@@ -175,7 +177,13 @@ npx wrangler deploy
 
 Set secrets via the Cloudflare dashboard or `wrangler secret put DEEPSEEK_API_KEY` / `wrangler secret put OPENAI_API_KEY`. Set `ALLOWED_ORIGINS` to the exact `Origin` values the browser will send (e.g. `https://yourname.github.io` for GitHub Pages) — anything else gets a 403.
 
-Bind the Worker to the **same hostname** as your static site so the browser calls `/api/ai/chat` same-origin, or configure a route like `yourdomain.com/api/*` → this Worker. After each production build, run `npm run verify:dist` to confirm no secret patterns leaked into `dist/`.
+Pick one of the two hosting shapes below and configure `VITE_AI_PROXY_URL` accordingly. After each production build, run `npm run verify:dist` to confirm no secret patterns leaked into `dist/`.
+
+**Hosting shape A — true same-origin (Cloudflare Pages / own domain).** Bind the Worker to the same hostname as the static site, or add a route like `yourdomain.com/api/*` → this Worker. The browser calls `/api/ai/chat` same-origin — no preflight, no CORS. `.env.production` can keep the relative path.
+
+**Hosting shape B — cross-origin (GitHub Pages).** `*.github.io` cannot route `/api/*` to a Worker, so the client must call the Worker on its own origin (e.g. `https://<name>-ai-proxy.<subdomain>.workers.dev/api/ai/chat`). This project ships a committed `.env.production` pointing at that URL; `ALLOWED_ORIGINS` on the Worker must include the Pages origin (`https://<you>.github.io`) so the CORS preflight returns 204 + the correct `Access-Control-Allow-*` headers. The Worker already implements this — see `proxy/src/worker.ts` and the Phase 5.1 notes in [WORKING_MEMORY.md](WORKING_MEMORY.md).
+
+Symptom of a mis-set prod URL: the client logs `[AIDialogueService] Proxy returned HTML (404) instead of JSON — VITE_AI_PROXY_URL is likely misrouted` and drops to scripted dialogue. That warning means the POST hit the static host's 404 page, not the Worker.
 
 ## AI Prompts & Character Personalities
 
@@ -377,7 +385,7 @@ Terminal B — **Vite**:
 npm run dev         # http://localhost:5173
 ```
 
-Vite's `server.proxy` in [vite.config.ts](vite.config.ts) forwards `/api/ai/chat` → `127.0.0.1:8787`, so the client uses the same relative URL in dev and prod.
+Vite's `server.proxy` in [vite.config.ts](vite.config.ts) forwards `/api/ai/chat` → `127.0.0.1:8787`, so dev always uses the relative path in `.env`. Production may use the same relative path (hosting shape A) or an absolute Worker URL (hosting shape B) via `.env.production` — see [AI Dialogue Proxy](#ai-dialogue-proxy) above.
 
 ### Smoke-test AI dialogue in the browser
 

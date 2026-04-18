@@ -130,6 +130,19 @@ export class AIDialogueService implements DialogueService {
 
     if (!res.ok) {
       const errText = await res.text();
+      // A non-JSON (HTML) error body almost always means the request never
+      // reached the Worker at all — e.g. `VITE_AI_PROXY_URL` points at a
+      // static host (GitHub Pages) that served its 404 page instead of the
+      // Worker, or a misconfigured reverse proxy is swallowing `/api/*`.
+      // Surface this as a distinct warning so it doesn't get lost in the
+      // generic `AI failed; using scripted fallback` log line.
+      const contentType = res.headers.get("content-type") ?? "";
+      if (contentType.includes("text/html") || /^\s*<!doctype|<html/i.test(errText)) {
+        console.warn(
+          `[AIDialogueService] Proxy returned HTML (${res.status}) instead of JSON — ` +
+            `VITE_AI_PROXY_URL is likely misrouted. Got: ${errText.slice(0, 120)}`,
+        );
+      }
       throw new Error(`AI proxy error ${res.status}: ${errText.slice(0, 200)}`);
     }
 
