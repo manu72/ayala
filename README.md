@@ -480,7 +480,7 @@ ayala/
 │   │   ├── GameConfig.ts               #   Resolution, physics, scenes, scaling
 │   │   └── gameplayConstants.ts        #   Shared gameplay radii, witness distances, input timings
 │   ├── ai/
-│   │   └── personas/                   #   Markdown LLM personas (?raw) for named cats
+│   │   └── personas/                   #   Markdown LLM personas (?raw) for named characters (cats and humans)
 │   ├── data/
 │   │   └── cat-dialogue.ts             #   Named cat dialogue scripts (condition/response data)
 │   ├── registry/

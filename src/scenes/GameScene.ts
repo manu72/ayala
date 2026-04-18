@@ -273,6 +273,19 @@ export class GameScene extends Phaser.Scene {
     this.aiThinkingTimer?.remove(false);
     this.aiThinkingTimer = null;
 
+    // Abort any in-flight ambient AI bubble and clear the single-flight
+    // guard. Without this, a scene restart mid-fetch (e.g. snatcher capture
+    // during a 1.5s human bubble call) leaves `humanAiBubbleInFlight = true`
+    // persisted on the Phaser-reused scene instance, blocking every ambient
+    // AI bubble after restart until the orphaned fetch's finally runs. The
+    // abort also tells AIDialogueService (via FallbackDialogueService's new
+    // caller-abort-rethrow path) that the caller no longer wants this work.
+    if (this.humanAiBubbleAbort) {
+      this.humanAiBubbleAbort.abort();
+      this.humanAiBubbleAbort = null;
+    }
+    this.humanAiBubbleInFlight = false;
+
     // Beat-5 cleanup. A scene shutdown mid-pickup could strand the player
     // invisible with a disabled body and an active input freeze, which
     // would make the next scene start unplayable. Clear all of it.
@@ -2921,13 +2934,20 @@ export class GameScene extends Phaser.Scene {
       // Persist for future bubbles. Store is keyed by speaker so per-human
       // history stays consistent whether the player talks to this human via
       // bubbles or via an encounter beat.
+      //
+      // Persist ONLY the line we actually rendered (`line`), not the whole
+      // `response.lines` payload. Ambient bubbles render a single bubble
+      // above the NPC, so any additional lines in response.lines were
+      // never seen by the player. Storing them would condition the next
+      // LLM call on dialogue the player never heard — see the matching
+      // lesson for Camille beats in WORKING_MEMORY.md.
       const snapshotTrust = this.trust.global;
       await storeConversation({
         speaker,
         timestamp: this.dayNight.totalGameTimeMs,
         realTimestamp: Date.now(),
         gameDay: this.dayNight.dayCount,
-        lines: response.lines,
+        lines: [line],
         trustBefore: snapshotTrust,
         trustAfter: snapshotTrust,
         chapter: this.chapters.chapter,

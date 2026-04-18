@@ -28,14 +28,33 @@ export class FallbackDialogueService implements DialogueService {
         getDialogue(r: DialogueRequest, o?: AIDialogueCallOptions): Promise<DialogueResponse>;
       }).getDialogue(request, callOpts);
     } catch (err) {
-      // AbortError is the designed abort path (player moved away, or the
-      // caller's tight per-call budget elapsed). Log at debug so it doesn't
-      // masquerade as a failure. Real upstream / parse errors stay at warn.
+      // AbortError is the designed abort path. It can originate from two
+      // different places and those two cases have opposite desired behaviours:
+      //
+      //   1. CALLER-initiated abort (callOpts.signal fired): the caller told
+      //      us to stop and expects to own cleanup. Falling back to scripted
+      //      discards caller intent and — for unscripted speakers like Camille
+      //      — surfaces ScriptedDialogueService's default "..." response as a
+      //      speech bubble. We rethrow so the caller's own catch can decide
+      //      (render authored fallback, render nothing, etc).
+      //
+      //   2. INTERNAL-timeout abort (AIDialogueService's per-call timer
+      //      fires; no caller signal involved): this is an AI-side failure
+      //      and scripted is the designed fallback. Engaged cat dialogue
+      //      relies on this path.
+      //
+      // We distinguish by inspecting the caller's signal.aborted flag —
+      // bridged into AIDialogueService's internal controller but never
+      // flipped by the internal timer.
       const isAbort =
         err instanceof DOMException && err.name === "AbortError" ||
         (err instanceof Error && err.name === "AbortError");
+      if (isAbort && callOpts?.signal?.aborted) {
+        console.debug("[Dialogue] AI aborted by caller; rethrowing", err);
+        throw err;
+      }
       if (isAbort) {
-        console.debug("[Dialogue] AI aborted; using scripted fallback", err);
+        console.debug("[Dialogue] AI aborted (internal timeout); using scripted fallback", err);
       } else {
         console.warn("[Dialogue] AI failed; using scripted fallback", err);
       }

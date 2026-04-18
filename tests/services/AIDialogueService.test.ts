@@ -390,4 +390,48 @@ describe("FallbackDialogueService", () => {
     expect(secondary.getDialogue).toHaveBeenCalled();
     warn.mockRestore();
   });
+
+  // A caller-owned AbortController is the caller's way of saying "stop; I no
+  // longer want this response." Converting that signal into a scripted
+  // secondary call discards caller intent — e.g. Camille beat timeouts then
+  // surface ScriptedDialogueService's default-human response ("...") as a
+  // Camille speech bubble. When the caller's signal is aborted we must
+  // propagate the abort so callers own their cleanup path.
+  it("rethrows when the caller's signal is aborted; does not call secondary", async () => {
+    const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
+    const controller = new AbortController();
+    const primary = {
+      getDialogue: vi.fn().mockImplementation(async () => {
+        controller.abort();
+        throw new DOMException("aborted", "AbortError");
+      }),
+    };
+    const secondary = {
+      getDialogue: vi.fn().mockResolvedValue({ lines: ["scripted"] }),
+    };
+    const fb = new FallbackDialogueService(primary, secondary);
+    await expect(
+      fb.getDialogue(baseReq(), { signal: controller.signal }),
+    ).rejects.toThrow();
+    expect(secondary.getDialogue).not.toHaveBeenCalled();
+    debug.mockRestore();
+  });
+
+  // Internal-timeout aborts (no caller signal, or caller signal not fired)
+  // must still fall back to scripted. Engaged cat dialogue relies on this to
+  // deliver the designed scripted response when the 8s default budget lapses.
+  it("still falls back to secondary when an internal-timeout AbortError occurs without caller-aborting", async () => {
+    const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
+    const primary = {
+      getDialogue: vi.fn().mockRejectedValue(new DOMException("aborted", "AbortError")),
+    };
+    const secondary = {
+      getDialogue: vi.fn().mockResolvedValue({ lines: ["scripted"] }),
+    };
+    const fb = new FallbackDialogueService(primary, secondary);
+    const out = await fb.getDialogue(baseReq());
+    expect(out.lines).toEqual(["scripted"]);
+    expect(secondary.getDialogue).toHaveBeenCalled();
+    debug.mockRestore();
+  });
 });
