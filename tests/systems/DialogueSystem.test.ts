@@ -444,6 +444,96 @@ describe('DialogueSystem.dismiss — early close never fires onComplete', () => 
 // Degraded-environment guard
 // ──────────────────────────────────────────────────────────────
 
+// ──────────────────────────────────────────────────────────────
+// Paired-surface hooks — used by the Camille encounter loop to keep
+// a floating spoken bubble in lockstep with the modal narrator line.
+// ──────────────────────────────────────────────────────────────
+
+describe('DialogueSystem — onLineShown + onHide hooks', () => {
+  it('fires onLineShown(0) synchronously from show() before the player can advance', () => {
+    const onLineShown = vi.fn()
+    const { system } = buildDialogue()
+    system.show(['A', 'B'], undefined, { onLineShown })
+    // Must fire BEFORE the player has a chance to press Space —
+    // callers rely on this to spawn the paired bubble for line 0.
+    expect(onLineShown).toHaveBeenCalledTimes(1)
+    expect(onLineShown).toHaveBeenCalledWith(0)
+  })
+
+  it('fires onLineShown(n) for each subsequent line as SPACE advances', () => {
+    const onLineShown = vi.fn()
+    const { system, spaceKey } = buildDialogue()
+    system.show(['One', 'Two', 'Three'], undefined, { onLineShown })
+    onLineShown.mockClear() // ignore the initial index-0 call for this assertion
+    spaceKey.emit('down') // → "Two"
+    expect(onLineShown).toHaveBeenLastCalledWith(1)
+    spaceKey.emit('down') // → "Three"
+    expect(onLineShown).toHaveBeenLastCalledWith(2)
+    // The final SPACE that advances past the end hides the dialogue and
+    // must NOT fire onLineShown (the dialogue is gone).
+    spaceKey.emit('down')
+    expect(onLineShown).toHaveBeenCalledTimes(2)
+  })
+
+  it('fires onHide() when the final line is advanced past (natural completion)', () => {
+    const onComplete = vi.fn()
+    const onHide = vi.fn()
+    const { system, spaceKey } = buildDialogue()
+    system.show(['A'], onComplete, { onHide })
+    spaceKey.emit('down') // past the end → hide
+    expect(onComplete).toHaveBeenCalledTimes(1)
+    expect(onHide).toHaveBeenCalledTimes(1)
+    expect(system.isActive).toBe(false)
+  })
+
+  it('fires onHide() on dismiss() even though onComplete does not fire', () => {
+    const onComplete = vi.fn()
+    const onHide = vi.fn()
+    const { system } = buildDialogue()
+    system.show(['A', 'B'], onComplete, { onHide })
+    system.dismiss()
+    expect(onComplete).not.toHaveBeenCalled()
+    expect(onHide).toHaveBeenCalledTimes(1)
+  })
+
+  it('fires onHide() on backdrop pointerdown and close-button dismiss paths', () => {
+    const a = vi.fn()
+    const { system: s1, backdrop } = buildDialogue()
+    s1.show(['A'], undefined, { onHide: a })
+    backdrop.emit('pointerdown')
+    expect(a).toHaveBeenCalledTimes(1)
+
+    const b = vi.fn()
+    const { system: s2, closeBtn } = buildDialogue()
+    s2.show(['A'], undefined, { onHide: b })
+    closeBtn.emit('pointerdown')
+    expect(b).toHaveBeenCalledTimes(1)
+  })
+
+  it('clears hooks between calls so a fresh show() is not cross-contaminated', () => {
+    const firstHide = vi.fn()
+    const secondHide = vi.fn()
+    const { system, spaceKey } = buildDialogue()
+    system.show(['A'], undefined, { onHide: firstHide })
+    system.dismiss() // fires firstHide
+    expect(firstHide).toHaveBeenCalledTimes(1)
+
+    system.show(['B'], undefined, { onHide: secondHide })
+    spaceKey.emit('down') // completion → hides
+    // Only the current invocation's onHide should fire, not the first one again.
+    expect(firstHide).toHaveBeenCalledTimes(1)
+    expect(secondHide).toHaveBeenCalledTimes(1)
+  })
+
+  it('tolerates hooks being omitted entirely (back-compat with two-arg callers)', () => {
+    const { system, spaceKey } = buildDialogue()
+    expect(() => {
+      system.show(['A'])
+      spaceKey.emit('down')
+    }).not.toThrow()
+  })
+})
+
 describe('DialogueSystem — degraded keyboard fallback', () => {
   beforeEach(() => {
     vi.clearAllMocks()

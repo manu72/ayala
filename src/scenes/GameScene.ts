@@ -23,17 +23,34 @@ import {
   INITIAL_COLONY_TOTAL,
   NAMED_AND_MAMMA_COUNT,
   VISIBLE_BACKGROUND_CAP,
+  CAMILLE_BEAT5_DECISION_MS,
+  STATIONARY_GREET_CAP,
+  STATIONARY_MOVE_THRESHOLD_PX,
 } from "../config/gameplayConstants";
 import { StoryKeys, migrateLegacyIntroFlag } from "../registry/storyKeys";
 import { computeBackgroundSpawnCount, decrementColonyTotal } from "../utils/colonySpawn";
 import {
   ScriptedDialogueService,
   type DialogueService,
+  type DialogueRequest,
   type DialogueResponse,
   type ConversationEntry,
 } from "../services/DialogueService";
+import { AIDialogueService } from "../services/AIDialogueService";
+import { FallbackDialogueService } from "../services/FallbackDialogueService";
+import type { DialogueHooks } from "../systems/DialogueSystem";
 import { storeConversation, getRecentConversations } from "../services/ConversationStore";
+import { AI_PERSONAS } from "../ai/personas";
 import { CAT_DIALOGUE_SCRIPTS, getRandomColonyLine } from "../data/cat-dialogue";
+import {
+  CAMILLE_ENCOUNTER_BEATS,
+  CAMILLE_ENCOUNTER_5_PREDECISION_STEPS,
+  CAMILLE_ENCOUNTER_5_JOURNEY_STEPS,
+  CAMILLE_BEAT5_ACCEPT_LINE,
+  CAMILLE_BEAT5_TIMEOUT_LINE,
+  mergeCamilleBeatSteps,
+  type EncounterStep,
+} from "../data/camille-encounter-beats";
 import { resolveSnatcherSpawnAction } from "../systems/SnatcherSystem";
 import { hasLineOfSightTiles } from "../utils/lineOfSight";
 
@@ -119,6 +136,27 @@ export class GameScene extends Phaser.Scene {
   /** NPC currently locked in dialogue with the player. */
   private engagedDialogueNPC: NPCCat | null = null;
   private dialogueRequestInFlight = false;
+  /** Fires a subtle "thinking" emote if AI dialogue is slow to return. */
+  private aiThinkingTimer: Phaser.Time.TimerEvent | null = null;
+
+  /**
+   * Per-human cooldown (wall ms) before another AI-driven ambient bubble is
+   * requested. Scripted bubbles continue firing during the cooldown so the
+   * world does not fall silent. Keyed by HumanNPC instance so named entities
+   * (Camille) and anonymous-but-identified entities (feeders) each get their
+   * own timer.
+   */
+  private humanAiBubbleCooldownUntil: WeakMap<HumanNPC, number> = new WeakMap();
+  /**
+   * Global single-flight guard: at most one AI ambient bubble may be in
+   * flight at a time. Prevents a crowded scene (Camille + Manu + Kish all
+   * approaching cats at once) from burning a burst of LLM calls. Engaged
+   * (Space-triggered) cat dialogue uses its own `dialogueRequestInFlight`
+   * guard and is independent.
+   */
+  private humanAiBubbleInFlight = false;
+  /** Abort controller for the currently in-flight human bubble (if any). */
+  private humanAiBubbleAbort: AbortController | null = null;
 
   /**
    * NPC the player just finished a conversation with. The player must leave
@@ -126,9 +164,16 @@ export class GameScene extends Phaser.Scene {
    * press (or held key) chains straight into the next scripted response —
    * turning Blacky's first-meeting dialogue into the "Still here? Good..."
    * return dialogue immediately, with no time having elapsed in-world.
-   * Cleared in `updateNPCs` once the player steps outside `INTERACTION_DISTANCE`.
+   *
+   * Cleared in `updateNPCs` when EITHER the player steps outside
+   * `INTERACTION_DISTANCE`, OR `LAST_PARTNER_HOLD_MS` elapses. The time
+   * expiry rescues the stationary-Mamma case: if the player closes a
+   * dialogue and doesn't move, waiting a beat is enough to re-engage —
+   * without it, the only way out was to walk a pixel away and back.
    */
   private lastDialoguePartner: NPCCat | null = null;
+  private lastDialoguePartnerAt = 0;
+  private static readonly LAST_PARTNER_HOLD_MS = 1500;
 
   // Snatcher tracking
   private snatchers: HumanNPC[] = [];
@@ -144,6 +189,32 @@ export class GameScene extends Phaser.Scene {
   private dumpingArmed = 0;
   private dumpingInProgress = false;
   private pendingCamilleEncounter = 0;
+
+  /**
+   * True while Camille's beat-5 10-second decision window is open. The player
+   * must walk Mamma Cat within CAMILLE_BEAT5_TOUCH_DIST of Camille and press
+   * Space to greet her within the window for the beat to resolve as "yes";
+   * otherwise Camille speaks a gentle timeout line and the beat re-arms.
+   */
+  private beat5DecisionActive = false;
+  /** TimerEvent for the beat-5 decision window; cancelled on accept / shutdown. */
+  private beat5DecisionTimer: Phaser.Time.TimerEvent | null = null;
+  /**
+   * Freeze flag for player input during the beat-5 pickup sequence. Set just
+   * before the pickup tween starts and cleared on scene shutdown / cleanup.
+   * While true, movement, interact, and rest inputs are all ignored so the
+   * pickup cinematic cannot be short-circuited.
+   */
+  private playerInputFrozen = false;
+  /**
+   * Reference position used to decide whether Mamma Cat is "stationary" for
+   * the purposes of the per-human greeting cap. Reset to the player's
+   * current position whenever she moves more than STATIONARY_MOVE_THRESHOLD_PX
+   * from this anchor; every human's stationary greet counter is cleared at
+   * the same time. See {@link STATIONARY_GREET_CAP}.
+   */
+  private playerStationaryAnchorX = 0;
+  private playerStationaryAnchorY = 0;
 
   /** One scripted "Kish, slow down" beat per Camille evening spawn. */
   private kishCamilleSlowDownShown = false;
@@ -163,7 +234,11 @@ export class GameScene extends Phaser.Scene {
   /** Dialogue lives in HUDScene (1x zoom) so it's always visible. */
   private get dialogue(): {
     isActive: boolean;
-    show: (lines: string[], onComplete?: () => void) => void;
+    show: (
+      lines: string[],
+      onComplete?: () => void,
+      hooks?: DialogueHooks,
+    ) => void;
     dismiss: () => void;
   } {
     const hud = this.scene.get("HUDScene") as HUDScene | undefined;
@@ -188,12 +263,42 @@ export class GameScene extends Phaser.Scene {
       this.engagedDialogueNPC = null;
     }
     this.lastDialoguePartner = null;
+    this.lastDialoguePartnerAt = 0;
     this.player?.stopGreeting();
     this.collapseWitness = null;
     this.wasCollapsed = false;
     this.collapseRecovering = false;
     this.collapseRecoveryTimer = 0;
     this.dialogue.dismiss();
+    this.aiThinkingTimer?.remove(false);
+    this.aiThinkingTimer = null;
+
+    // Abort any in-flight ambient AI bubble and clear the single-flight
+    // guard. Without this, a scene restart mid-fetch (e.g. snatcher capture
+    // during a 1.5s human bubble call) leaves `humanAiBubbleInFlight = true`
+    // persisted on the Phaser-reused scene instance, blocking every ambient
+    // AI bubble after restart until the orphaned fetch's finally runs. The
+    // abort also tells AIDialogueService (via FallbackDialogueService's new
+    // caller-abort-rethrow path) that the caller no longer wants this work.
+    if (this.humanAiBubbleAbort) {
+      this.humanAiBubbleAbort.abort();
+      this.humanAiBubbleAbort = null;
+    }
+    this.humanAiBubbleInFlight = false;
+
+    // Beat-5 cleanup. A scene shutdown mid-pickup could strand the player
+    // invisible with a disabled body and an active input freeze, which
+    // would make the next scene start unplayable. Clear all of it.
+    this.cancelBeat5Decision();
+    this.beat5DecisionActive = false;
+    this.playerInputFrozen = false;
+    if (this.player) {
+      const body = this.player.body as Phaser.Physics.Arcade.Body | undefined;
+      body?.setEnable(true);
+      this.player.setAlpha(1);
+      this.player.setVisible(true);
+    }
+    this.resumeCamilleEraHumans();
   }
 
   /** Remove pending intro delayed calls and tweens (idempotent). */
@@ -284,7 +389,29 @@ export class GameScene extends Phaser.Scene {
     this.chapters = new ChapterSystem();
     this.chapterCheckTimer = 0;
     this.narrationShown = new Set();
-    this.dialogueService = new ScriptedDialogueService(CAT_DIALOGUE_SCRIPTS);
+    const scripted = new ScriptedDialogueService(CAT_DIALOGUE_SCRIPTS);
+    const proxyUrl = import.meta.env.VITE_AI_PROXY_URL;
+    const primary =
+      import.meta.env.VITE_AI_PRIMARY === "openai" ? ("openai" as const) : ("deepseek" as const);
+    const fb = import.meta.env.VITE_AI_FALLBACK;
+    const secondary: "deepseek" | "openai" =
+      fb === "openai" || fb === "deepseek"
+        ? fb
+        : primary === "deepseek"
+          ? "openai"
+          : "deepseek";
+    this.dialogueService =
+      typeof proxyUrl === "string" && proxyUrl.length > 0
+        ? new FallbackDialogueService(
+            new AIDialogueService({
+              proxyUrl,
+              personas: AI_PERSONAS,
+              primaryProvider: primary,
+              secondaryProvider: secondary,
+            }),
+            scripted,
+          )
+        : scripted;
     this.territory = new TerritorySystem();
     this.camilleNPC = null;
     this.manuNPC = null;
@@ -860,7 +987,17 @@ export class GameScene extends Phaser.Scene {
 
     // ──── Interact (Space tap) ────
     const spaceJust = this.spaceKey && Phaser.Input.Keyboard.JustDown(this.spaceKey);
-    if (spaceJust && !this.dialogue.isActive) {
+    if (spaceJust && (this.dialogue.isActive || this.playerInputFrozen) && import.meta.env.DEV) {
+      // console.log (not .debug) so the diagnostic shows at Chrome's
+      // "Default levels" filter — .debug maps to Verbose which is hidden
+      // by default, making Space-press bugs impossible to self-diagnose.
+      console.log("[interact]", {
+        outcome: "space blocked at outer gate",
+        dialogueActive: this.dialogue.isActive,
+        frozen: this.playerInputFrozen,
+      });
+    }
+    if (spaceJust && !this.dialogue.isActive && !this.playerInputFrozen) {
       const usedSource = this.foodSources.tryInteract(
         this.player.x,
         this.player.y,
@@ -888,7 +1025,13 @@ export class GameScene extends Phaser.Scene {
     const zJustUp = this.restKey ? Phaser.Input.Keyboard.JustUp(this.restKey) : false;
     const REST_TAP_MS = 300;
 
-    if (zDown && playerStationary && !this.dialogue.isActive && !this.player.isGreeting) {
+    if (
+      zDown &&
+      playerStationary &&
+      !this.dialogue.isActive &&
+      !this.player.isGreeting &&
+      !this.playerInputFrozen
+    ) {
       this.restHoldTimer += delta;
       this.restHoldActive = true;
       if (this.restHoldTimer >= REST_HOLD_MS) {
@@ -939,16 +1082,26 @@ export class GameScene extends Phaser.Scene {
     const inShade = this.isUnderCanopy(this.player.x, this.player.y);
     const inShelter = this.isNearShelter(this.player.x, this.player.y);
 
-    this.player.update(this.stats.canRun, delta);
-    this.stats.update(
-      deltaSec,
-      this.player.isMoving,
-      this.player.isRunning,
-      this.dayNight.isHeatActive,
-      inShade,
-      inShelter,
-      false,
-    );
+    if (this.playerInputFrozen) {
+      // Pickup cinematic is running. Mamma Cat's position is driven by the
+      // beat-5 tween; we zero velocity + skip input polling so cursor keys
+      // cannot drift her out from under the tween, and skip stats updates
+      // that would interpret tween-driven motion as the player walking.
+      this.player.setVelocity(0);
+    } else {
+      this.player.update(this.stats.canRun, delta);
+      this.stats.update(
+        deltaSec,
+        this.player.isMoving,
+        this.player.isRunning,
+        this.dayNight.isHeatActive,
+        inShade,
+        inShelter,
+        false,
+      );
+    }
+
+    this.updatePlayerStationaryAnchor();
 
     this.foodSources.update(this.dayNight.currentPhase, time);
     this.guard.update(delta);
@@ -1204,8 +1357,12 @@ export class GameScene extends Phaser.Scene {
 
   private cleanupCamilleNPCs(): void {
     this.kishCamilleSlowDownShown = false;
+    this.cancelBeat5Decision();
+    this.beat5DecisionActive = false;
+    this.playerInputFrozen = false;
     for (const npc of [this.camilleNPC, this.manuNPC, this.kishNPC]) {
       if (!npc) continue;
+      npc.resumeFromEncounter();
       const idx = this.humans.indexOf(npc);
       if (idx !== -1) this.humans.splice(idx, 1);
       npc.destroy();
@@ -1213,6 +1370,25 @@ export class GameScene extends Phaser.Scene {
     this.camilleNPC = null;
     this.manuNPC = null;
     this.kishNPC = null;
+  }
+
+  /**
+   * Pause Camille (and any nearby story humans Manu/Kish) for the duration
+   * of a paired beat so they stop walking their circuits during narration.
+   * Mirrors the Phase 5.1a contract: the visual speaker is fixed while the
+   * modal + bubble play. Idempotent.
+   */
+  private pauseCamilleEraHumans(faceTargetX: number): void {
+    this.camilleNPC?.pauseForEncounter(faceTargetX);
+    this.manuNPC?.pauseForEncounter(faceTargetX);
+    this.kishNPC?.pauseForEncounter(faceTargetX);
+  }
+
+  /** Resume any paused Camille-era humans. Safe to call when nothing is paused. */
+  private resumeCamilleEraHumans(): void {
+    this.camilleNPC?.resumeFromEncounter();
+    this.manuNPC?.resumeFromEncounter();
+    this.kishNPC?.resumeFromEncounter();
   }
 
   private startCamilleEncounter(encounterNum: number): void {
@@ -1312,6 +1488,35 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
+  /**
+   * Authored fallback lines + beat objectives for Camille's five encounters.
+   *
+   * Beat 1 and beat 5 stay scripted (pure narrator POV, plus the chapter-6
+   * handoff at the end) — those beats carry crucial story weight and must
+   * survive LLM failure byte-for-byte. Beats 2-4 attempt AI dialogue sourced
+   * from Camille's persona with the `encounterBeat` objective; on timeout,
+   * parse failure, or any network issue the `fallbackLines` array is shown
+   * so the player always sees the beat.
+   *
+   * All registry/trust/chapter side-effects live in {@link runCamilleEncounterBeat}
+   * — the LLM never controls story progression.
+   */
+  /**
+   * Paired narrator + spoken beats for Camille's 2–4th encounters.
+   * See {@link ../data/camille-encounter-beats} for the authored data
+   * and pairing contract; {@link runCamilleEncounterBeat} drives it.
+   */
+  private readonly camilleEncounterBeats = CAMILLE_ENCOUNTER_BEATS;
+
+  /**
+   * Beat 5 split into a pre-decision phase (Camille asks) and a journey
+   * phase (narration over the pickup tween). The 10-second player decision
+   * window sits between them. See
+   * {@link ../data/camille-encounter-beats.CAMILLE_ENCOUNTER_5_PREDECISION_STEPS}.
+   */
+  private readonly camilleBeat5PredecisionSteps = CAMILLE_ENCOUNTER_5_PREDECISION_STEPS;
+  private readonly camilleBeat5JourneySteps = CAMILLE_ENCOUNTER_5_JOURNEY_STEPS;
+
   private playCamilleEncounterNarrative(encounterNum: number): void {
     const hud = this.scene.get("HUDScene") as HUDScene | undefined;
     hud?.pulseEdge(0x332200, 0.2, 2000);
@@ -1327,58 +1532,19 @@ export class GameScene extends Phaser.Scene {
 
       case 2:
         this.scheduleCamilleEncounterDialogue(8000, 2, () => {
-          this.registry.set(StoryKeys.CAMILLE_ENCOUNTER, encounterNum);
-          this.registry.set(StoryKeys.CAMILLE_ENCOUNTER_DAY, this.dayNight.dayCount);
-          this.camilleNPC?.playCrouchToward(this.player.x);
-          this.dialogue.show(
-            [
-              "She sees you. She's not coming closer. She's... waiting. For you.",
-              "She places a treat on the ground between you. Doesn't move closer.",
-            ],
-            () => {
-              hud?.showNarration("She watches you eat. She doesn't reach for you. She understands.");
-              this.stats.restore("hunger", 30);
-            },
-          );
+          this.runCamilleEncounterBeat(2, hud);
         });
         break;
 
       case 3:
         this.scheduleCamilleEncounterDialogue(10000, 3, () => {
-          this.registry.set(StoryKeys.CAMILLE_ENCOUNTER, encounterNum);
-          this.registry.set(StoryKeys.CAMILLE_ENCOUNTER_DAY, this.dayNight.dayCount);
-          this.camilleNPC?.playCrouchToward(this.player.x);
-          this.dialogue.show(
-            [
-              "She closes her eyes. Slowly. Opens them again. That means... trust.",
-              "You've seen other cats do this.",
-              "Slow blink back?",
-            ],
-            () => {
-              this.emotes.show(this, this.player, "heart");
-              if (this.camilleNPC) this.emotes.show(this, this.camilleNPC, "heart");
-              hud?.showNarration("Something shifts between you. A thread, invisible but real.");
-            },
-          );
+          this.runCamilleEncounterBeat(3, hud);
         });
         break;
 
       case 4:
         this.scheduleCamilleEncounterDialogue(10000, 4, () => {
-          this.registry.set(StoryKeys.CAMILLE_ENCOUNTER, encounterNum);
-          this.registry.set(StoryKeys.CAMILLE_ENCOUNTER_DAY, this.dayNight.dayCount);
-          this.camilleNPC?.playCrouchToward(this.player.x);
-          this.dialogue.show(
-            [
-              "Her hand smells like fish treats and soap. And something else. Home.",
-              "You push your head against her fingers. You haven't done this since... before.",
-            ],
-            () => {
-              this.emotes.show(this, this.player, "heart");
-              if (this.camilleNPC) this.emotes.show(this, this.camilleNPC, "heart");
-              hud?.showNarration("The small one is loud. But Camille keeps her still. She understands you.");
-            },
-          );
+          this.runCamilleEncounterBeat(4, hud);
         });
         break;
 
@@ -1386,22 +1552,493 @@ export class GameScene extends Phaser.Scene {
         this.scheduleCamilleEncounterDialogue(12000, 5, () => {
           this.registry.set(StoryKeys.CAMILLE_ENCOUNTER, encounterNum);
           this.registry.set(StoryKeys.CAMILLE_ENCOUNTER_DAY, this.dayNight.dayCount);
-          this.dialogue.show(
-            [
-              "She has a box. You've seen boxes before. Cats go in. They don't come back.",
-              "This is different. She's not grabbing. She's asking.",
-              "And you... you want to say yes.",
-              "The garden shrinks behind you. The smells change. The sounds change.",
-              "But the hand on the carrier is warm. And for the first time in a long time... you're not afraid.",
-            ],
-            () => {
-              this.registry.set(StoryKeys.ENCOUNTER_5_COMPLETE, true);
-              this.autoSave();
-              this.startChapter6Sequence();
-            },
-          );
+          this.playCamilleBeat5Predecision(hud);
         });
         break;
+    }
+  }
+
+  /**
+   * Drive a paired narrator+spoken sequence.
+   *
+   * For each step:
+   *  1. The narrator line appears in the modal dialogue box.
+   *  2. If the step has a `spoken` line and a valid `speaker`, a
+   *     persistent bubble is spawned above the speaker with that line.
+   *  3. When the player presses Space, both the modal advances AND the
+   *     current spoken bubble is torn down before the next step begins.
+   *
+   * On entry the speaker (and, when the speaker is Camille, the other
+   * Camille-era humans) is frozen via `pauseForEncounter` so they stop
+   * walking their circuits for the beat. Pause lifecycle is then owned
+   * by the CALLER: {@link onComplete} runs with the pause still engaged,
+   * and the caller decides whether to resume (a single-shot beat), hold
+   * (chain into a decision window or follow-up beat), or reconfigure.
+   * Early dismissals (modal closed via click/x or external `.hide()`) are
+   * the only case where `playPairedBeat` itself releases the pause — via
+   * its internal `onHide` fallback — because there is no caller continuation.
+   *
+   * `onComplete` is only invoked when the player reads through the
+   * full sequence — matching the existing DialogueSystem contract.
+   *
+   * `onStepShown(index)` fires after the narrator line + spoken bubble for
+   * step `index` are on screen. Used by the beat-5 journey phase to kick
+   * off the pickup tween in lockstep with the first journey narration line.
+   */
+  private playPairedBeat(
+    steps: ReadonlyArray<EncounterStep>,
+    speaker: HumanNPC | null,
+    onComplete: () => void,
+    opts?: { onStepShown?: (index: number) => void },
+  ): void {
+    if (steps.length === 0) {
+      onComplete();
+      return;
+    }
+
+    if (speaker) {
+      speaker.pauseForEncounter(this.player.x);
+    }
+    const isCamilleBeat = speaker !== null && speaker === this.camilleNPC;
+    if (isCamilleBeat) {
+      this.pauseCamilleEraHumans(this.player.x);
+    }
+
+    const narratorLines = steps.map((s) => s.narrator);
+    let currentBubble: Phaser.GameObjects.Text | null = null;
+    let completed = false;
+    const clearBubble = (): void => {
+      if (currentBubble) {
+        currentBubble.destroy();
+        currentBubble = null;
+      }
+    };
+
+    this.dialogue.show(
+      narratorLines,
+      () => {
+        completed = true;
+        clearBubble();
+        onComplete();
+      },
+      {
+        onLineShown: (index: number): void => {
+          clearBubble();
+          const step = steps[index];
+          if (step?.spoken && speaker && speaker.active && speaker.visible) {
+            currentBubble = this.renderHumanBubble(speaker, step.spoken, { persistent: true });
+          }
+          opts?.onStepShown?.(index);
+        },
+        onHide: (): void => {
+          clearBubble();
+          // Only auto-release pause on EARLY dismiss (player closed the
+          // modal before the final line). Natural completion hands control
+          // to onComplete, which owns the pause lifecycle from there.
+          if (!completed) {
+            if (isCamilleBeat) {
+              this.resumeCamilleEraHumans();
+            } else if (speaker) {
+              speaker.resumeFromEncounter();
+            }
+          }
+        },
+      },
+    );
+  }
+
+  /**
+   * Execute one of Camille's middle encounter beats (2/3/4).
+   *
+   * Flow:
+   *  1. Pin registry side-effects *before* any async work so pause/resume
+   *     doesn't re-trigger the beat.
+   *  2. Play Camille's crouch animation.
+   *  3. Try AI dialogue for Camille's SPOKEN lines only (beat `objective`
+   *     makes this explicit). The authored narrator lines always run.
+   *     AI lines replace authored spoken fallbacks positionally.
+   *  4. Drive the paired narrator+spoken sequence via {@link playPairedBeat}
+   *     so the narrator renders in the modal and Camille's voice renders
+   *     as a floating bubble above her head.
+   *  5. Apply beat-specific side-effects in `onComplete` (stats restore,
+   *     emotes, HUD narration) so they run regardless of whether AI
+   *     spoken lines succeeded or the scripted fallback ran.
+   */
+  private runCamilleEncounterBeat(n: 2 | 3 | 4, hud: HUDScene | undefined): void {
+    this.registry.set(StoryKeys.CAMILLE_ENCOUNTER, n);
+    this.registry.set(StoryKeys.CAMILLE_ENCOUNTER_DAY, this.dayNight.dayCount);
+    this.camilleNPC?.playCrouchToward(this.player.x);
+
+    const beat = this.camilleEncounterBeats[n];
+    const onComplete = (): void => {
+      switch (n) {
+        case 2:
+          hud?.showNarration("She watches you eat. She doesn't reach for you. She understands.");
+          this.stats.restore("hunger", 30);
+          break;
+        case 3:
+          this.emotes.show(this, this.player, "heart");
+          if (this.camilleNPC) this.emotes.show(this, this.camilleNPC, "heart");
+          hud?.showNarration("Something shifts between you. A thread, invisible but real.");
+          break;
+        case 4:
+          this.emotes.show(this, this.player, "heart");
+          if (this.camilleNPC) this.emotes.show(this, this.camilleNPC, "heart");
+          hud?.showNarration("The small one is loud. But Camille keeps her still. She understands you.");
+          break;
+      }
+      // Release the encounter pause so Camille (and Manu / Kish during the
+      // later beats) resume their circuits. playPairedBeat now intentionally
+      // leaves the pause engaged through onComplete so callers like the
+      // beat-5 state machine can chain into a follow-up phase without a
+      // one-frame "resume then re-pause" flicker.
+      this.resumeCamilleEraHumans();
+    };
+
+    // `runBeatWith` drives a single beat render + persist pass. It is
+    // called with either the AI-returned spoken lines (success path) or
+    // `null` (AI failed / unavailable — scripted fallback only).
+    //
+    // Persistence MUST happen here rather than in
+    // `requestCamilleEncounterLines` because the AI payload and the
+    // merged render surface can diverge: `mergeCamilleBeatSteps` maps
+    // AI lines only into authored-spoken slots (narrator-only steps stay
+    // silent), drops surplus AI lines, and substitutes authored
+    // fallbacks when AI lines are missing. Persisting the raw AI payload
+    // would therefore misrepresent what Camille actually said to Mamma
+    // Cat on screen — and future LLM calls, which condition on this
+    // history, would be grounded in a fiction.
+    const runBeatWith = (spokenOverrides: string[] | null): void => {
+      const { steps, spokenRendered } = mergeCamilleBeatSteps(beat.steps, spokenOverrides);
+      this.playPairedBeat(steps, this.camilleNPC, onComplete);
+      if (spokenRendered.length > 0) {
+        void this.persistCamilleBeatHistory(n, spokenRendered);
+      }
+    };
+
+    void this.requestCamilleEncounterLines(n, beat.objective)
+      .then((lines) => runBeatWith(lines))
+      .catch(() => runBeatWith(null));
+  }
+
+  /**
+   * Persist the spoken lines Camille was actually seen saying during a
+   * middle encounter beat (2/3/4). Called from `runCamilleEncounterBeat`
+   * after the render surface has been computed by `mergeCamilleBeatSteps`,
+   * so the stored record matches what the player saw — not the raw AI
+   * payload, which may be reshaped by the merge.
+   *
+   * Errors are swallowed: conversation history is best-effort context for
+   * future LLM calls, not a source of truth, and an IDB hiccup should
+   * never break a Camille beat.
+   */
+  private async persistCamilleBeatHistory(
+    n: 2 | 3 | 4,
+    spokenRendered: string[],
+  ): Promise<void> {
+    try {
+      const snapshotTrust = this.trust.global;
+      await storeConversation({
+        speaker: "Camille",
+        timestamp: this.dayNight.totalGameTimeMs,
+        realTimestamp: Date.now(),
+        gameDay: this.dayNight.dayCount,
+        lines: spokenRendered,
+        trustBefore: snapshotTrust,
+        trustAfter: snapshotTrust,
+        chapter: this.chapters.chapter,
+        playerAction: `camille_encounter_${n}`,
+        gameStateSnapshot: {
+          trustWithSpeaker: snapshotTrust,
+          trustGlobal: this.trust.global,
+          timeOfDay: this.dayNight.currentPhase,
+          hunger: this.stats.hunger,
+          thirst: this.stats.thirst,
+          energy: this.stats.energy,
+        },
+      });
+    } catch {
+      // Best-effort persistence; deliberately silent.
+    }
+  }
+
+  // ──────────── Camille Beat 5 (three-phase decision gate) ────────────
+  //
+  // Beat 5 is the Chapter-6 handoff: Camille asks Mamma Cat to come home
+  // with her, and the PLAYER must consent by walking Mamma Cat to Camille
+  // and greeting her (Space) within {@link CAMILLE_BEAT5_DECISION_MS}. This
+  // replaces the pre-v0.3.2 auto-pickup flow where Camille simply narrated
+  // the journey regardless of player action — the new flow gives agency to
+  // Mamma Cat and cleanly resolves the narrative/visual desync where
+  // Camille would walk off without her.
+  //
+  // Phases:
+  //   A: playCamilleBeat5Predecision  — paired beat, Camille asks.
+  //   B: beginBeat5Decision            — 10s window, player consent gate.
+  //   C: playCamilleBeat5Journey       — paired beat over pickup tween.
+  //
+  // On timeout Camille speaks {@link CAMILLE_BEAT5_TIMEOUT_LINE}, resumes
+  // her circuit, and `pendingCamilleEncounter = 5` so the next proximity
+  // poll re-arms the beat. The ENCOUNTER_5_COMPLETE registry flag is only
+  // set at the end of Phase C — a timed-out beat does NOT count as done.
+
+  /** Phase A: Camille asks. Runs first; holds the encounter pause through onComplete. */
+  private playCamilleBeat5Predecision(hud: HUDScene | undefined): void {
+    void hud;
+    this.camilleNPC?.playCrouchToward(this.player.x);
+    this.playPairedBeat(
+      this.camilleBeat5PredecisionSteps,
+      this.camilleNPC,
+      () => this.beginBeat5Decision(),
+    );
+  }
+
+  /**
+   * Phase B: open the 10-second decision window. Camille stays crouched
+   * (encounter pause remains engaged from Phase A), a gentle HUD narration
+   * primes the player, and a heart emote floats above Camille so the ask
+   * reads emotionally without embedding a heart glyph in bubble text.
+   *
+   * Acceptance is driven from {@link tryInteract}: the same Space-to-greet
+   * action the player already knows. Timeout falls through to {@link failBeat5}.
+   */
+  private beginBeat5Decision(): void {
+    this.beat5DecisionActive = true;
+    this.cancelBeat5Decision(); // defensive: drop any stale timer
+    if (this.camilleNPC) {
+      this.emotes.show(this, this.camilleNPC, "heart");
+      this.pauseCamilleEraHumans(this.player.x);
+    }
+    const hud = this.scene.get("HUDScene") as HUDScene | undefined;
+    hud?.showNarration("Approach Camille and press Space to go with her.");
+    this.beat5DecisionTimer = this.time.delayedCall(CAMILLE_BEAT5_DECISION_MS, () => {
+      if (!this.beat5DecisionActive) return;
+      this.failBeat5();
+    });
+  }
+
+  /** Cancel any in-flight beat-5 decision timer. Safe to call repeatedly. */
+  private cancelBeat5Decision(): void {
+    if (this.beat5DecisionTimer) {
+      this.beat5DecisionTimer.remove(false);
+      this.beat5DecisionTimer = null;
+    }
+  }
+
+  /**
+   * Check whether the player has accepted beat 5 this frame. Called from
+   * {@link tryInteract} when a no-target Space greet would otherwise fire.
+   * Returns `true` if the greet was consumed as the beat-5 acceptance (the
+   * caller should then SKIP the usual `player.startGreeting()`), `false`
+   * otherwise (normal greet flow).
+   */
+  private tryAcceptBeat5Decision(): boolean {
+    if (!this.beat5DecisionActive) return false;
+    if (!this.camilleNPC || !this.camilleNPC.active || !this.camilleNPC.visible) return false;
+    const dist = Phaser.Math.Distance.Between(
+      this.player.x,
+      this.player.y,
+      this.camilleNPC.x,
+      this.camilleNPC.y,
+    );
+    if (dist > GP.CAMILLE_BEAT5_TOUCH_DIST) return false;
+    this.acceptBeat5();
+    return true;
+  }
+
+  /** Player accepted within the window → play the accept line, then Phase C. */
+  private acceptBeat5(): void {
+    this.beat5DecisionActive = false;
+    this.cancelBeat5Decision();
+    this.player.startGreeting();
+    if (this.camilleNPC) {
+      this.emotes.show(this, this.camilleNPC, "heart");
+      this.emotes.show(this, this.player, "heart");
+    }
+    // Show Camille's acceptance line as a persistent bubble, then Phase C.
+    const speaker = this.camilleNPC;
+    if (!speaker) {
+      // Shouldn't happen — defensive fallthrough.
+      this.playCamilleBeat5Journey();
+      return;
+    }
+    const bubble = this.renderHumanBubble(speaker, CAMILLE_BEAT5_ACCEPT_LINE, {
+      persistent: true,
+    });
+    this.time.delayedCall(3200, () => {
+      bubble?.destroy();
+      this.playCamilleBeat5Journey();
+    });
+  }
+
+  /** Window expired → gentle fallback, resume Camille, re-arm the beat. */
+  private failBeat5(): void {
+    this.beat5DecisionActive = false;
+    this.cancelBeat5Decision();
+    const speaker = this.camilleNPC;
+    if (speaker && speaker.active && speaker.visible) {
+      const bubble = this.renderHumanBubble(speaker, CAMILLE_BEAT5_TIMEOUT_LINE, {
+        persistent: true,
+      });
+      this.time.delayedCall(2600, () => bubble?.destroy());
+    }
+    this.resumeCamilleEraHumans();
+    // Re-arm so the next CAMILLE_ENCOUNTER_DIST proximity poll retries.
+    this.pendingCamilleEncounter = 5;
+  }
+
+  /**
+   * Phase C: narration over the pickup tween. The journey paired beat runs
+   * two narrator-only steps in the modal; on the FIRST step shown we kick
+   * off the pickup tween ({@link runBeat5Pickup}) so "The garden shrinks
+   * behind you" is perfectly synchronised with Mamma Cat being lifted into
+   * the carrier and Camille walking toward the underpass exit.
+   */
+  private playCamilleBeat5Journey(): void {
+    this.playerInputFrozen = true;
+    this.player.setVelocity(0);
+    this.playPairedBeat(
+      this.camilleBeat5JourneySteps,
+      this.camilleNPC,
+      () => {
+        this.registry.set(StoryKeys.ENCOUNTER_5_COMPLETE, true);
+        this.autoSave();
+        this.startChapter6Sequence();
+      },
+      {
+        onStepShown: (index) => {
+          if (index === 0) this.runBeat5Pickup();
+        },
+      },
+    );
+  }
+
+  /**
+   * Run the "Camille picks up Mamma Cat" visual:
+   *   1. Tween Mamma Cat to Camille's feet while fading out (carrier).
+   *   2. Disable Mamma's physics body + hide her.
+   *   3. Tween Camille off-screen toward the underpass exit (her spawn
+   *      waypoint) with her walk animation.
+   * All under the existing `playerInputFrozen` and `beat5PickupInProgress`
+   * guards so nothing else can steer the player while this plays out.
+   */
+  private runBeat5Pickup(): void {
+    const speaker = this.camilleNPC;
+    if (!speaker) return;
+
+    // Step 1+2: Mamma → Camille's feet, fade, hide.
+    const mammaBody = this.player.body as Phaser.Physics.Arcade.Body | undefined;
+    this.tweens.add({
+      targets: this.player,
+      x: speaker.x,
+      y: speaker.y + 4,
+      alpha: 0,
+      duration: 900,
+      ease: "Sine.easeInOut",
+      onComplete: () => {
+        mammaBody?.setEnable(false);
+        this.player.setVisible(false);
+      },
+    });
+
+    // Step 3: Camille walks off-screen toward her underpass spawn waypoint.
+    // Release just Camille (not the whole Camille-era group — Manu/Kish
+    // should continue their own circuits normally once the beat resolves).
+    const exitTarget = speaker.config.path[0] ?? { x: speaker.x - 200, y: speaker.y };
+    this.manuNPC?.resumeFromEncounter();
+    this.kishNPC?.resumeFromEncounter();
+    speaker.resumeFromEncounter();
+    this.tweens.add({
+      targets: speaker,
+      x: exitTarget.x,
+      y: exitTarget.y,
+      duration: 3200,
+      ease: "Sine.easeInOut",
+      onUpdate: () => {
+        const dx = exitTarget.x - speaker.x;
+        const dy = exitTarget.y - speaker.y;
+        const key = speaker.humanType;
+        const dir =
+          Math.abs(dx) > Math.abs(dy)
+            ? dx < 0
+              ? "left"
+              : "right"
+            : dy < 0
+              ? "up"
+              : "down";
+        if (this.anims.exists(`${key}-walk-${dir}`)) {
+          speaker.anims.play(`${key}-walk-${dir}`, true);
+        }
+      },
+      onComplete: () => {
+        speaker.setVisible(false);
+      },
+    });
+  }
+
+  /**
+   * Ask Camille's AI persona for beat-appropriate spoken lines. Returns the
+   * trimmed lines on success, or `null` on any failure (the caller then
+   * substitutes authored fallback text without error propagation).
+   *
+   * This method is intentionally SIDE-EFFECT-FREE — it does not persist
+   * conversation history. Persistence happens in
+   * {@link persistCamilleBeatHistory} after the caller has merged the AI
+   * lines with the authored beat via {@link mergeCamilleBeatSteps}, so the
+   * stored record reflects what Camille actually said on screen rather
+   * than the raw AI payload (which may be reshaped or partially dropped
+   * by the merge).
+   */
+  private async requestCamilleEncounterLines(
+    n: 2 | 3 | 4,
+    objective: string,
+  ): Promise<string[] | null> {
+    if (!(this.dialogueService instanceof FallbackDialogueService)) {
+      return null;
+    }
+    if (!("Camille" in AI_PERSONAS)) return null;
+
+    try {
+      const history = await getRecentConversations("Camille", 20);
+      const conversationHistory: ConversationEntry[] = history.map((r) => ({
+        timestamp: r.timestamp,
+        speaker: r.speaker,
+        text: r.lines.join(" "),
+      }));
+
+      const request: DialogueRequest = {
+        speaker: "Camille",
+        speakerType: "human",
+        target: "Mamma Cat",
+        gameState: {
+          chapter: this.chapters.chapter,
+          timeOfDay: this.dayNight.currentPhase,
+          trustGlobal: this.trust.global,
+          trustWithSpeaker: this.trust.global,
+          hunger: this.stats.hunger,
+          thirst: this.stats.thirst,
+          energy: this.stats.energy,
+          daysSurvived: this.dayNight.dayCount,
+          knownCats: Array.from(this.knownCats),
+          recentEvents: [],
+        },
+        conversationHistory,
+        encounterBeat: { kind: "camille_encounter", n, objective },
+      };
+
+      const response = await this.dialogueService.getDialogue(request, {
+        // Engaged-style budget: encounters are modal beats, the player is
+        // committed to the beat and can tolerate a longer wait than an
+        // ambient bubble.
+        timeoutMs: 5000,
+      });
+
+      const lines = response.lines
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0);
+      return lines.length === 0 ? null : lines;
+    } catch {
+      return null;
     }
   }
 
@@ -1649,10 +2286,16 @@ export class GameScene extends Phaser.Scene {
       const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, cat.x, cat.y);
 
       // Clear the "just spoke to" guard once the player leaves interaction
-      // range, so coming back later naturally triggers the next scripted
-      // response instead of it chaining from the last one.
-      if (this.lastDialoguePartner === cat && dist > INTERACTION_DISTANCE) {
-        this.lastDialoguePartner = null;
+      // range OR enough time has elapsed, so coming back later naturally
+      // triggers the next scripted response instead of it chaining from the
+      // last one. The time branch prevents stationary Mamma from being
+      // locked out of re-engaging a cat she didn't walk away from.
+      if (this.lastDialoguePartner === cat) {
+        const elapsedSinceChat = now - this.lastDialoguePartnerAt;
+        if (dist > INTERACTION_DISTANCE || elapsedSinceChat >= GameScene.LAST_PARTNER_HOLD_MS) {
+          this.lastDialoguePartner = null;
+          this.lastDialoguePartnerAt = 0;
+        }
       }
 
       if (!indicator.known) {
@@ -1978,6 +2621,7 @@ export class GameScene extends Phaser.Scene {
     return [
       {
         type: "feeder",
+        identityName: "Rose",
         speed: 40,
         activePhases: ["dawn", "evening"],
         lingerSec: 45,
@@ -1987,6 +2631,7 @@ export class GameScene extends Phaser.Scene {
       },
       {
         type: "feeder",
+        identityName: "Ben",
         speed: 38,
         activePhases: ["dawn", "evening"],
         lingerSec: 40,
@@ -1997,6 +2642,29 @@ export class GameScene extends Phaser.Scene {
     ];
   }
 
+  /**
+   * Track Mamma Cat's position to drive the per-human stationary greeting
+   * cap. If she has moved more than {@link STATIONARY_MOVE_THRESHOLD_PX}
+   * from the current anchor, reset every human's stationary greet counter
+   * and re-anchor. While she is stationary (or asleep/resting) the counter
+   * accumulates until it hits {@link STATIONARY_GREET_CAP}, at which point
+   * `updateHumans` skips the ambient greeting branch until she moves again.
+   *
+   * Uses squared-distance to avoid a per-frame sqrt. O(humans) on threshold
+   * crossings, otherwise O(1).
+   */
+  private updatePlayerStationaryAnchor(): void {
+    const dx = this.player.x - this.playerStationaryAnchorX;
+    const dy = this.player.y - this.playerStationaryAnchorY;
+    const thresholdSq = STATIONARY_MOVE_THRESHOLD_PX * STATIONARY_MOVE_THRESHOLD_PX;
+    if (dx * dx + dy * dy < thresholdSq) return;
+    this.playerStationaryAnchorX = this.player.x;
+    this.playerStationaryAnchorY = this.player.y;
+    for (const human of this.humans) {
+      human.resetStationaryGreet();
+    }
+  }
+
   private updateHumans(delta: number): void {
     const now = this.time.now;
     for (const human of this.humans) {
@@ -2005,13 +2673,25 @@ export class GameScene extends Phaser.Scene {
 
       if (!human.visible) continue;
 
-      if (human.isCatPerson && !human.isGreeting) {
+      // Humans that are paused for an encounter beat (Camille during her
+      // dialogue, Manu/Kish while flanking her) must not enter the ambient
+      // proximity-greeting branch — their encounter pause already sets
+      // their pose, and firing a second greeting would clobber the crouch
+      // animation and spawn a duplicate bubble above their head.
+      if (human.isCatPerson && !human.isGreeting && !human.isEncounterPaused) {
         let greeted = false;
 
-        // Always greet Mamma Cat when close — no "already greeted" gate.
-        // The isGreeting cooldown (4-6s) prevents frame-spam naturally.
+        // Mamma Cat proximity greeting, capped per human per stationary
+        // session. See STATIONARY_GREET_CAP. The cap resets automatically
+        // via `resetStationaryGreet` when Mamma moves more than
+        // STATIONARY_MOVE_THRESHOLD_PX from her anchor (see
+        // `updatePlayerStationaryAnchor`). The isGreeting cooldown (4-6s)
+        // still prevents frame-spam during the N allowed attempts.
         const playerDist = Phaser.Math.Distance.Between(human.x, human.y, this.player.x, this.player.y);
-        if (playerDist < GP.CAT_PERSON_PLAYER_GREET_DIST) {
+        if (
+          playerDist < GP.CAT_PERSON_PLAYER_GREET_DIST &&
+          human.stationaryGreetCount < STATIONARY_GREET_CAP
+        ) {
           let playerLine: string | undefined;
           if (human.humanType === "camille") {
             const enc = (this.registry.get(StoryKeys.CAMILLE_ENCOUNTER) as number) ?? 0;
@@ -2020,6 +2700,7 @@ export class GameScene extends Phaser.Scene {
             }
           }
           human.startGreeting(this.player.x, this.player.y);
+          human.incrementStationaryGreet();
           this.showGreetingBubble(human, { line: playerLine });
           this.emotes.show(this, human, "heart");
           this.emotes.show(this, this.player, "heart");
@@ -2051,29 +2732,15 @@ export class GameScene extends Phaser.Scene {
         this.camilleNPC &&
         this.kishNPC &&
         !this.kishNPC.isGreeting &&
+        !this.camilleNPC.isEncounterPaused &&
+        !this.kishNPC.isEncounterPaused &&
         Phaser.Math.Distance.Between(this.kishNPC.x, this.kishNPC.y, this.camilleNPC.x, this.camilleNPC.y) < 80
       ) {
         this.kishCamilleSlowDownShown = true;
-        const bubble = this.add
-          .text(this.camilleNPC.x, this.camilleNPC.y - 44, "Kish, slow down.", {
-            fontFamily: "Arial, Helvetica, sans-serif",
-            fontSize: "10px",
-            color: "#ffffff",
-            stroke: "#000000",
-            strokeThickness: 2,
-            backgroundColor: "#00000066",
-            padding: { x: 4, y: 2 },
-          })
-          .setOrigin(0.5)
-          .setDepth(8);
-        this.tweens.add({
-          targets: bubble,
-          y: this.camilleNPC.y - 64,
-          alpha: 0,
-          delay: 2000,
-          duration: 800,
-          onComplete: () => bubble.destroy(),
-        });
+        // Consolidated into the ambient-bubble channel so all human-spoken
+        // dialogue uses the same visual surface as greetings and encounter
+        // beats. Camille is the speaker; Kish just hears it.
+        this.renderGreetingBubble(this.camilleNPC, "Kish, slow down.");
         this.emotes.show(this, this.camilleNPC, "curious");
       }
 
@@ -2158,19 +2825,183 @@ export class GameScene extends Phaser.Scene {
     feeder: ["Hi sweetie.", "Kamusta, pusa.", "There you are.", "Good kitty."],
   };
 
+  /**
+   * Show a single greeting bubble above `human` using the best available
+   * source in priority order: caller-forced line > AI persona > scripted pool.
+   *
+   * AI path: eligible when the human has an `identityName` registered in
+   * `AI_PERSONAS`, its per-human cooldown has elapsed, no other AI bubble is
+   * in flight, and no caller-forced line was passed. On success, stores the
+   * exchange in `ConversationStore` keyed by the identity name so future
+   * bubbles (and engaged dialogue if we ever wire humans to Space) pick up
+   * prior beats. On timeout/failure, quietly falls back to the scripted pool.
+   *
+   * Timing: AI path uses a 1.5s budget (vs 8s for engaged cat dialogue) so
+   * ambient bubbles never stall the scene. Caller's emote + greeting animation
+   * fire synchronously in `updateHumans` regardless of which path is chosen.
+   */
   private showGreetingBubble(human: HumanNPC, opts?: { line?: string; nearNpcCat?: NPCCat }): void {
-    let line = opts?.line;
-    if (!line && opts?.nearNpcCat && human.humanType === "camille") {
-      const named = this.camillePersonalLines[opts.nearNpcCat.npcName];
-      if (named?.length) {
-        line = named[Math.floor(Math.random() * named.length)]!;
-      }
-    }
-    if (!line) {
-      const lines = this.catPersonGreetings[human.humanType] ?? this.catPersonGreetings.feeder!;
-      line = lines[Math.floor(Math.random() * lines.length)]!;
+    if (opts?.line) {
+      this.renderGreetingBubble(human, opts.line);
+      return;
     }
 
+    const identity = human.identityName;
+    const hasPersona = identity !== null && identity in AI_PERSONAS;
+    const now = this.time.now;
+    const cooldownUntil = this.humanAiBubbleCooldownUntil.get(human) ?? 0;
+    const aiEligible =
+      hasPersona &&
+      !this.humanAiBubbleInFlight &&
+      now >= cooldownUntil &&
+      this.dialogueService instanceof FallbackDialogueService;
+
+    if (aiEligible && identity !== null) {
+      // Per-human cooldown is set up front (regardless of success) so a burst
+      // of proximity events can't fire multiple AI calls for the same speaker.
+      this.humanAiBubbleCooldownUntil.set(human, now + GameScene.HUMAN_AI_BUBBLE_COOLDOWN_MS);
+      void this.requestHumanBubbleLine(human, identity, opts?.nearNpcCat).catch(() => {
+        /* fallbackLine branch inside already renders scripted on failure */
+      });
+      return;
+    }
+
+    this.renderGreetingBubble(human, this.pickScriptedGreeting(human, opts?.nearNpcCat));
+  }
+
+  /**
+   * Ask the AI service for a single ambient line and render it. Falls back to
+   * a scripted line on timeout, network failure, parse failure, or if the
+   * human becomes ineligible (off-screen, exited) mid-flight.
+   */
+  private async requestHumanBubbleLine(
+    human: HumanNPC,
+    speaker: string,
+    nearNpcCat: NPCCat | undefined,
+  ): Promise<void> {
+    this.humanAiBubbleInFlight = true;
+    const abort = new AbortController();
+    this.humanAiBubbleAbort = abort;
+
+    const renderFallback = (): void => {
+      if (!human.active || !human.visible) return;
+      this.renderGreetingBubble(human, this.pickScriptedGreeting(human, nearNpcCat));
+    };
+
+    try {
+      const history = await getRecentConversations(speaker, 10);
+      const conversationHistory: ConversationEntry[] = history.map((r) => ({
+        timestamp: r.timestamp,
+        speaker: r.speaker,
+        text: r.lines.join(" "),
+      }));
+
+      const request: DialogueRequest = {
+        speaker,
+        speakerType: "human",
+        target: "Mamma Cat",
+        gameState: {
+          chapter: this.chapters.chapter,
+          timeOfDay: this.dayNight.currentPhase,
+          trustGlobal: this.trust.global,
+          trustWithSpeaker: this.trust.global,
+          hunger: this.stats.hunger,
+          thirst: this.stats.thirst,
+          energy: this.stats.energy,
+          daysSurvived: this.dayNight.dayCount,
+          knownCats: Array.from(this.knownCats),
+          recentEvents: [],
+        },
+        conversationHistory,
+        nearbyCat: nearNpcCat?.npcName,
+      };
+
+      const response = await (this.dialogueService as FallbackDialogueService).getDialogue(
+        request,
+        { timeoutMs: GameScene.HUMAN_AI_BUBBLE_TIMEOUT_MS, signal: abort.signal },
+      );
+
+      if (abort.signal.aborted || !human.active || !human.visible) {
+        return;
+      }
+      const line = response.lines[0]?.trim();
+      if (!line) {
+        renderFallback();
+        return;
+      }
+      this.renderGreetingBubble(human, line);
+
+      // Persist for future bubbles. Store is keyed by speaker so per-human
+      // history stays consistent whether the player talks to this human via
+      // bubbles or via an encounter beat.
+      //
+      // Persist ONLY the line we actually rendered (`line`), not the whole
+      // `response.lines` payload. Ambient bubbles render a single bubble
+      // above the NPC, so any additional lines in response.lines were
+      // never seen by the player. Storing them would condition the next
+      // LLM call on dialogue the player never heard — see the matching
+      // lesson for Camille beats in WORKING_MEMORY.md.
+      const snapshotTrust = this.trust.global;
+      await storeConversation({
+        speaker,
+        timestamp: this.dayNight.totalGameTimeMs,
+        realTimestamp: Date.now(),
+        gameDay: this.dayNight.dayCount,
+        lines: [line],
+        trustBefore: snapshotTrust,
+        trustAfter: snapshotTrust,
+        chapter: this.chapters.chapter,
+        playerAction: "ambient_greeting",
+        gameStateSnapshot: {
+          trustWithSpeaker: snapshotTrust,
+          trustGlobal: this.trust.global,
+          timeOfDay: this.dayNight.currentPhase,
+          hunger: this.stats.hunger,
+          thirst: this.stats.thirst,
+          energy: this.stats.energy,
+        },
+      });
+    } catch {
+      renderFallback();
+    } finally {
+      this.humanAiBubbleInFlight = false;
+      if (this.humanAiBubbleAbort === abort) this.humanAiBubbleAbort = null;
+    }
+  }
+
+  /** Pick a scripted line for a human greeting, honouring Camille's per-cat overrides. */
+  private pickScriptedGreeting(human: HumanNPC, nearNpcCat: NPCCat | undefined): string {
+    if (nearNpcCat && human.humanType === "camille") {
+      const named = this.camillePersonalLines[nearNpcCat.npcName];
+      if (named?.length) {
+        return named[Math.floor(Math.random() * named.length)]!;
+      }
+    }
+    const lines = this.catPersonGreetings[human.humanType] ?? this.catPersonGreetings.feeder!;
+    return lines[Math.floor(Math.random() * lines.length)]!;
+  }
+
+  /**
+   * Render a floating speech bubble above `human` carrying `line`.
+   *
+   * All human-spoken dialogue — ambient greetings, Kish's "slow down"
+   * beat, and Camille's encounter lines — renders through this single
+   * helper so the game never shows more than one visual style for
+   * human speech.
+   *
+   * Lifetime is controlled by `opts.persistent`:
+   *  - `false` (default): auto-fades at ~2.5s and self-destroys; used
+   *    for ambient greetings where the player keeps moving.
+   *  - `true`: returns the Text GameObject and does NOT auto-destroy.
+   *    The caller owns the bubble's lifetime (typically tied to an
+   *    encounter beat step) and MUST `.destroy()` it when advancing
+   *    or aborting. Used by the Camille encounter loop.
+   */
+  private renderHumanBubble(
+    human: HumanNPC,
+    line: string,
+    opts?: { persistent?: boolean },
+  ): Phaser.GameObjects.Text {
     const bubble = this.add
       .text(human.x, human.y - 30, line, {
         fontFamily: "Arial, Helvetica, sans-serif",
@@ -2184,15 +3015,39 @@ export class GameScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setDepth(8);
 
-    this.tweens.add({
-      targets: bubble,
-      y: human.y - 50,
-      alpha: 0,
-      delay: 2500,
-      duration: 1000,
-      onComplete: () => bubble.destroy(),
-    });
+    if (!opts?.persistent) {
+      this.tweens.add({
+        targets: bubble,
+        y: human.y - 50,
+        alpha: 0,
+        delay: 2500,
+        duration: 1000,
+        onComplete: () => bubble.destroy(),
+      });
+    }
+
+    return bubble;
   }
+
+  /**
+   * Back-compat wrapper for the ambient (auto-fading) bubble path.
+   * Kept as a named helper so call sites read naturally at the greeting
+   * sites.
+   */
+  private renderGreetingBubble(human: HumanNPC, line: string): void {
+    this.renderHumanBubble(human, line);
+  }
+
+  /** Per-human wait between AI ambient bubbles, ms. */
+  private static readonly HUMAN_AI_BUBBLE_COOLDOWN_MS = 30_000;
+  /**
+   * Budget for ambient bubble LLM calls, ms. Observed proxy round-trips run
+   * 2000–4500 ms, so anything tighter forces almost every bubble through the
+   * scripted fallback (and spams the console). 3500 ms catches the common
+   * case while still well below the 8s engaged dialogue budget so a slow
+   * model can't stall the scene.
+   */
+  private static readonly HUMAN_AI_BUBBLE_TIMEOUT_MS = 3500;
 
   // ──────────── Food Sources ────────────
 
@@ -2293,36 +3148,94 @@ export class GameScene extends Phaser.Scene {
 
   private tryInteract(): void {
     // Greeting locks the player; ignore re-presses until it finishes.
-    if (this.player.isGreeting) return;
+    if (this.player.isGreeting) {
+      this.logInteractDiag("skipped: player mid-greeting", null, Infinity, null, Infinity);
+      return;
+    }
 
     let nearestEntry: NPCEntry | null = null;
     let nearestDist = Infinity;
+    // Track the absolute-nearest cat ignoring the `lastDialoguePartner`
+    // skip, so the diagnostic can tell "no cat in range" apart from "a cat
+    // is right next to you but is being intentionally skipped".
+    let nearestRawEntry: NPCEntry | null = null;
+    let nearestRawDist = Infinity;
     for (const entry of this.npcs) {
+      const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, entry.cat.x, entry.cat.y);
+      if (dist < nearestRawDist) {
+        nearestRawEntry = entry;
+        nearestRawDist = dist;
+      }
       // Skip the cat we just finished talking to until the player has stepped
       // out of range. Without this guard, a single Space press can both close
       // the current dialogue (Phaser dispatches key events before update())
       // and immediately re-open the next scripted response for the same NPC.
       if (entry.cat === this.lastDialoguePartner) continue;
-      const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, entry.cat.x, entry.cat.y);
       if (dist < INTERACTION_DISTANCE && dist < nearestDist) {
         nearestEntry = entry;
         nearestDist = dist;
       }
     }
     if (!nearestEntry) {
+      // Beat-5 decision gate takes priority over the free greet: if the
+      // player pressed Space close enough to Camille while her 10s window
+      // is open, consume the press as the "yes, take me home" answer.
+      // acceptBeat5() fires Mamma's greeting animation itself so we return
+      // early here and do NOT double-trigger startGreeting().
+      if (this.tryAcceptBeat5Decision()) {
+        this.logInteractDiag("consumed by Beat-5 decision", null, Infinity, nearestRawEntry, nearestRawDist);
+        return;
+      }
       // No cat in range — space becomes a free Mamma-Cat greeting action.
       // This is NOT proximity-gated and does NOT target any NPC: the player
       // can greet anywhere, any time. The humans' own passive proximity greet
       // loop in updateHumans() is untouched and still runs independently.
+      this.logInteractDiag("free greet (no cat in range)", null, Infinity, nearestRawEntry, nearestRawDist);
       this.player.startGreeting();
       return;
     }
     const cat = nearestEntry.cat;
     if (cat.state === "sleeping") {
+      this.logInteractDiag("alerted sleeping cat", nearestEntry, nearestDist, nearestRawEntry, nearestRawDist);
       cat.triggerAlert();
       return;
     }
+    this.logInteractDiag("engaging dialogue", nearestEntry, nearestDist, nearestRawEntry, nearestRawDist);
     this.showCatDialogue(cat);
+  }
+
+  /**
+   * DEV-only one-line breakdown of every Space-interact press, so "why
+   * didn't that do anything?" is self-diagnosing. Prints the guard state
+   * (dialogue/frozen/greeting), the selected target (respecting the
+   * `lastDialoguePartner` skip), and the absolute-nearest cat so you can
+   * see at a glance whether proximity or the just-spoke-to guard was what
+   * blocked engagement. No-ops in production builds.
+   *
+   * Uses `console.log` (not `.debug`) because Chrome's "Default levels"
+   * filter hides `.debug` under the Verbose bucket — the whole point of
+   * this diagnostic is to be visible without tweaking DevTools.
+   */
+  private logInteractDiag(
+    outcome: string,
+    selected: NPCEntry | null,
+    selectedDist: number,
+    rawNearest: NPCEntry | null,
+    rawNearestDist: number,
+  ): void {
+    if (!import.meta.env.DEV) return;
+    console.log("[interact]", {
+      outcome,
+      dialogueActive: this.dialogue.isActive,
+      frozen: this.playerInputFrozen,
+      isGreeting: this.player.isGreeting,
+      lastPartner: this.lastDialoguePartner?.npcName ?? null,
+      selected: selected ? { name: selected.cat.npcName, dist: Math.round(selectedDist) } : null,
+      nearestAny: rawNearest
+        ? { name: rawNearest.cat.npcName, dist: Math.round(rawNearestDist) }
+        : null,
+      interactDist: INTERACTION_DISTANCE,
+    });
   }
 
   private showCatDialogue(cat: NPCCat): void {
@@ -2345,12 +3258,16 @@ export class GameScene extends Phaser.Scene {
   private async requestCatDialogue(cat: NPCCat): Promise<void> {
     if (this.dialogueRequestInFlight) return;
     this.dialogueRequestInFlight = true;
+    this.aiThinkingTimer = this.time.delayedCall(400, () => {
+      if (!this.dialogueRequestInFlight) return;
+      this.emotes.show(this, cat, "curious");
+    });
 
     try {
       const name = cat.npcName;
       const trustBefore = this.trust.getCatTrust(name);
 
-      const history = await getRecentConversations(name, 10);
+      const history = await getRecentConversations(name, 20);
       const conversationHistory: ConversationEntry[] = history.map((r) => ({
         timestamp: r.timestamp,
         speaker: r.speaker,
@@ -2414,6 +3331,7 @@ export class GameScene extends Phaser.Scene {
         cat.disengageDialogue();
         this.engagedDialogueNPC = null;
         this.lastDialoguePartner = cat;
+        this.lastDialoguePartnerAt = this.time.now;
         this.processDialogueResponse(cat, name, trustBefore, response);
       });
     } catch (err) {
@@ -2432,6 +3350,8 @@ export class GameScene extends Phaser.Scene {
       const hud = this.scene.get("HUDScene") as HUDScene | undefined;
       hud?.showNarration("Words fail. The moment passes.");
     } finally {
+      this.aiThinkingTimer?.remove(false);
+      this.aiThinkingTimer = null;
       this.dialogueRequestInFlight = false;
     }
   }
@@ -2446,66 +3366,75 @@ export class GameScene extends Phaser.Scene {
       this.emotes.show(this, cat, response.emote as EmoteType);
     }
 
-    // Persist to IndexedDB for Phase 5 AI context
-    storeConversation({
+    const event = response.event;
+    const isFirst = event ? event.endsWith("_first") : false;
+
+    if (event) {
+      if (isFirst) {
+        this.addKnownCat(catName);
+        this.npcs.find((e) => e.cat === cat)?.indicator.reveal();
+        this.awardFirstConversation(catName);
+      } else if (event.endsWith("_return") || event.endsWith("_warmup")) {
+        this.awardReturnConversation(catName);
+      }
+
+      switch (event) {
+        case "blacky_first":
+          this.registry.set("MET_BLACKY", true);
+          break;
+        case "tiger_first":
+          this.registry.set("TIGER_TALKS", 1);
+          break;
+        case "tiger_warmup":
+          this.registry.set("TIGER_TALKS", 2);
+          cat.disposition = "friendly";
+          this.npcs.find((e) => e.cat === cat)?.indicator.setDisposition("friendly");
+          break;
+        case "jayco_first":
+          this.registry.set("JAYCO_TALKS", 1);
+          cat.disposition = "friendly";
+          {
+            const entry = this.npcs.find((e) => e.cat === cat);
+            entry?.indicator.setDisposition("friendly");
+          }
+          break;
+        case "jaycojr_first":
+          this.registry.set("JAYCO_JR_TALKS", 1);
+          break;
+        case "fluffy_first":
+          this.registry.set("FLUFFY_TALKS", 1);
+          break;
+        case "pedigree_first":
+          this.registry.set("PEDIGREE_TALKS", 1);
+          break;
+        case "ginger_first":
+          this.registry.set("MET_GINGER_A", true);
+          break;
+        case "gingerb_first":
+          this.registry.set("MET_GINGER_B", true);
+          break;
+      }
+    }
+
+    // Persist after trust awards so trustAfter matches gameplay state.
+    void storeConversation({
       speaker: catName,
       timestamp: this.dayNight.totalGameTimeMs,
+      realTimestamp: Date.now(),
       gameDay: this.dayNight.dayCount,
       lines: response.lines,
       trustBefore,
       trustAfter: this.trust.getCatTrust(catName),
       chapter: this.chapters.chapter,
+      gameStateSnapshot: {
+        trustWithSpeaker: this.trust.getCatTrust(catName),
+        trustGlobal: this.trust.global,
+        timeOfDay: this.dayNight.currentPhase,
+        hunger: this.stats.hunger,
+        thirst: this.stats.thirst,
+        energy: this.stats.energy,
+      },
     });
-
-    const event = response.event;
-    if (!event) return;
-
-    const isFirst = event.endsWith("_first");
-
-    if (isFirst) {
-      this.addKnownCat(catName);
-      this.npcs.find((e) => e.cat === cat)?.indicator.reveal();
-      this.awardFirstConversation(catName);
-    } else if (event.endsWith("_return") || event.endsWith("_warmup")) {
-      this.awardReturnConversation(catName);
-    }
-
-    switch (event) {
-      case "blacky_first":
-        this.registry.set("MET_BLACKY", true);
-        break;
-      case "tiger_first":
-        this.registry.set("TIGER_TALKS", 1);
-        break;
-      case "tiger_warmup":
-        this.registry.set("TIGER_TALKS", 2);
-        cat.disposition = "friendly";
-        this.npcs.find((e) => e.cat === cat)?.indicator.setDisposition("friendly");
-        break;
-      case "jayco_first":
-        this.registry.set("JAYCO_TALKS", 1);
-        cat.disposition = "friendly";
-        {
-          const entry = this.npcs.find((e) => e.cat === cat);
-          entry?.indicator.setDisposition("friendly");
-        }
-        break;
-      case "jaycojr_first":
-        this.registry.set("JAYCO_JR_TALKS", 1);
-        break;
-      case "fluffy_first":
-        this.registry.set("FLUFFY_TALKS", 1);
-        break;
-      case "pedigree_first":
-        this.registry.set("PEDIGREE_TALKS", 1);
-        break;
-      case "ginger_first":
-        this.registry.set("MET_GINGER_A", true);
-        break;
-      case "gingerb_first":
-        this.registry.set("MET_GINGER_B", true);
-        break;
-    }
 
     if (isFirst) {
       this.autoSave();
@@ -2781,6 +3710,7 @@ export class GameScene extends Phaser.Scene {
     // partner pointer.
     if (this.lastDialoguePartner === cat) {
       this.lastDialoguePartner = null;
+      this.lastDialoguePartnerAt = 0;
     }
 
     const prev = this.registry.get(StoryKeys.CATS_SNATCHED);
