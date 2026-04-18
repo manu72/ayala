@@ -3,6 +3,7 @@ import { GAME_VERSION } from "../config/gameVersion";
 import type { GameScene } from "./GameScene";
 import { DialogueSystem } from "../systems/DialogueSystem";
 import { REST_HOLD_MS } from "../config/gameplayConstants";
+import { AUDIO_MUTED_CHANGED } from "../systems/AudioSystem";
 
 const PANEL_X = 8;
 const PANEL_Y = 8;
@@ -40,6 +41,10 @@ export class HUDScene extends Phaser.Scene {
   private warningOverlay!: Phaser.GameObjects.Rectangle;
   private exhaustedText!: Phaser.GameObjects.Text;
   private saveNotice!: Phaser.GameObjects.Text;
+
+  private muteIcon!: Phaser.GameObjects.Image;
+  private muteFocusRing!: Phaser.GameObjects.Rectangle;
+  private muteListener: ((muted: boolean) => void) | null = null;
 
   private restProgressBg!: Phaser.GameObjects.Arc;
   private restProgressArc!: Phaser.GameObjects.Graphics;
@@ -126,8 +131,10 @@ export class HUDScene extends Phaser.Scene {
       .setVisible(false);
 
     // ──── Save notice ────
+    // Shifted left to make room for the mute icon that lives in the top-right
+    // corner. The notice auto-sizes its origin, so this is a pure reposition.
     this.saveNotice = this.add
-      .text(width - 14, 14, "Saved", {
+      .text(width - 40, 14, "Saved", {
         fontFamily: FONT_FAMILY,
         fontSize: "14px",
         color: "#44DD44",
@@ -136,6 +143,8 @@ export class HUDScene extends Phaser.Scene {
       })
       .setOrigin(1, 0)
       .setAlpha(0);
+
+    this.buildMuteToggle(width);
 
     // ──── Rest progress indicator ────
     this.restProgressBg = this.add.circle(width / 2, height / 2, 24, 0x000000, 0.5).setVisible(false);
@@ -333,6 +342,80 @@ export class HUDScene extends Phaser.Scene {
       overlay, title, this.pauseChapterTitle, this.pauseChapterHint,
       saveBtn, journalBtn, resumeBtn, quitBtn, this.pauseVersionLabel,
     ]);
+  }
+
+  /**
+   * Top-right mute toggle. Driven by the AudioSystem's mute flag (which
+   * persists across scene restarts via localStorage), so the icon state is
+   * the source-of-truth reflection of that flag — never the other way around.
+   *
+   * The hit area is slightly larger than the visible 20px glyph so the icon
+   * is comfortable to click on touch displays. A simple focus ring fades in
+   * on hover to satisfy the "visible focus state" accessibility rule for a
+   * Phaser-canvas control that can't inherit browser focus styles. The glyph
+   * itself carries the semantic state (speaker-with-waves vs speaker-with-X)
+   * independently of colour, per the "don't rely on colour alone" rule.
+   */
+  private buildMuteToggle(width: number): void {
+    const ICON_SIZE = 20;
+    const PAD = 10;
+    const cx = width - PAD - ICON_SIZE / 2;
+    const cy = PAD + ICON_SIZE / 2;
+
+    this.muteFocusRing = this.add
+      .rectangle(cx, cy, ICON_SIZE + 10, ICON_SIZE + 10, 0x000000, 0.35)
+      .setStrokeStyle(1, 0xffffff, 0.75)
+      .setAlpha(0)
+      .setDepth(94);
+
+    this.muteIcon = this.add
+      .image(cx, cy, "icon_volume_on")
+      .setDisplaySize(ICON_SIZE, ICON_SIZE)
+      .setDepth(95);
+
+    const hit = this.add
+      .rectangle(cx, cy, ICON_SIZE + 10, ICON_SIZE + 10, 0x000000, 0)
+      .setInteractive({ useHandCursor: true })
+      .setDepth(96);
+
+    const gameScene = this.scene.get("GameScene") as GameScene;
+
+    const refresh = (muted: boolean) => {
+      this.muteIcon.setTexture(muted ? "icon_volume_off" : "icon_volume_on");
+      this.muteIcon.setAlpha(muted ? 0.6 : 1);
+    };
+
+    const toggle = () => {
+      if (!gameScene?.audio) return;
+      gameScene.audio.toggleMuted();
+    };
+
+    hit.on("pointerover", () => this.muteFocusRing.setAlpha(1));
+    hit.on("pointerout", () => this.muteFocusRing.setAlpha(0));
+    hit.on("pointerdown", toggle);
+
+    // M-key shortcut; verified no other binding claims M. Must not fire while
+    // typing into an input (we don't have any, but guard anyway) and is
+    // deliberately not scene-paused so it works even from the pause menu.
+    const mKey = this.input.keyboard?.addKey("M", true, false);
+    mKey?.on("down", toggle);
+
+    // React to mute changes from any source (click, hotkey, or future code
+    // paths) via the GameScene event bus. Listener is unsubscribed on HUD
+    // shutdown so scene restarts don't leak closures.
+    this.muteListener = refresh;
+    gameScene?.events.on(AUDIO_MUTED_CHANGED, refresh);
+
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      if (this.muteListener) {
+        gameScene?.events.off(AUDIO_MUTED_CHANGED, this.muteListener);
+        this.muteListener = null;
+      }
+      mKey?.off("down", toggle);
+    });
+
+    // Reflect the persisted state on first mount.
+    if (gameScene?.audio) refresh(gameScene.audio.isMuted());
   }
 
   private createMenuButton(x: number, y: number, label: string, callback: () => void): Phaser.GameObjects.Text {

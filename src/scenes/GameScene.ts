@@ -52,6 +52,7 @@ import {
   type EncounterStep,
 } from "../data/camille-encounter-beats";
 import { resolveSnatcherSpawnAction } from "../systems/SnatcherSystem";
+import { AudioSystem } from "../systems/AudioSystem";
 import { hasLineOfSightTiles } from "../utils/lineOfSight";
 
 const INTERACTION_DISTANCE = GP.INTERACTION_DIST;
@@ -125,6 +126,11 @@ export class GameScene extends Phaser.Scene {
   private narrationShown = new Set<string>();
   private dialogueService!: DialogueService;
   territory!: TerritorySystem;
+  /**
+   * Owns the looping background music (ambient ↔ danger crossfade) and
+   * one-shot SFX. Public so HUDScene can hook the mute toggle.
+   */
+  audio!: AudioSystem;
 
   // Camille encounter sequence state
   private camilleNPC: HumanNPC | null = null;
@@ -299,6 +305,10 @@ export class GameScene extends Phaser.Scene {
       this.player.setVisible(true);
     }
     this.resumeCamilleEraHumans();
+
+    // Stop music + release sound instances so a scene restart (e.g. after a
+    // snatcher capture at GameScene.ts:3750) doesn't stack overlapping loops.
+    this.audio?.stop();
   }
 
   /** Remove pending intro delayed calls and tweens (idempotent). */
@@ -387,6 +397,8 @@ export class GameScene extends Phaser.Scene {
     this.trust = new TrustSystem();
     this.emotes = new EmoteSystem();
     this.chapters = new ChapterSystem();
+    this.audio = new AudioSystem();
+    this.audio.start(this);
     this.chapterCheckTimer = 0;
     this.narrationShown = new Set();
     const scripted = new ScriptedDialogueService(CAT_DIALOGUE_SCRIPTS);
@@ -987,15 +999,22 @@ export class GameScene extends Phaser.Scene {
 
     // ──── Interact (Space tap) ────
     const spaceJust = this.spaceKey && Phaser.Input.Keyboard.JustDown(this.spaceKey);
-    if (spaceJust && (this.dialogue.isActive || this.playerInputFrozen) && import.meta.env.DEV) {
-      // console.log (not .debug) so the diagnostic shows at Chrome's
-      // "Default levels" filter — .debug maps to Verbose which is hidden
-      // by default, making Space-press bugs impossible to self-diagnose.
-      console.log("[interact]", {
-        outcome: "space blocked at outer gate",
-        dialogueActive: this.dialogue.isActive,
-        frozen: this.playerInputFrozen,
-      });
+    if (spaceJust && (this.dialogue.isActive || this.playerInputFrozen)) {
+      // Play the happy meow even when the press is absorbed by the outer
+      // gate (dialogue open / player frozen), so every Space tap has audio
+      // feedback and the mute state is consistent across all [interact]
+      // outcomes.
+      this.audio.playMeow();
+      if (import.meta.env.DEV) {
+        // console.log (not .debug) so the diagnostic shows at Chrome's
+        // "Default levels" filter — .debug maps to Verbose which is hidden
+        // by default, making Space-press bugs impossible to self-diagnose.
+        console.log("[interact]", {
+          outcome: "space blocked at outer gate",
+          dialogueActive: this.dialogue.isActive,
+          frozen: this.playerInputFrozen,
+        });
+      }
     }
     if (spaceJust && !this.dialogue.isActive && !this.playerInputFrozen) {
       const usedSource = this.foodSources.tryInteract(
@@ -2801,6 +2820,11 @@ export class GameScene extends Phaser.Scene {
       this.checkSnatcherDetection();
     }
 
+    // Crossfade background music to the danger theme whenever any snatcher
+    // exists in the park. setDanger() is idempotent, so calling it every
+    // frame is cheap.
+    this.audio.setDanger(this.snatchers.length > 0);
+
     // NPC cats flee from snatchers
     if (this.snatchers.length > 0) {
       for (const snatcher of this.snatchers) {
@@ -3147,6 +3171,11 @@ export class GameScene extends Phaser.Scene {
   // ──────────── NPC Interaction ────────────
 
   private tryInteract(): void {
+    // Every Space press that reaches this handler gets a happy meow, regardless
+    // of outcome (free greet, engage, alert a sleeper). JustDown gating upstream
+    // guarantees this fires exactly once per key press.
+    this.audio.playMeow();
+
     // Greeting locks the player; ignore re-presses until it finishes.
     if (this.player.isGreeting) {
       this.logInteractDiag("skipped: player mid-greeting", null, Infinity, null, Infinity);
