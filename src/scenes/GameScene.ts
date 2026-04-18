@@ -3200,9 +3200,18 @@ export class GameScene extends Phaser.Scene {
   // ──────────── NPC Interaction ────────────
 
   private tryInteract(): void {
-    // Greeting locks the player; ignore re-presses until it finishes.
+    // Greeting and consuming are both lock-in animation states that register
+    // a `once(ANIMATION_COMPLETE)` listener in MammaCat. Opening cat dialogue
+    // here calls `player.faceToward(...)` → `anims.stop()` on the running
+    // drink/greet animation, which fires ANIMATION_STOP (not COMPLETE) and
+    // orphans the listener — leaving the state machine stuck and the player
+    // frozen. Skip the whole engagement path until the animation finishes.
     if (this.player.isGreeting) {
       this.logInteractDiag("skipped: player mid-greeting", null, Infinity, null, Infinity);
+      return;
+    }
+    if (this.player.isConsuming) {
+      this.logInteractDiag("skipped: player mid-consuming", null, Infinity, null, Infinity);
       return;
     }
 

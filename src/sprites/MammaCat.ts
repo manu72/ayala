@@ -190,8 +190,17 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
       .setDepth(5);
   }
 
-  /** Face toward a world position (for dialogue engagement). */
+  /**
+   * Face toward a world position (for dialogue engagement).
+   *
+   * No-op while a lock-in animation state owns the sprite (`greeting` /
+   * `consuming`) — `showStandFrame()` would call `anims.stop()`, which
+   * fires `ANIMATION_STOP` (not `ANIMATION_COMPLETE`) and orphans the
+   * outstanding `once(ANIMATION_COMPLETE_KEY + ...)` listener, leaving the
+   * state machine stuck in that state and the player permanently frozen.
+   */
   faceToward(worldX: number, worldY: number): void {
+    if (this.playerState === "greeting" || this.playerState === "consuming") return;
     const dx = worldX - this.x;
     const dy = worldY - this.y;
     if (dx === 0 && dy === 0) return;
@@ -212,8 +221,18 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
     this.nameLabel.setText(claimed ? "\u2665 Mamma Cat" : "Mamma Cat");
   }
 
-  /** Enter the resting/sleep state. Called by GameScene after hold-to-rest completes. */
+  /**
+   * Enter the resting/sleep state. Called by GameScene after hold-to-rest
+   * completes.
+   *
+   * No-op during `greeting` / `consuming` lock-in states so an in-flight
+   * animation's `once(ANIMATION_COMPLETE)` listener is not orphaned by the
+   * `anims.stop()` call below. The GameScene Z-hold callsite already gates
+   * on these flags; this guard is belt-and-suspenders so future callers
+   * inherit the same invariant.
+   */
   enterRest(): void {
+    if (this.playerState === "greeting" || this.playerState === "consuming") return;
     this.playerState = "resting";
     this.crouchLatched = false;
     this.crouchKeyDownTime = 0;
@@ -244,9 +263,21 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
     this.showStandFrame();
   }
 
-  /** Enter catloaf (alert rest): stationary, shows catloaf sprite, game continues. */
+  /**
+   * Enter catloaf (alert rest): stationary, shows catloaf sprite, game
+   * continues. No-op during any other lock-in state so an outstanding
+   * animation-complete listener isn't orphaned by the `anims.stop()` below.
+   */
   enterCatloaf(): void {
-    if (this.playerState === "catloaf" || this.playerState === "resting" || this.playerState === "waking") return;
+    if (
+      this.playerState === "catloaf" ||
+      this.playerState === "resting" ||
+      this.playerState === "waking" ||
+      this.playerState === "greeting" ||
+      this.playerState === "consuming"
+    ) {
+      return;
+    }
     this.playerState = "catloaf";
     this.crouchLatched = false;
     this.crouchKeyDownTime = 0;
@@ -270,10 +301,20 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
   }
 
   /**
-   * Scripted intro: frightened crouch using sit-idle (ears-low read) without keyboard.
+   * Scripted intro: frightened crouch using sit-idle (ears-low read) without
+   * keyboard. Only ever reached from the intro cinematic (GameScene gates
+   * player input while `cinematicActive`), but the full lock-in guard is
+   * kept for consistency with the other state-entering mutators.
    */
   enterForcedCrouchPose(): void {
-    if (this.playerState === "resting" || this.playerState === "waking") return;
+    if (
+      this.playerState === "resting" ||
+      this.playerState === "waking" ||
+      this.playerState === "greeting" ||
+      this.playerState === "consuming"
+    ) {
+      return;
+    }
     this.playerState = "crouching";
     this.setVelocity(0);
     this.anims.stop();
