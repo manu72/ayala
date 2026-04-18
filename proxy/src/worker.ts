@@ -23,6 +23,11 @@ const DEFAULT_OPENAI_MODEL = "gpt-4.1-mini";
 const DEEPSEEK_BASE = "https://api.deepseek.com/v1/chat/completions";
 const OPENAI_BASE = "https://api.openai.com/v1/chat/completions";
 
+const CHAT_PATH = "/api/ai/chat";
+const ALLOWED_METHODS = "POST, OPTIONS";
+const ALLOWED_REQUEST_HEADERS = "Content-Type, Authorization";
+const PREFLIGHT_MAX_AGE_SECONDS = "86400";
+
 type ChatRole = "system" | "user" | "assistant";
 
 interface ChatMessage {
@@ -66,6 +71,41 @@ export function parseAllowedOrigins(raw: string | undefined): string[] {
 export function isOriginAllowed(origin: string | null, allowed: string[]): boolean {
   if (!origin) return false;
   return allowed.includes(normalizeOrigin(origin));
+}
+
+/**
+ * CORS headers returned to an *allowed* origin. We echo the exact Origin header
+ * back (no wildcard) and set `Vary: Origin` so caches don't serve the wrong
+ * allow-list entry to a different origin. `Access-Control-Allow-Headers` is a
+ * fixed allow-list — we do not reflect `Access-Control-Request-Headers`.
+ */
+function corsHeaders(origin: string): Record<string, string> {
+  return {
+    "Access-Control-Allow-Origin": origin,
+    "Access-Control-Allow-Methods": ALLOWED_METHODS,
+    "Access-Control-Allow-Headers": ALLOWED_REQUEST_HEADERS,
+    "Access-Control-Max-Age": PREFLIGHT_MAX_AGE_SECONDS,
+    Vary: "Origin",
+  };
+}
+
+/**
+ * Build a JSON response, merging CORS headers when the caller's origin is
+ * allow-listed. Disallowed origins receive no CORS headers at all — the
+ * browser will surface an opaque failure, which is the intended behaviour.
+ */
+function jsonResponse(
+  body: unknown,
+  status: number,
+  cors: Record<string, string> | null,
+  extra?: Record<string, string>,
+): Response {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(cors ?? {}),
+    ...(extra ?? {}),
+  };
+  return new Response(JSON.stringify(body), { status, headers });
 }
 
 export function validateChatBody(body: unknown):
@@ -140,13 +180,11 @@ async function forwardChat(
   provider: "deepseek" | "openai",
   data: ChatRequestBody,
   env: Env,
+  cors: Record<string, string>,
 ): Promise<Response> {
   const { url, model, key } = upstreamUrlAndModel(provider, env);
   if (!key) {
-    return new Response(JSON.stringify({ error: `Missing API key for ${provider}` }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" },
-    });
+    return jsonResponse({ error: `Missing API key for ${provider}` }, 500, cors);
   }
 
   const controller = new AbortController();
@@ -174,57 +212,72 @@ async function forwardChat(
       status: upstream.status,
       headers: {
         "Content-Type": upstream.headers.get("Content-Type") ?? "application/json",
+        ...cors,
       },
     });
   } catch (e) {
     const aborted = e instanceof Error && e.name === "AbortError";
-    return new Response(JSON.stringify({ error: aborted ? "upstream timeout" : "upstream error" }), {
-      status: 504,
-      headers: { "Content-Type": "application/json" },
-    });
+    return jsonResponse(
+      { error: aborted ? "upstream timeout" : "upstream error" },
+      504,
+      cors,
+    );
   } finally {
     clearTimeout(timeoutId);
   }
 }
 
 export async function handleRequest(request: Request, env: Env): Promise<Response> {
-  if (request.method !== "POST") {
-    return new Response("Method Not Allowed", { status: 405 });
-  }
-
   const url = new URL(request.url);
-  if (!url.pathname.endsWith("/api/ai/chat")) {
-    return new Response("Not Found", { status: 404 });
-  }
-
   const allowed = parseAllowedOrigins(env.ALLOWED_ORIGINS);
   const origin = request.headers.get("Origin");
-  if (!isOriginAllowed(origin, allowed)) {
-    return new Response(JSON.stringify({ error: "forbidden origin" }), {
-      status: 403,
-      headers: { "Content-Type": "application/json" },
+  const originAllowed = isOriginAllowed(origin, allowed);
+  // Non-null assertion is safe: isOriginAllowed returns false when origin is null.
+  const cors = originAllowed ? corsHeaders(origin as string) : null;
+
+  // 1) CORS preflight. Must be answered before any routing so browsers can
+  //    complete their preflight cache even for not-yet-existent sub-paths.
+  if (request.method === "OPTIONS") {
+    if (!cors) {
+      return new Response(null, { status: 403 });
+    }
+    return new Response(null, { status: 204, headers: cors });
+  }
+
+  // 2) Route: only /api/ai/chat is served. Everything else is 404.
+  //    `endsWith` keeps parity with the original behaviour (accounts for
+  //    deployments behind a path-stripping proxy).
+  if (!url.pathname.endsWith(CHAT_PATH)) {
+    return jsonResponse({ error: "not found" }, 404, cors);
+  }
+
+  // 3) Method gate: preflight handled above, POST below, nothing else.
+  if (request.method !== "POST") {
+    return jsonResponse({ error: "method not allowed" }, 405, cors, {
+      Allow: ALLOWED_METHODS,
     });
   }
 
+  // 4) Origin check for the actual request. Disallowed origins get a bare
+  //    403 with no CORS headers (strict, per spec).
+  if (!cors) {
+    return jsonResponse({ error: "forbidden origin" }, 403, null);
+  }
+
+  // 5) JSON body.
   let parsed: unknown;
   try {
     parsed = await request.json();
   } catch {
-    return new Response(JSON.stringify({ error: "invalid JSON" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
+    return jsonResponse({ error: "invalid JSON" }, 400, cors);
   }
 
   const validated = validateChatBody(parsed);
   if (!validated.ok) {
-    return new Response(JSON.stringify({ error: validated.error }), {
-      status: validated.status,
-      headers: { "Content-Type": "application/json" },
-    });
+    return jsonResponse({ error: validated.error }, validated.status, cors);
   }
 
-  return forwardChat(validated.data.provider, validated.data, env);
+  return forwardChat(validated.data.provider, validated.data, env, cors);
 }
 
 export default {
