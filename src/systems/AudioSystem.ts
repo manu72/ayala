@@ -56,7 +56,13 @@ export class AudioSystem {
   private dangerActive = false;
   private muted: boolean;
   private started = false;
-  private lastCatGrowlAt = 0;
+  /**
+   * Sentinel so the first growl after scene start (or scene.restart, which
+   * resets `scene.time.now` to 0) is not suppressed by the cooldown check.
+   * `NEGATIVE_INFINITY` makes `now - lastCatGrowlAt` unconditionally greater
+   * than `CAT_GROWL_COOLDOWN_MS` on the first call.
+   */
+  private lastCatGrowlAt = Number.NEGATIVE_INFINITY;
 
   constructor() {
     this.muted = AudioSystem.readMutedFromStorage();

@@ -49,6 +49,8 @@ export class BootScene extends Phaser.Scene {
       ["mc_stand_idle_w", "mammacat_standing_idle_west"],
       ["mc_greet_e", "mammacat_greeting_east"],
       ["mc_greet_w", "mammacat_greeting_west"],
+      ["mc_drink_e", "mammacat_drinking_east"],
+      ["mc_drink_w", "mammacat_drinking_west"],
     ];
     for (const [key, file] of mcSheets) {
       this.load.spritesheet(key, `assets/sprites/${file}.png`, {
