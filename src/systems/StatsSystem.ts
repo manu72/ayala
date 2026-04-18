@@ -14,13 +14,13 @@ const DECAY = {
 } as const;
 
 const HEAT_MULTIPLIER = 1.5;
-const SHADE_ENERGY_REGEN = 0.5;
-const SHELTER_ENERGY_REGEN = 1.0;
+const SHADE_ENERGY_REGEN = 0.2; // passive regen in shade
+const SHELTER_ENERGY_REGEN = 0.5; // passive regen in shelter
 
 /** Deliberate rest/sleep energy rates (per second). */
-const REST_RATE_OPEN = 0.5;
-const REST_RATE_SHADE = 1.0;
-const REST_RATE_SAFE = 2.0;
+const REST_RATE_OPEN = 0.2;
+const REST_RATE_SHADE = 0.5;
+const REST_RATE_SAFE = 1.0;
 
 /** Hunger/thirst decay while sleeping is reduced (lower metabolic rate). */
 const REST_DECAY_MULTIPLIER = 0.1;
