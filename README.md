@@ -28,6 +28,7 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 | 4.5 Visual & Narrative | Intro cinematic, dialogue poses, cat-person circuits, witness-gated events, chapter cards | Complete    |
 | 5. AI cat dialogue + proxy | LLM personas, Cloudflare Worker proxy, scripted fallback, dist leak checks              | Complete (v0.2.0) |
 | 5.1 AI human dialogue  | Camille / Manu / Kish personas, named feeders (Rose, Ben), AI ambient bubbles, AI-sourced Camille beats 2-4 | Complete (v0.3.0) |
+| 5.1a Consolidated human bubbles | All human-spoken dialogue renders in the floating bubble channel; Camille encounter beats are paired narrator (modal) + spoken (bubble) | Complete (v0.3.1) |
 | 5b. Polish & Release   | Playtesting, audio, PWA/offline, deployment                                               | Not started |
 
 ### What exists now
@@ -223,7 +224,7 @@ Every AI path has a scripted safety net. If the LLM is slow, unreachable, rate-l
 
 - **Engaged cat dialogue** → `FallbackDialogueService` delivers the scripted line from `cat-dialogue.ts`.
 - **Human ambient bubbles** → render a scripted line from `catPersonGreetings` / `camillePersonalLines` (or the caller-forced line for first-meet Camille).
-- **Camille encounter beats 2–4** → render the authored `fallbackLines` for that beat.
+- **Camille encounter beats 2–4** → render the authored `steps[i].spoken` line for that step (narrator line is unchanged either way).
 - **Camille beats 1 and 5** → always authored, never LLM-sourced. Beat 1 is pure narrator POV; beat 5 is the chapter-6 handoff and must run byte-for-byte.
 
 No LLM response is allowed to mutate trust, registry keys, chapter state, or story flags. That split is enforced in `AIDialogueService.getDialogue()` (`trustChange` and `event` are always taken from `matchScriptedResponse`) and in `runCamilleEncounterBeat` (all registry / stats / emote side-effects live in `onComplete`, independent of dialogue source).
@@ -273,19 +274,26 @@ Short paragraph — what do they remember, where do they usually sit/stand
 
 See [src/ai/personas/blacky.md](src/ai/personas/blacky.md) (cat) and [src/ai/personas/camille.md](src/ai/personas/camille.md) (human) as canonical examples.
 
-### Camille encounter beats (AI + scripted split)
+### Camille encounter beats (paired narrator + spoken)
 
-Camille's 5-encounter story arc routes through AI + scripted fallback beat-by-beat:
+Camille's 5-encounter story arc is driven by **paired steps**. Each step has two surfaces that advance together on Space:
 
-| Beat | Source | Why |
-| --- | --- | --- |
-| 1 — First sighting | Scripted narration only (no dialogue) | Mamma Cat's POV reaction, not Camille speaking |
-| 2 — Places a treat | AI (Camille persona) with `encounterBeat.n = 2` | "Objective: she waits, places treat, does not reach" |
-| 3 — Slow blink | AI (Camille persona) with `encounterBeat.n = 3` | "Objective: slow-blink trust exchange" |
-| 4 — First touch | AI (Camille persona) with `encounterBeat.n = 4` | "Objective: first physical contact, Kish is loud nearby" |
-| 5 — Carrier / chapter-6 handoff | Scripted verbatim | Must run byte-for-byte regardless of LLM state |
+- `narrator` → modal dialogue box (Mamma Cat's POV, scene description)
+- `spoken` → floating bubble above Camille's head (what she actually says aloud)
 
-Authored fallback lines for beats 2-4 live in `camilleEncounterBeats` in `GameScene.ts` alongside each beat's objective — tweak the objective to change the AI's emotional target, tweak `fallbackLines` to change what players see when the LLM is down.
+This keeps all human-spoken dialogue in the same visual channel as ambient greetings. The LLM only produces `spoken` lines; narrator is always authored and deterministic.
+
+| Beat | Narrator source | Spoken source | Notes |
+| --- | --- | --- | --- |
+| 1 — First sighting | Scripted (HUD narration) | — | Pure interiority, no bubble |
+| 2 — Places a treat | Scripted `steps[i].narrator` | AI (`encounterBeat.n = 2`) → falls back to `steps[i].spoken` | AI lines replace authored spoken positionally |
+| 3 — Slow blink | Scripted `steps[i].narrator` | AI (`encounterBeat.n = 3`) → falls back to `steps[i].spoken` | Step 2 is narrator-only by design (Mamma Cat's memory) |
+| 4 — First touch | Scripted `steps[i].narrator` | AI (`encounterBeat.n = 4`) → falls back to `steps[i].spoken` | Kish is loud nearby; Camille stays steady |
+| 5 — Carrier / chapter-6 handoff | Scripted `steps[i].narrator` | Scripted `steps[i].spoken` | Never AI; Camille still gets a bubble for her asking line |
+
+The paired data lives in [src/data/camille-encounter-beats.ts](src/data/camille-encounter-beats.ts); `GameScene.playPairedBeat` drives the sequence using `DialogueSystem`'s `onLineShown` + `onHide` hooks to keep the modal and bubble in lockstep. Hooks tear down the persistent bubble on every exit path (completion, Space-past-end, backdrop click, close button).
+
+Tweak the `objective` field to change the LLM's emotional target for a beat; tweak `steps[i].spoken` to change the scripted fallback line that plays when the LLM is unavailable.
 
 ### Human ambient bubbles (throttling)
 
@@ -315,7 +323,7 @@ These knobs live as `HUMAN_AI_BUBBLE_COOLDOWN_MS` / `HUMAN_AI_BUBBLE_TIMEOUT_MS`
 1. Create `src/ai/personas/<slug>.md` using the seven-section format (Identity states `Species: human, ...`).
 2. Register in `src/ai/personas/index.ts` — key by the exact `HumanNPC.identityName`, add to `PERSONA_TIER` (tier2 unless they deserve tier1 memory like Camille).
 3. Wire `identityName` on the `HumanConfig` so the `HumanNPC` instance links to the persona. For named types (`camille` / `manu` / `kish`) the default identity name is auto-derived; for anonymous types (`feeder`) pass `identityName: "Rose"` etc. explicitly.
-4. If they're involved in an encounter beat, extend `camilleEncounterBeats` (or add a sibling table) and route the beat through `runCamilleEncounterBeat` so side-effects stay deterministic.
+4. If they're involved in an encounter beat, extend `CAMILLE_ENCOUNTER_BEATS` (or add a sibling table) in [src/data/camille-encounter-beats.ts](src/data/camille-encounter-beats.ts) with paired `{ narrator, spoken? }` steps, and route the beat through `runCamilleEncounterBeat` / `playPairedBeat` so side-effects stay deterministic and the spoken bubble renders above the right speaker.
 5. Extend [tests/ai/personas.test.ts](tests/ai/personas.test.ts) with the new key.
 
 ### Tuning tips
@@ -387,7 +395,19 @@ Each Space on a named cat should produce one `POST /api/ai/chat` with status **2
 | Scripted line still fires during cooldown when approaching again | Bubble contents (shorter, from pool) |
 | When Worker is stopped, scripted fallback fires within 1.5s | Bubble still appears; console shows `AI failed; using scripted fallback` |
 
-**Camille encounter beats 2-4.** Progress to Chapter 5 and trigger a Camille encounter (one per eligible evening). Verify beats 2, 3, 4 show AI-sourced Camille lines matching the beat objective; beats 1 and 5 always show the authored narrator-POV text regardless of Worker state. The `CAMILLE_ENCOUNTER` registry key should increment exactly once per beat even if the LLM fails.
+**Camille encounter beats 2–5 (paired surfaces).** Progress to Chapter 5 and trigger a Camille encounter (one per eligible evening). Verify:
+
+| Check | Where to look |
+| --- | --- |
+| Narrator POV appears in the modal dialogue box at the bottom | Modal text |
+| Camille's spoken line appears as a bubble **above her head**, not in the modal | Floating bubble |
+| Pressing Space advances **both** the modal and the bubble to the next pair | Modal + bubble |
+| Dismissing the modal (backdrop click / x) tears down the current bubble too | No orphan bubble after dismiss |
+| Beat 1 is narrator-only in the HUD; Camille has no bubble for beat 1 | HUD narration |
+| Beat 5 still plays byte-for-byte when Worker is stopped (fully scripted) | Modal + bubble |
+| `CAMILLE_ENCOUNTER` registry key increments exactly once per beat, even on LLM failure | DevTools → saved state |
+
+For beats 2–4, one `POST /api/ai/chat` fires per beat (Camille persona, `encounterBeat.n` in the prompt). Kish's "Kish, slow down." line also renders in the same bubble style — not as a bare text overlay.
 
 ### Test the fallback paths (do not skip)
 
@@ -521,7 +541,7 @@ ayala/
 │   ├── data/                           #   cat-dialogue script conditions
 │   └── sprites/                        #   BaseNPC helpers, SpriteProfiles
 ├── vitest.config.ts                     # Vitest configuration
-└── VERSION                              # 0.3.0
+└── VERSION                              # 0.3.1
 ```
 
 ## Asset Generation

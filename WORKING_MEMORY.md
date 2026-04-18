@@ -2,7 +2,7 @@
 
 > Persistent memory layer for AI-assisted development sessions.
 > Last Updated: 2026-04-18
-> Version: 0.3.0
+> Version: 0.3.1
 
 ---
 
@@ -28,6 +28,7 @@
 | 4.5 Visual & Narrative | Complete  | Intro cinematic, dialogue poses, human circuits, witness gates, chapter cards, reduced-motion |
 | 5. AI cat dialogue + proxy | Complete | AIDialogueService, Cloudflare Worker proxy, personas, scripted fallback |
 | 5.1 AI human dialogue | Complete | Camille/Manu/Kish/Rose/Ben personas, ambient AI bubbles with 30s cooldown + 1.5s budget, AI-sourced Camille encounter beats 2-4 |
+| 5.1a Consolidated human bubbles | Complete | All human-spoken dialogue (ambient, encounter, Kish "slow down") flows through one floating-bubble renderer; Camille encounter beats are now paired narrator (modal) + spoken (bubble) advancing together on Space |
 | 5b. Polish & Release | Not started | Audio, PWA, playtesting, deployment                            |
 
 ---
@@ -43,7 +44,7 @@ BootScene -> StartScene -> GameScene + HUDScene (overlay) + JournalScene (overla
 
 - **BootScene** (`src/scenes/BootScene.ts`): Loads all assets (tilesets, spritesheets)
 - **StartScene** (`src/scenes/StartScene.ts`): Title screen, New/Continue
-- **GameScene** (`src/scenes/GameScene.ts`): Main game loop, NPC management, input, chapters (~2600 lines)
+- **GameScene** (`src/scenes/GameScene.ts`): Main game loop, NPC management, input, chapters (~3400 lines — extraction candidates flagged under Technical Debt)
 - **HUDScene** (`src/scenes/HUDScene.ts`): Stats bars, clock, rest progress, pause menu, narration, dialogue
 - **JournalScene** (`src/scenes/JournalScene.ts`): Colony journal overlay (J key or pause menu)
 
@@ -255,9 +256,19 @@ SmallDog.png, WhiteDog.png, BrownDog.png — randomly assigned to dog walkers
 - **Encounter beat context:** `DialogueRequest` gained optional `nearbyCat` (for human ambient bubbles — e.g. "Rose is near Tiger") and `encounterBeat: { kind: "camille_encounter"; n: 1–5; objective: string }`. The encounter beat context is appended as `## Story beat context` with an explicit reminder that registry side-effects are handled by the game.
 - **Human identity wiring:** `HumanNPC` now exposes `identityName: string | null`. `defaultIdentityNameFor(type)` returns `Camille` / `Manu` / `Kish` for those types; feeders default to `null` (anonymous) and must be opted in explicitly — the feeder configs in `GameScene.buildFeederConfigs` pass `identityName: "Rose"` and `identityName: "Ben"`. This cleanly separates "has a persona" from "is a single canonical instance" so future feeder waves won't collide on the same key.
 - **Ambient bubble throttling (`showGreetingBubble`):** AI path is eligible only when the human has an `identityName` in `AI_PERSONAS`, **per-human 30s cooldown has elapsed** (`humanAiBubbleCooldownUntil` WeakMap), **no other AI bubble is in flight** (`humanAiBubbleInFlight` global guard), and `DialogueService` is actually `FallbackDialogueService`. Cooldown is set up-front regardless of success so proximity bursts can't spam calls. Tight 1.5s `timeoutMs` passed to `AIDialogueService.getDialogue` so a slow model never stalls the scene — on any failure `pickScriptedGreeting` renders the existing scripted line pool. Bubbles are stored in `ConversationStore` keyed by identity name so memory is preserved across bubbles and encounter beats.
-- **Camille encounter beats 2-4 go through AI, beats 1 and 5 stay scripted.** `runCamilleEncounterBeat(n, hud)` pins registry state (`CAMILLE_ENCOUNTER`, `CAMILLE_ENCOUNTER_DAY`) *before* any async work, plays the crouch animation, fetches AI lines via `requestCamilleEncounterLines` with `encounterBeat` context and a 5s budget, then applies per-beat `onComplete` side-effects (HUD narration, `stats.restore("hunger", 30)` for beat 2, heart emotes for 3 & 4) inside `dialogue.show`'s completion callback. The per-beat fallback lines + `objective` strings live in `camilleEncounterBeats`. Beat 1 is pure narrator text; beat 5 is the chapter-6 handoff and runs verbatim — both bypass AI entirely because losing either to an LLM hiccup would break the story.
+- **Camille encounter beats 2-4 go through AI, beats 1 and 5 stay scripted.** `runCamilleEncounterBeat(n, hud)` pins registry state (`CAMILLE_ENCOUNTER`, `CAMILLE_ENCOUNTER_DAY`) *before* any async work, plays the crouch animation, fetches AI lines via `requestCamilleEncounterLines` with `encounterBeat` context and a 5s budget, then applies per-beat `onComplete` side-effects (HUD narration, `stats.restore("hunger", 30)` for beat 2, heart emotes for 3 & 4) in the completion callback. Beat 1 is pure narrator text; beat 5 is the chapter-6 handoff and runs verbatim — both bypass AI entirely because losing either to an LLM hiccup would break the story. **Superseded in 5.1a:** beat data moved to `src/data/camille-encounter-beats.ts` and changed shape from `fallbackLines: string[]` to paired `steps: { narrator, spoken? }[]`; see the Phase 5.1a lesson for the current contract.
 - **Per-call `AIDialogueCallOptions`:** New optional second arg on `AIDialogueService.getDialogue` (and forwarded by `FallbackDialogueService`) carries `timeoutMs` and `signal`. External abort is bridged onto the internal `AbortController` so callers can cancel (e.g. human walks off-screen). The scripted fallback path ignores these options — it's synchronous.
 - **Deterministic story progression is preserved end-to-end:** Same principle as Phase 5 applies to human beats. AI supplies `lines`/`speakerPose`/`emote`/`narration` only. All registry mutations, stats restores, chapter triggers, and HUD narration live in game-owned callbacks. On LLM failure the player still sees authored text; on LLM success the registry side-effect for that beat has already been pinned.
+
+### Phase 5.1a — Consolidated human-spoken bubbles + paired beats
+
+- **One bubble channel for every human-spoken line.** `renderHumanBubble(human, line, { persistent })` is the single renderer for every human's spoken dialogue — ambient greetings, the Kish "slow down" beat (previously an ad-hoc `add.text`), and Camille's encounter beats all render into the same Arial 10px floating bubble above the speaker's head. The old `renderGreetingBubble` is a thin wrapper kept for call-site readability. Rule of thumb: if a human says something out loud to a cat, it goes through this renderer — no other surface is allowed.
+- **Persistent vs. auto-fading bubbles.** `persistent: true` returns the `Phaser.GameObjects.Text` without a fade-and-destroy tween; the caller owns its lifetime. Used by encounter beats where the bubble must stay visible until the player advances the paired narrator line. Default (auto-fade) is still used everywhere else.
+- **`DialogueSystem` gained paired-surface hooks.** `show(lines, onComplete, { onLineShown, onHide })`. `onLineShown(index)` fires once per line (including the initial line-0), on the same synchronous tick as the modal text change, so callers can spawn a paired spoken bubble without racing the player's Space. `onHide` fires on every exit path (completion, Space-past-end, backdrop click, close button) so the caller always tears down its paired surface — no orphan bubbles. Both hooks are optional and back-compat with existing two-arg callers.
+- **Paired-beat authoring lives in `src/data/camille-encounter-beats.ts`.** `CAMILLE_ENCOUNTER_BEATS[2..4]` and `CAMILLE_ENCOUNTER_5_STEPS` export `{ narrator, spoken? }[]` step arrays plus (for 2–4) the LLM `objective`. Invariants (non-empty narrator, spoken never equal to narrator, at least one spoken per beat) are tested in `tests/data/camille-encounter-beats.test.ts`. Beats 2–4 take AI spoken lines positionally over the authored spoken fallback; narrator is always authored. Beat 5 is scripted-only but still uses the paired shape so Camille's "Would you like to come home, little one?" renders above her head, not buried in the modal.
+- **`runCamilleEncounterBeat` is now a thin shell around `playPairedBeat(steps, speaker, onComplete)`.** Registry side-effects, stat restores, emotes, and HUD narration still live in the `onComplete` callback so they're deterministic regardless of AI success or scripted fallback. AI failure collapses to `spokenOverrides = null` which means each step falls back to its authored `spoken` (or is narrator-only if none was authored).
+- **Do NOT reintroduce `this.dialogue.show(lines)` for human-spoken encounter lines.** The temptation is to pile a human's lines into the modal alongside narrator POV; don't. The contract is narrator ∈ modal, spoken ∈ bubble. Mixing them in the modal is how we got overlapping Kish/feeder text + a Camille wall-of-text in the same modal during playtesting (v0.3.0 bug).
+- **Version bump only — no DB/migration impact.** Conversation memory schema, registry keys, and save-file shape are unchanged. Only the rendering path for Camille encounters shifts.
 
 ### Scene Restart Data Passing
 
@@ -307,42 +318,40 @@ SmallDog.png, WhiteDog.png, BrownDog.png — randomly assigned to dog walkers
 
 ---
 
-## Recent Features (v0.1.8 - v0.1.10)
+## Recent Features (v0.2.0 - v0.3.1)
 
-### v0.1.10 — Dynamic colony population + named-cat snatch eligibility
+### v0.3.1 — Consolidated human-spoken bubbles + paired narrator/spoken beats
 
-- **`COLONY_COUNT` is now a true dynamic total** (named + Mamma + background). Seeded from `INITIAL_COLONY_TOTAL = 42`, bumped by dumping (+1, max 3 events), decremented by snatching (-1, floored at `NAMED_AND_MAMMA_COUNT = 9`). Previously it only moved on dumping — the snatcher half of the realism loop was missing. See the "Colony population model" lesson for the full contract.
-- **Visible `Colony Cat N` roster is derived, not fixed.** `spawnColonyCats` now calls the pure `computeBackgroundSpawnCount(total, named+mamma, cap)` helper in `src/utils/colonySpawn.ts` (unit tested — 9 cases). On a healthy colony the `VISIBLE_BACKGROUND_CAP = 12` cap binds and today's experience is unchanged; once the total thins below 21, the visible roster shrinks so snatcher losses show up in the world, not just the journal.
-- **Named cats are now snatcher-eligible.** Removed the `npcName.startsWith("Colony Cat")` immunity guard in `checkSnatcherDetection`. New rule: `active && !(sleeping && isNearShelter(cat.x, cat.y))` — sleeping safely is the only immunity, mirroring Mamma Cat's rule. Named cats near their home POIs (most of which are near shelter) remain rarely caught; a named cat caught napping unsafely can be taken.
-- **Floor clamp** (`NAMED_AND_MAMMA_COUNT = 9`) prevents total narrative annihilation; even under pathological snatching the counter bottoms out at "just the story regulars".
-- **`StoryKeys.COLONY_COUNT`** — promoted from raw string literal. Closes one more item off the partial-registry-typing tech debt.
-- **Known limitation flagged as follow-up:** named-cat snatches don't persist across scene boundaries (spawn list re-runs on reload). See "Follow-ups" above.
+- Unified every human-spoken line (ambient greetings, Kish "slow down", Camille encounter beats 2-5) through one `renderHumanBubble(human, line, { persistent })` renderer in `GameScene`; the old `renderGreetingBubble` is now a thin wrapper. Eliminates the v0.3.0 bug where overlapping bubbles + modal text clashed.
+- Extended `DialogueSystem.show(lines, onComplete?, { onLineShown, onHide }?)` with optional paired-surface hooks so a caller can spawn a persistent floating bubble per modal line and tear it down on every exit path (completion, Space-past-end, backdrop click, close). Back-compat for two-arg callers.
+- Camille encounter beat data moved to `src/data/camille-encounter-beats.ts` with a new paired `{ narrator, spoken? }` shape (plus invariants tested in `tests/data/camille-encounter-beats.test.ts`). Contract: narrator ∈ modal, spoken ∈ bubble — never mix.
+- `runCamilleEncounterBeat` is now a thin shell around `playPairedBeat(steps, speaker, onComplete)`. Side-effects stay deterministic regardless of AI success/failure. See the Phase 5.1a lesson for the full contract.
+- No save/registry/conversation-store schema changes.
 
-### v0.1.9 — Snatcher counters + colony-cat capture mechanic
+### v0.3.0 — AI dialogue for named humans (Camille / Manu / Kish / Rose / Ben)
 
-- **Two new lifetime counters** wired to the existing snatcher system and surfaced in the journal footer alongside the collapse count: `PLAYER_SNATCHED_COUNT` ("Times you've been snatched: N") and `CATS_SNATCHED` ("Cats lost to snatchers: N"). Both suppressed when 0, all three counters share the muted "Days survived" tone.
-- **Colony-cat capture mechanic** added (`handleColonyCatSnatch` in `GameScene`). Before this version, `CATS_SNATCHED` was a scaffolded but unincremented registry key, and cats only ever *fled* from snatchers. Now `checkSnatcherDetection` also sweeps for background "Colony Cat N" entries within a 16px grab range; named story cats are immune, sleeping cats are treated as sheltered (mirrors the player rule). Narration "A cat was here. Now it's gone." is gated by the standard Phase 4.5 witness check (proximity + LOS); unperceived captures happen silently. Splice-during-iteration is avoided by collecting victims and applying removals after the nested loop.
-- **Player capture counter** (`PLAYER_SNATCHED_COUNT`): incremented in `handleSnatcherCapture` *before* `autoSave()`, then the existing fade → dialogue → `scene.restart({ loadSave: true })` flow. See the "Persisting counters across save-based scene restarts" lesson.
-- **`readLifetimeCount` helper** (`src/utils/lifetimeCount.ts`) — pure, no-Phaser defensive parse that powers all three journal life-stat rows. Returns a safe non-negative integer; non-finite, negative, or non-numeric registry values collapse to 0 so the caller can use `> 0` as its "show this row" gate. 8 unit tests.
-- **Latent bug fixed:** `COLLAPSE_COUNT` was missing from the New-Game clear-list, so a previous run's fall count would leak into a fresh game. Added to the list alongside `CATS_SNATCHED` (promoted from raw string literal to `StoryKeys.CATS_SNATCHED`) and `PLAYER_SNATCHED_COUNT`.
+- Extended Phase 5 AI dialogue from cats to named humans. Unified `AI_PERSONAS` registry (cats + humans) with a `PERSONA_TIER` map pinning Camille + Blacky/Tiger/Jayco at tier1 (20-turn history) and everyone else at tier2 (10-turn). Species-aware prompt branches on `speakerType: "cat" | "human"`.
+- `HumanNPC` gained `identityName`; feeders opt in via `identityName: "Rose" | "Ben"` so anonymous feeder waves don't collide on the same persona key.
+- Ambient AI bubbles per human: per-human 30s cooldown, global single-flight guard, 1.5s timeout, scripted fallback on any failure. Bubbles routed through `ConversationStore` by identity name.
+- Camille encounter beats 2-4 take AI spoken lines with 5s budget + authored fallbacks; beats 1 and 5 stay scripted. Story-critical registry side-effects are pinned *before* any async work.
+- New `AIDialogueCallOptions` (`timeoutMs`, `signal`) on `AIDialogueService.getDialogue` bridges external abort onto the internal `AbortController`.
+- See the Phase 5.1 lesson for the full contract.
 
-### v0.1.9 — Collapse mechanism narrative upgrade
+### v0.2.0 — AI dialogue infrastructure (named cats)
 
-- **Rising/falling-edge collapse detection** in `GameScene.update()` via a `wasCollapsed` boolean. On collapse it runs `onCollapsed()` (HUD narration, `trust.collapsedInColony()` penalty, `StoryKeys.COLLAPSE_COUNT++` on the registry). `onRecovered()` is a symmetric hook for future use. The flag is re-primed after save load in `create()` to suppress spurious events.
-- **Witness-aware recovery:** `findCollapseWitness()` picks the nearest friendly `NPCCat` within `GP.NARRATION_WITNESS_DIST` with line-of-sight (reuses the private `hasLineOfSight` helper). If a witness is still present/active/in-range at recovery time, `recoverFromCollapse()` narrates accordingly and awards `trust.supportedDuringCollapse(catName)` (+1 global, +3 per-cat); otherwise generic recovery narration fires.
-- **New trust methods** on `TrustSystem`: `collapsedInColony()` (-2 global, clamped to 0) and `supportedDuringCollapse(name)` (+1 global, +3 per-cat, 0-100 clamp, creates per-cat entry if missing). Covered by 8 new unit tests.
-- **Persistence:** `COLLAPSE_COUNT` added to `StoryKeys`, `SaveSystem.TRACKED_KEYS`, and the New-Game clear list in `GameScene.create`.
-- **Named constant:** `COLLAPSE_RECOVERY_MS = 3000` lives in `src/config/gameplayConstants.ts`; the literal `3000` in the recovery timer was replaced. `COLLAPSE_THRESHOLD_MS` is now exported from `StatsSystem.ts` so tests can derive their deltas from it.
-- **Journal surface:** `JournalScene` footer shows "Times you've fallen: N" in the muted "Days survived" tone, only when `COLLAPSE_COUNT > 0`. Defensive parse: non-finite / negative values resolve to 0 (no UI row).
-- **Input guards:** Space (interact/wake) and J (journal) handlers check `!this.stats.collapsed`, so the collapse sequence can't be short-circuited by interact/dialogue/journal input.
-- **Architectural note:** Tier 4 (replace polling with a StatsSystem `EventEmitter`) was explicitly rejected — see the "Cross-system communication" lesson. The `wasCollapsed` edge flag is the canonical pattern for new rising/falling-edge needs.
+- Added `AIDialogueService` (`src/services/AIDialogueService.ts`) behind the existing `DialogueService` interface. Providers: Deepseek (primary) → OpenAI (retry) → `FallbackDialogueService` (full scripted). 8s client abort, JSON-parsed response.
+- Secrets live only in the Cloudflare Worker proxy (`proxy/`) — `VITE_AI_PROXY_URL` is a path only (`/api/ai/chat`). `npm run verify:dist` greps `dist/` for common key leak patterns after every build.
+- Authoritative `event` field still derived from scripted condition match in `CAT_DIALOGUE_SCRIPTS` so story flags and trust awards stay deterministic even on AI success. AI supplies `lines` / `narration` / `emote` / `speakerPose` only.
+- Personas as markdown in `src/ai/personas/*.md` loaded with Vite `?raw` imports; persona keys must match `npcName`.
+- `ConversationStore` (IndexedDB) caps history at 100 entries/cat via `pruneConversations`; snapshots feed AI context windows.
+- See the Phase 5 lesson for the full contract.
 
-### v0.1.8 / late-0.1.7 — Movement & greeting additions
+### v0.1.x — Snapshot (condensed)
 
-- **Mamma Cat N/S walk + run animations** added so the 8-way move set is complete (previous sheets covered only E/W). Frame rows follow the existing cat-grid convention.
-- **Mamma Cat greeting action** (`MammaCat.startGreeting()` / `stopGreeting()`, `playerState === "greeting"`): Space-key fallback when no food/NPC is in range. Plays the directional `mammacat_greeting_east/west` sheet once at 8 fps, sets `setVelocity(0)`, and blocks movement for the duration. Triggered unconditionally by the player — **not** proximity-gated to humans. Priority order in `tryInteract()`: food → cat dialogue → greeting. Z-key (rest) is guarded by `!this.player.isGreeting`, and `shutdown()` calls `stopGreeting()`.
-- **Male jogger** added as a second jogger circuit (clockwise loop, counter to the existing female jogger). Waypoints were iteratively corrected and conflicting collision tiles removed from the tilemap.
-- **Boot-path `localStorage` hardening** (fixed PR feedback from 0.1.7): wrapped the `window.localStorage` *reference acquisition* itself (not just `getItem`/`setItem`) in try/catch around `migrateLegacyIntroFlag`. See the "`localStorage` access itself can throw" lesson under Persistence.
+- **v0.1.10 Dynamic colony + named-cat snatch eligibility:** `COLONY_COUNT` became a true dynamic total (seed 42 → bumped by dumping, decremented by snatching, floored at 9). Visible roster derived from `computeBackgroundSpawnCount` in `src/utils/colonySpawn.ts`. Named-cat snatch immunity reduced to "sleeping near shelter". See the "Colony population model" lesson.
+- **v0.1.9 Snatcher counters + colony-cat capture:** Added `PLAYER_SNATCHED_COUNT` + `CATS_SNATCHED` lifetime counters surfaced in the journal footer. `handleColonyCatSnatch` in `GameScene` removes background cats within a 16px grab range with witness+LOS-gated narration. `readLifetimeCount` helper (`src/utils/lifetimeCount.ts`, 8 unit tests) powers all life-stat rows. See the "Persisting counters across save-based scene restarts" lesson.
+- **v0.1.9 Collapse narrative upgrade:** Rising/falling-edge collapse detection via `wasCollapsed` in `GameScene.update()`; witness-aware recovery awards `trust.supportedDuringCollapse`. `COLLAPSE_THRESHOLD_MS` / `COLLAPSE_RECOVERY_MS` exported as runtime constants so tests can derive deltas. See the "Cross-system communication" and "Testing" lessons.
+- **v0.1.8 Movement + greeting:** Mamma Cat N/S walk + run animations completed the 8-way move set. `MammaCat.startGreeting()` (Space fallback when no food/NPC in range). Male jogger circuit added. Boot-path `localStorage` hardening — see the "`localStorage` access itself can throw" lesson.
 
 ---
 
@@ -351,7 +360,7 @@ SmallDog.png, WhiteDog.png, BrownDog.png — randomly assigned to dog walkers
 - **Test coverage is partial:** Vitest unit tests cover pure systems and most leaf modules — StatsSystem, TrustSystem, TerritorySystem, SaveSystem, ChapterSystem, DialogueService, AIDialogueService, DialogueSystem, DayNightCycle, FoodSource, BaseNPC helpers, HumanNPC, SpriteProfiles, ConversationStore, cat-dialogue, storyKeys, personas loader, plus pure utils (`lineOfSight`, `snatcherSpawnLogic`, `dialoguePoseAnim`). Count drifts; re-run `npx vitest run` for the current number. Remaining gaps are the Phaser-coupled scene glue (GameScene, HUDScene, JournalScene, EpilogueScene, BootScene, StartScene) and the NPCCat/GuardNPC/DogNPC state-machine update loops. CI runs tests before build and `verify:dist` after build.
 - **No audio:** Planned for Phase 5b / polish.
 - **Tilemap POI names are hardcoded:** Spawn points, food sources, shelter POIs use string names matched between Tiled JSON and GameScene. No validation that map contains expected POIs.
-- **GameScene is ~2900+ lines:** Camille encounters, snatchers, colony dynamics, and territory should be extracted into dedicated systems; `SnatcherSystem.ts` is a thin re-export for spawn policy only.
+- **GameScene is ~3400 lines (growing):** Camille encounters, snatchers, colony dynamics, ambient-bubble throttling, and territory should be extracted into dedicated systems; `SnatcherSystem.ts` is a thin re-export for spawn policy only. Beat data moved out in 5.1a (`src/data/camille-encounter-beats.ts`) as a first step.
 - **Colony cat random positions:** Not tied to map POIs; positions are hardcoded zone coordinates with random offsets. May clip into objects.
 - **Disposition type `"wary"` added in Phase 3:** Not yet used in NPC AI behavior weights (only affects emotes/narration/indicators).
 - **Camille/Manu/Kish use generic HumanNPC:** No dedicated sprites yet. They use the feeder profile/sprite. Custom sprites needed for visual distinction.

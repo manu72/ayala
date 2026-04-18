@@ -35,9 +35,15 @@ import {
 } from "../services/DialogueService";
 import { AIDialogueService } from "../services/AIDialogueService";
 import { FallbackDialogueService } from "../services/FallbackDialogueService";
+import type { DialogueHooks } from "../systems/DialogueSystem";
 import { storeConversation, getRecentConversations } from "../services/ConversationStore";
 import { AI_PERSONAS } from "../ai/personas";
 import { CAT_DIALOGUE_SCRIPTS, getRandomColonyLine } from "../data/cat-dialogue";
+import {
+  CAMILLE_ENCOUNTER_BEATS,
+  CAMILLE_ENCOUNTER_5_STEPS,
+  type EncounterStep,
+} from "../data/camille-encounter-beats";
 import { resolveSnatcherSpawnAction } from "../systems/SnatcherSystem";
 import { hasLineOfSightTiles } from "../utils/lineOfSight";
 
@@ -188,7 +194,11 @@ export class GameScene extends Phaser.Scene {
   /** Dialogue lives in HUDScene (1x zoom) so it's always visible. */
   private get dialogue(): {
     isActive: boolean;
-    show: (lines: string[], onComplete?: () => void) => void;
+    show: (
+      lines: string[],
+      onComplete?: () => void,
+      hooks?: DialogueHooks,
+    ) => void;
     dismiss: () => void;
   } {
     const hud = this.scene.get("HUDScene") as HUDScene | undefined;
@@ -1374,36 +1384,15 @@ export class GameScene extends Phaser.Scene {
    * All registry/trust/chapter side-effects live in {@link runCamilleEncounterBeat}
    * — the LLM never controls story progression.
    */
-  private readonly camilleEncounterBeats: Record<
-    2 | 3 | 4,
-    { objective: string; fallbackLines: string[] }
-  > = {
-    2: {
-      objective:
-        "Second meeting. She recognises Mamma Cat. She stays a respectful distance, crouches, and places a treat on the ground between them. She does not reach; she waits. 1–2 short lines.",
-      fallbackLines: [
-        "She sees you. She's not coming closer. She's... waiting. For you.",
-        "She places a treat on the ground between you. Doesn't move closer.",
-      ],
-    },
-    3: {
-      objective:
-        "Third meeting. She slow-blinks at Mamma Cat — cat trust language she's learnt. She invites a slow blink back. 2–3 short lines.",
-      fallbackLines: [
-        "She closes her eyes. Slowly. Opens them again. That means... trust.",
-        "You've seen other cats do this.",
-        "Slow blink back?",
-      ],
-    },
-    4: {
-      objective:
-        "Fourth meeting. Mamma Cat finally lets her fingers touch — first physical contact. Her niece Kish is loud nearby; Camille keeps her steady. 1–2 short lines, warm but restrained.",
-      fallbackLines: [
-        "Her hand smells like fish treats and soap. And something else. Home.",
-        "You push your head against her fingers. You haven't done this since... before.",
-      ],
-    },
-  };
+  /**
+   * Paired narrator + spoken beats for Camille's 2–4th encounters.
+   * See {@link ../data/camille-encounter-beats} for the authored data
+   * and pairing contract; {@link runCamilleEncounterBeat} drives it.
+   */
+  private readonly camilleEncounterBeats = CAMILLE_ENCOUNTER_BEATS;
+
+  /** Scripted beat-5 handoff (Chapter 6). Never AI-sourced. */
+  private readonly camilleEncounter5Steps = CAMILLE_ENCOUNTER_5_STEPS;
 
   private playCamilleEncounterNarrative(encounterNum: number): void {
     const hud = this.scene.get("HUDScene") as HUDScene | undefined;
@@ -1440,25 +1429,64 @@ export class GameScene extends Phaser.Scene {
         this.scheduleCamilleEncounterDialogue(12000, 5, () => {
           this.registry.set(StoryKeys.CAMILLE_ENCOUNTER, encounterNum);
           this.registry.set(StoryKeys.CAMILLE_ENCOUNTER_DAY, this.dayNight.dayCount);
-          // Beat 5 stays scripted — it's the chapter-6 handoff and needs to
-          // run verbatim regardless of LLM availability.
-          this.dialogue.show(
-            [
-              "She has a box. You've seen boxes before. Cats go in. They don't come back.",
-              "This is different. She's not grabbing. She's asking.",
-              "And you... you want to say yes.",
-              "The garden shrinks behind you. The smells change. The sounds change.",
-              "But the hand on the carrier is warm. And for the first time in a long time... you're not afraid.",
-            ],
-            () => {
-              this.registry.set(StoryKeys.ENCOUNTER_5_COMPLETE, true);
-              this.autoSave();
-              this.startChapter6Sequence();
-            },
-          );
+          // Beat 5 stays scripted — it's the chapter-6 handoff and must
+          // run verbatim regardless of LLM availability — but uses the
+          // same paired narrator+spoken pattern as beats 2–4.
+          this.playPairedBeat(this.camilleEncounter5Steps, this.camilleNPC, () => {
+            this.registry.set(StoryKeys.ENCOUNTER_5_COMPLETE, true);
+            this.autoSave();
+            this.startChapter6Sequence();
+          });
         });
         break;
     }
+  }
+
+  /**
+   * Drive a paired narrator+spoken sequence.
+   *
+   * For each step:
+   *  1. The narrator line appears in the modal dialogue box.
+   *  2. If the step has a `spoken` line and a valid `speaker`, a
+   *     persistent bubble is spawned above the speaker with that line.
+   *  3. When the player presses Space, both the modal advances AND the
+   *     current spoken bubble is torn down before the next step begins.
+   *
+   * The `onHide` hook guarantees bubble cleanup on any exit path
+   * (completion, Space-past-end, or early dismiss via click/x).
+   *
+   * `onComplete` is only invoked when the player reads through the
+   * full sequence — matching the existing DialogueSystem contract.
+   */
+  private playPairedBeat(
+    steps: ReadonlyArray<EncounterStep>,
+    speaker: HumanNPC | null,
+    onComplete: () => void,
+  ): void {
+    if (steps.length === 0) {
+      onComplete();
+      return;
+    }
+
+    const narratorLines = steps.map((s) => s.narrator);
+    let currentBubble: Phaser.GameObjects.Text | null = null;
+    const clearBubble = (): void => {
+      if (currentBubble) {
+        currentBubble.destroy();
+        currentBubble = null;
+      }
+    };
+
+    this.dialogue.show(narratorLines, onComplete, {
+      onLineShown: (index: number): void => {
+        clearBubble();
+        const step = steps[index];
+        if (step?.spoken && speaker && speaker.active && speaker.visible) {
+          currentBubble = this.renderHumanBubble(speaker, step.spoken, { persistent: true });
+        }
+      },
+      onHide: clearBubble,
+    });
   }
 
   /**
@@ -1468,11 +1496,15 @@ export class GameScene extends Phaser.Scene {
    *  1. Pin registry side-effects *before* any async work so pause/resume
    *     doesn't re-trigger the beat.
    *  2. Play Camille's crouch animation.
-   *  3. Try AI dialogue with the beat objective; on success, show those lines;
-   *     on any failure, show the authored fallback lines.
-   *  4. Apply beat-specific side-effects in the `onComplete` (stats restore,
-   *     emotes, HUD narration) so they run regardless of which dialogue path
-   *     was taken.
+   *  3. Try AI dialogue for Camille's SPOKEN lines only (beat `objective`
+   *     makes this explicit). The authored narrator lines always run.
+   *     AI lines replace authored spoken fallbacks positionally.
+   *  4. Drive the paired narrator+spoken sequence via {@link playPairedBeat}
+   *     so the narrator renders in the modal and Camille's voice renders
+   *     as a floating bubble above her head.
+   *  5. Apply beat-specific side-effects in `onComplete` (stats restore,
+   *     emotes, HUD narration) so they run regardless of whether AI
+   *     spoken lines succeeded or the scripted fallback ran.
    */
   private runCamilleEncounterBeat(n: 2 | 3 | 4, hud: HUDScene | undefined): void {
     this.registry.set(StoryKeys.CAMILLE_ENCOUNTER, n);
@@ -1499,14 +1531,17 @@ export class GameScene extends Phaser.Scene {
       }
     };
 
+    const runBeatWith = (spokenOverrides: string[] | null): void => {
+      const steps = beat.steps.map((s, idx) => ({
+        narrator: s.narrator,
+        spoken: spokenOverrides?.[idx] ?? s.spoken,
+      }));
+      this.playPairedBeat(steps, this.camilleNPC, onComplete);
+    };
+
     void this.requestCamilleEncounterLines(n, beat.objective)
-      .then((lines) => {
-        const finalLines = lines ?? beat.fallbackLines;
-        this.dialogue.show(finalLines, onComplete);
-      })
-      .catch(() => {
-        this.dialogue.show(beat.fallbackLines, onComplete);
-      });
+      .then((lines) => runBeatWith(lines))
+      .catch(() => runBeatWith(null));
   }
 
   /**
@@ -2241,26 +2276,10 @@ export class GameScene extends Phaser.Scene {
         Phaser.Math.Distance.Between(this.kishNPC.x, this.kishNPC.y, this.camilleNPC.x, this.camilleNPC.y) < 80
       ) {
         this.kishCamilleSlowDownShown = true;
-        const bubble = this.add
-          .text(this.camilleNPC.x, this.camilleNPC.y - 44, "Kish, slow down.", {
-            fontFamily: "Arial, Helvetica, sans-serif",
-            fontSize: "10px",
-            color: "#ffffff",
-            stroke: "#000000",
-            strokeThickness: 2,
-            backgroundColor: "#00000066",
-            padding: { x: 4, y: 2 },
-          })
-          .setOrigin(0.5)
-          .setDepth(8);
-        this.tweens.add({
-          targets: bubble,
-          y: this.camilleNPC.y - 64,
-          alpha: 0,
-          delay: 2000,
-          duration: 800,
-          onComplete: () => bubble.destroy(),
-        });
+        // Consolidated into the ambient-bubble channel so all human-spoken
+        // dialogue uses the same visual surface as greetings and encounter
+        // beats. Camille is the speaker; Kish just hears it.
+        this.renderGreetingBubble(this.camilleNPC, "Kish, slow down.");
         this.emotes.show(this, this.camilleNPC, "curious");
       }
 
@@ -2494,8 +2513,27 @@ export class GameScene extends Phaser.Scene {
     return lines[Math.floor(Math.random() * lines.length)]!;
   }
 
-  /** Render a floating greeting bubble — shared by scripted and AI paths. */
-  private renderGreetingBubble(human: HumanNPC, line: string): void {
+  /**
+   * Render a floating speech bubble above `human` carrying `line`.
+   *
+   * All human-spoken dialogue — ambient greetings, Kish's "slow down"
+   * beat, and Camille's encounter lines — renders through this single
+   * helper so the game never shows more than one visual style for
+   * human speech.
+   *
+   * Lifetime is controlled by `opts.persistent`:
+   *  - `false` (default): auto-fades at ~2.5s and self-destroys; used
+   *    for ambient greetings where the player keeps moving.
+   *  - `true`: returns the Text GameObject and does NOT auto-destroy.
+   *    The caller owns the bubble's lifetime (typically tied to an
+   *    encounter beat step) and MUST `.destroy()` it when advancing
+   *    or aborting. Used by the Camille encounter loop.
+   */
+  private renderHumanBubble(
+    human: HumanNPC,
+    line: string,
+    opts?: { persistent?: boolean },
+  ): Phaser.GameObjects.Text {
     const bubble = this.add
       .text(human.x, human.y - 30, line, {
         fontFamily: "Arial, Helvetica, sans-serif",
@@ -2509,14 +2547,27 @@ export class GameScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setDepth(8);
 
-    this.tweens.add({
-      targets: bubble,
-      y: human.y - 50,
-      alpha: 0,
-      delay: 2500,
-      duration: 1000,
-      onComplete: () => bubble.destroy(),
-    });
+    if (!opts?.persistent) {
+      this.tweens.add({
+        targets: bubble,
+        y: human.y - 50,
+        alpha: 0,
+        delay: 2500,
+        duration: 1000,
+        onComplete: () => bubble.destroy(),
+      });
+    }
+
+    return bubble;
+  }
+
+  /**
+   * Back-compat wrapper for the ambient (auto-fading) bubble path.
+   * Kept as a named helper so call sites read naturally at the greeting
+   * sites.
+   */
+  private renderGreetingBubble(human: HumanNPC, line: string): void {
+    this.renderHumanBubble(human, line);
   }
 
   /** Per-human wait between AI ambient bubbles, ms. */
