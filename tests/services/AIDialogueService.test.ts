@@ -214,6 +214,44 @@ describe("AIDialogueService.getDialogue", () => {
     expect(bodies[0]!.provider).toBe("deepseek");
     expect(bodies[1]!.provider).toBe("openai");
   });
+
+  // Regression: a bad DEEPSEEK_API_KEY makes the proxy forward the upstream
+  // 401 verbatim. The documented provider-retry contract (README "Provider
+  // retry" step) requires that this failover to the secondary provider, not
+  // collapse straight to scripted fallback.
+  it("retries on 401 (bad primary API key) with secondary provider", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: { message: "Invalid API key" } }), { status: 401 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            choices: [
+              { message: { content: '{"lines":["Retry ok"],"speakerPose":"friendly","emote":"heart"}' } },
+            ],
+          }),
+          { status: 200 },
+        ),
+      );
+    const svc = new AIDialogueService({
+      proxyUrl: "/api/ai/chat",
+      personas: { Blacky: "# x" },
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      primaryProvider: "deepseek",
+      secondaryProvider: "openai",
+    });
+    const req = baseReq();
+    req.conversationHistory = [];
+    req.gameState.trustWithSpeaker = 0;
+    const out = await svc.getDialogue(req);
+    expect(out.lines).toEqual(["Retry ok"]);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    const bodies = fetchImpl.mock.calls.map((c) => JSON.parse(c[1]!.body as string));
+    expect(bodies[0]!.provider).toBe("deepseek");
+    expect(bodies[1]!.provider).toBe("openai");
+  });
 });
 
 describe("AIDialogueService human dialogue", () => {

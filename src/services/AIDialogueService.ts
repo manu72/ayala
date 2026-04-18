@@ -159,7 +159,18 @@ export class AIDialogueService implements DialogueService {
 }
 
 function shouldRetryWithFallback(status: number): boolean {
-  return status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
+  // 401 covers bad/expired primary API keys forwarded verbatim by the proxy
+  // (see proxy/src/worker.ts#forwardChat: `status: upstream.status`). Without
+  // 401 here, a bad DEEPSEEK_API_KEY skips the documented provider-retry and
+  // collapses straight to FallbackDialogueService — see README "Provider retry".
+  return (
+    status === 401 ||
+    status === 429 ||
+    status === 500 ||
+    status === 502 ||
+    status === 503 ||
+    status === 504
+  );
 }
 
 export function matchScriptedResponse(request: DialogueRequest): DialogueResponse | null {
