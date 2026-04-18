@@ -293,12 +293,24 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
    * current facing direction (east or west variant chosen from `lastHorizontal`).
    * Non-interruptible by directional input: movement is frozen for the
    * duration of the animation. Callable only from the `normal`, `crouching`,
-   * or `catloaf` states; no-op otherwise (resting / waking / already greeting).
+   * or `catloaf` states; no-op otherwise (resting / waking / already greeting
+   * / currently consuming).
+   *
+   * The `consuming` block is symmetric with {@link startConsuming}'s own
+   * greeting block: both are lock-in animation states that register a
+   * `once(ANIMATION_COMPLETE)` listener, so allowing one to interrupt the
+   * other would orphan the outstanding listener on the sprite until the
+   * same animation key next plays to completion.
    *
    * Returns `true` if the greeting started, `false` if the call was ignored.
    */
   startGreeting(): boolean {
-    if (this.playerState === "resting" || this.playerState === "waking" || this.playerState === "greeting") {
+    if (
+      this.playerState === "resting" ||
+      this.playerState === "waking" ||
+      this.playerState === "greeting" ||
+      this.playerState === "consuming"
+    ) {
       return false;
     }
 
