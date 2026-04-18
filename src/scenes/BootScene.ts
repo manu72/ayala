@@ -181,6 +181,18 @@ export class BootScene extends Phaser.Scene {
         frameHeight: 68,
       });
     }
+
+    // Audio: two looping background tracks and a one-shot meow SFX.
+    // Phaser's SoundManager keeps these cached across scene restarts so we
+    // only pay the decode cost once at boot.
+    this.load.audio("bgm_ayala", "assets/sounds/ayala_loop_Luminous Rain.mp3");
+    this.load.audio("bgm_snatcher", "assets/sounds/snatcher_loop_Stay the Course.mp3");
+    this.load.audio("sfx_meow_happy", "assets/sounds/meow_happy.wav");
+
+    // Lucide volume-2 / volume-x glyphs for the HUD mute toggle. Rasterised
+    // at 20x20 to match the HUD icon slot exactly (avoids runtime scaling).
+    this.load.svg("icon_volume_on", "assets/icons/volume-2.svg", { width: 20, height: 20 });
+    this.load.svg("icon_volume_off", "assets/icons/volume-x.svg", { width: 20, height: 20 });
   }
 
   create(): void {

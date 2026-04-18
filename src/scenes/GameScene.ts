@@ -52,6 +52,7 @@ import {
   type EncounterStep,
 } from "../data/camille-encounter-beats";
 import { resolveSnatcherSpawnAction } from "../systems/SnatcherSystem";
+import { AudioSystem } from "../systems/AudioSystem";
 import { hasLineOfSightTiles } from "../utils/lineOfSight";
 
 const INTERACTION_DISTANCE = GP.INTERACTION_DIST;
@@ -125,6 +126,11 @@ export class GameScene extends Phaser.Scene {
   private narrationShown = new Set<string>();
   private dialogueService!: DialogueService;
   territory!: TerritorySystem;
+  /**
+   * Owns the looping background music (ambient ↔ danger crossfade) and
+   * one-shot SFX. Public so HUDScene can hook the mute toggle.
+   */
+  audio!: AudioSystem;
 
   // Camille encounter sequence state
   private camilleNPC: HumanNPC | null = null;
@@ -299,6 +305,10 @@ export class GameScene extends Phaser.Scene {
       this.player.setVisible(true);
     }
     this.resumeCamilleEraHumans();
+
+    // Stop music + release sound instances so a scene restart (e.g. after a
+    // snatcher capture at GameScene.ts:3750) doesn't stack overlapping loops.
+    this.audio?.stop();
   }
 
   /** Remove pending intro delayed calls and tweens (idempotent). */
@@ -387,6 +397,8 @@ export class GameScene extends Phaser.Scene {
     this.trust = new TrustSystem();
     this.emotes = new EmoteSystem();
     this.chapters = new ChapterSystem();
+    this.audio = new AudioSystem();
+    this.audio.start(this);
     this.chapterCheckTimer = 0;
     this.narrationShown = new Set();
     const scripted = new ScriptedDialogueService(CAT_DIALOGUE_SCRIPTS);
@@ -991,6 +1003,8 @@ export class GameScene extends Phaser.Scene {
       // console.log (not .debug) so the diagnostic shows at Chrome's
       // "Default levels" filter — .debug maps to Verbose which is hidden
       // by default, making Space-press bugs impossible to self-diagnose.
+      // No meow here: the press was absorbed by an open dialogue / input
+      // freeze, so firing audio feedback would be confusing.
       console.log("[interact]", {
         outcome: "space blocked at outer gate",
         dialogueActive: this.dialogue.isActive,
@@ -2801,6 +2815,11 @@ export class GameScene extends Phaser.Scene {
       this.checkSnatcherDetection();
     }
 
+    // Crossfade background music to the danger theme whenever any snatcher
+    // exists in the park. setDanger() is idempotent, so calling it every
+    // frame is cheap.
+    this.audio.setDanger(this.snatchers.length > 0);
+
     // NPC cats flee from snatchers
     if (this.snatchers.length > 0) {
       for (const snatcher of this.snatchers) {
@@ -3184,6 +3203,7 @@ export class GameScene extends Phaser.Scene {
       // early here and do NOT double-trigger startGreeting().
       if (this.tryAcceptBeat5Decision()) {
         this.logInteractDiag("consumed by Beat-5 decision", null, Infinity, nearestRawEntry, nearestRawDist);
+        this.audio.playMeow();
         return;
       }
       // No cat in range — space becomes a free Mamma-Cat greeting action.
@@ -3192,16 +3212,40 @@ export class GameScene extends Phaser.Scene {
       // loop in updateHumans() is untouched and still runs independently.
       this.logInteractDiag("free greet (no cat in range)", null, Infinity, nearestRawEntry, nearestRawDist);
       this.player.startGreeting();
+      // Only meow on a free greet if Mamma is actually greeting *someone* —
+      // i.e. a human NPC is within the player-initiated greet range. A free
+      // greet in empty space is silent.
+      if (this.isHumanInGreetRange()) {
+        this.audio.playMeow();
+      }
       return;
     }
     const cat = nearestEntry.cat;
     if (cat.state === "sleeping") {
       this.logInteractDiag("alerted sleeping cat", nearestEntry, nearestDist, nearestRawEntry, nearestRawDist);
       cat.triggerAlert();
+      this.audio.playMeow();
       return;
     }
     this.logInteractDiag("engaging dialogue", nearestEntry, nearestDist, nearestRawEntry, nearestRawDist);
+    this.audio.playMeow();
     this.showCatDialogue(cat);
+  }
+
+  /**
+   * True when at least one visible human NPC is within the player-initiated
+   * greet radius. Used to gate the meow SFX for "free greet (no cat in
+   * range)" — without a target cat AND without a nearby human, the press is
+   * a silent idle greet rather than a social interaction.
+   */
+  private isHumanInGreetRange(): boolean {
+    const range = GP.CAT_PERSON_PLAYER_GREET_DIST;
+    for (const human of this.humans) {
+      if (!human.active || !human.visible) continue;
+      const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, human.x, human.y);
+      if (dist <= range) return true;
+    }
+    return false;
   }
 
   /**
