@@ -55,7 +55,7 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 - **Snatchers** (night threat) with detection radius, crouching/cover evasion, capture-reload mechanic for Mamma Cat, and a colony-cat capture sweep. Eligibility rule mirrors Mamma Cat's: any active cat is vulnerable unless sleeping near a shelter POI. Named cats can also be taken if caught napping unsafely, though they usually stay close to their home POIs
 - **Colony dynamics** with 3 dumping events and fluctuating background population
 - **Centralized DialogueService** with `AIDialogueService` + `FallbackDialogueService` — named cats use AI lines when `VITE_AI_PROXY_URL` is set; story flags still come from scripted condition matching; **IndexedDB** stores up to 100 turns per cat (pruned automatically) with optional game-state snapshots
-- **Cloudflare Worker** (`proxy/`) holds Deepseek/OpenAI keys and exposes `POST /api/ai/chat` — see [proxy/README.md](proxy/README.md)
+- **Cloudflare Worker** (`proxy/`) holds Deepseek/OpenAI keys and exposes `POST /api/ai/chat` — see [AI Dialogue Proxy](#ai-dialogue-proxy) below
 - **Epilogue and end screen** with welfare information, links to CARA Philippines and @atgcats, and credits
 - **New Game+** (cozy mode) unlocked after completing the story -- replay with full trust and territory
 - **Phase 4.5:** Opening abandonment cinematic; NPC dialogue engagement with `speakerPose`-driven animations; Category A/B human behaviour (glances vs circuits); witness-gated dumping and snatcher narration; Camille encounter re-validation on delayed dialogue; chapter title cards + pause-menu chapter hint; `prefers-reduced-motion` support for decorative HUD/emote/intro tweens; gameplay radii centralised in `src/config/gameplayConstants.ts`
@@ -125,14 +125,6 @@ npm run dev
 
 Vite will start a dev server (default port 5173, or the next available port). Open the URL shown in the terminal.
 
-### AI dialogue (optional)
-
-1. Copy [.env.example](.env.example) to `.env` and set `VITE_AI_PROXY_URL=/api/ai/chat` (no secrets in this file).
-2. In `proxy/`, copy `proxy/.dev.vars.example` to `proxy/.dev.vars` and add `DEEPSEEK_API_KEY` / `OPENAI_API_KEY`.
-3. Run two terminals: `npm run dev` (game) and `npm run dev:proxy` (Worker on port 8787). Vite proxies `/api/ai/chat` to the Worker.
-
-Without a proxy, the game uses **scripted dialogue only** (same as Phase 4). Production: deploy the Worker on the **same origin** as the static site so keys never reach the browser bundle. Run `npm run verify:dist` after `npm run build` to ensure no secret patterns leaked into `dist/`.
-
 ### Production Build
 
 ```bash
@@ -148,6 +140,111 @@ npm run preview
 ```
 
 Serves the `dist/` folder locally to verify the production build before deploying.
+
+## AI Dialogue Proxy
+
+Named colony cats use LLM-backed dialogue when a same-origin proxy is configured. The proxy (`proxy/`, a Cloudflare Worker) forwards `POST /api/ai/chat` to Deepseek (primary) or OpenAI (fallback) using **server-held API keys only** — no secret ever ships to the browser. Scripted dialogue (`src/data/cat-dialogue.ts`) remains the automatic fallback if the proxy is unreachable or the model returns malformed output.
+
+### One-time setup
+
+1. Copy [.env.example](.env.example) to `.env` (no secrets; only `VITE_AI_PROXY_URL=/api/ai/chat` and provider preferences).
+2. Copy `proxy/.dev.vars.example` to `proxy/.dev.vars` (gitignored) and paste real keys:
+
+   ```bash
+   DEEPSEEK_API_KEY=sk-...
+   OPENAI_API_KEY=sk-...
+   # Optional overrides — defaults are fine locally:
+   # DEEPSEEK_MODEL=deepseek-chat
+   # OPENAI_MODEL=gpt-4.1-mini
+   # ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+   ```
+
+3. Install Worker deps once: `cd proxy && npm install`.
+
+Without `VITE_AI_PROXY_URL`, the game runs scripted-only — identical to Phase 4 behaviour, zero network calls.
+
+### Deploy to production
+
+```bash
+cd proxy
+npx wrangler deploy
+```
+
+Set secrets via the Cloudflare dashboard or `wrangler secret put DEEPSEEK_API_KEY` / `wrangler secret put OPENAI_API_KEY`. Set `ALLOWED_ORIGINS` to the exact `Origin` values the browser will send (e.g. `https://yourname.github.io` for GitHub Pages) — anything else gets a 403.
+
+Bind the Worker to the **same hostname** as your static site so the browser calls `/api/ai/chat` same-origin, or configure a route like `yourdomain.com/api/*` → this Worker. After each production build, run `npm run verify:dist` to confirm no secret patterns leaked into `dist/`.
+
+## Local Development & Testing
+
+The repo ships two npm projects — the game (root) and the Worker (`proxy/`). Tests and dev servers for each are separate.
+
+### Unit tests (fast fail, run first)
+
+```bash
+npm test            # Vitest: game systems, AIDialogueService, FallbackDialogueService, personas, ConversationStore
+npm run test:proxy  # Vitest (in proxy/): worker origin check, validation, timeout paths
+```
+
+### Static-bundle secret leak check
+
+```bash
+npm run build
+npm run verify:dist
+```
+
+`check-dist-leaks.mjs` greps `dist/` for `sk-...`, `DEEPSEEK_API_KEY`, and `OPENAI_API_KEY`. CI runs this automatically after `npm run build` in [.github/workflows/deploy-pages.yml](.github/workflows/deploy-pages.yml).
+
+### Run game + proxy together (two terminals)
+
+Terminal A — **Worker**:
+
+```bash
+npm run dev:proxy   # wrangler dev on http://127.0.0.1:8787
+```
+
+Terminal B — **Vite**:
+
+```bash
+npm run dev         # http://localhost:5173
+```
+
+Vite's `server.proxy` in [vite.config.ts](vite.config.ts) forwards `/api/ai/chat` → `127.0.0.1:8787`, so the client uses the same relative URL in dev and prod.
+
+### Smoke-test AI dialogue in the browser
+
+Approach one of the **eight AI cats** (Blacky, Tiger, Jayco, Jayco Jr, Fluffy, Pedigree, Ginger, Ginger B) and press **Space**. Verify:
+
+| Check | Where to look |
+| --- | --- |
+| 400ms "thinking" curious emote if the model is slow | Above the engaged cat |
+| Lines feel in character (cat-speak, short) | Dialogue box |
+| First-meeting trust, indicator, registry all fire once | Journal (J key) |
+| Turn persisted to IndexedDB | DevTools → Application → IndexedDB → `ayala_conversations` |
+| Second conversation references the first | Re-approach the same cat |
+
+Each Space on a named cat should produce one `POST /api/ai/chat` with status **200** in DevTools → Network. Body shape: `{ provider, messages, temperature, max_tokens }`.
+
+### Test the fallback paths (do not skip)
+
+- **AI down, scripted fallback.** Stop the Worker (Ctrl+C in Terminal A) and talk to any named cat. After the 8s client abort the scripted line from `cat-dialogue.ts` fires; console logs `[Dialogue] AI failed; using scripted fallback` from [FallbackDialogueService](src/services/FallbackDialogueService.ts).
+- **No proxy configured at all.** Comment out `VITE_AI_PROXY_URL` in `.env`, restart Vite. Zero AI network calls — scripted-only.
+- **Provider retry.** Put a bad `DEEPSEEK_API_KEY` in `proxy/.dev.vars` and restart `dev:proxy`. Deepseek 401s; the client retries with `provider: "openai"` automatically. Two POSTs in Network.
+
+### Reset conversation memory between tests
+
+DevTools → Application → IndexedDB → right-click `ayala_conversations` → Delete database, then reload.
+
+### Pre-push checklist
+
+```bash
+npm test && npm run test:proxy && npm run build && npm run verify:dist
+```
+
+All four must pass. CI runs these on every push and PR to `main`, so green locally = green on GitHub.
+
+### Common gotcha
+
+If you want to test the browser against a **deployed** Worker (not `wrangler dev`), `ALLOWED_ORIGINS` on the Worker must include `http://localhost:5173`, otherwise the Worker returns **403 forbidden origin**. Local `.dev.vars` defaults already allow it — this only bites once you deploy.
 
 ## Project Structure
 
@@ -241,7 +338,11 @@ ayala/
 │       ├── SnatcherSystem.ts           #   Facade re-exporting snatcher spawn policy
 │       └── ThreatIndicator.ts          #   NPC disposition indicators
 │
-├── proxy/                               # Cloudflare Worker — POST /api/ai/chat (see proxy/README.md)
+├── proxy/                               # Cloudflare Worker — POST /api/ai/chat (see AI Dialogue Proxy above)
+│   ├── src/worker.ts                   #   Origin check, validation, upstream forwarding
+│   ├── tests/worker.test.ts            #   Vitest suite (npm run test:proxy)
+│   ├── wrangler.toml                   #   Worker config
+│   └── .dev.vars.example               #   Copy to .dev.vars (gitignored) with real keys
 ├── scripts/
 │   └── check-dist-leaks.mjs            #   CI: fail if secret-like patterns in dist/
 ├── index.html                           # Vite entry page
