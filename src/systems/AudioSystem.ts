@@ -19,6 +19,15 @@ const VOLUMES = {
 
 const FADE_MS = 600;
 const MEOW_VOLUME = 0.6;
+const CAT_GROWL_VOLUME = 0.7;
+
+/**
+ * Minimum gap (ms) between cat-growl plays. Prevents a stack of overlapping
+ * growls when several cats emit warning emotes on the same frame — e.g.
+ * during the first snatcher sighting when every cat within witness range
+ * fires an `alert` emote simultaneously.
+ */
+const CAT_GROWL_COOLDOWN_MS = 1500;
 
 const MUTE_STORAGE_KEY = "ayala.audio.muted";
 
@@ -47,6 +56,7 @@ export class AudioSystem {
   private dangerActive = false;
   private muted: boolean;
   private started = false;
+  private lastCatGrowlAt = 0;
 
   constructor() {
     this.muted = AudioSystem.readMutedFromStorage();
@@ -89,6 +99,19 @@ export class AudioSystem {
   playMeow(): void {
     if (this.muted || !this.scene) return;
     this.scene.sound.play("sfx_meow_happy", { volume: MEOW_VOLUME });
+  }
+
+  /**
+   * One-shot cat growl/hiss cue for warning reactions. Rate-limited globally
+   * so simultaneous warning emotes (e.g. multiple cats spotting a snatcher)
+   * don't stack into a garbled chorus.
+   */
+  playCatGrowl(): void {
+    if (this.muted || !this.scene) return;
+    const now = this.scene.time.now;
+    if (now - this.lastCatGrowlAt < CAT_GROWL_COOLDOWN_MS) return;
+    this.lastCatGrowlAt = now;
+    this.scene.sound.play("sfx_cat_growl_warning", { volume: CAT_GROWL_VOLUME });
   }
 
   isMuted(): boolean {

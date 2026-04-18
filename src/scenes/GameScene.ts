@@ -59,6 +59,32 @@ const INTERACTION_DISTANCE = GP.INTERACTION_DIST;
 const DIALOGUE_BREAK_DISTANCE = GP.DIALOGUE_BREAK_DIST;
 const LEARN_NAME_DISTANCE = GP.LEARN_NAME_DIST;
 const TILE_SIZE = GP.TILE_SIZE;
+
+/**
+ * Canonical emote for each dialogue pose. Used both for the opening emote
+ * shown when dialogue starts and to validate/normalise `response.emote`
+ * so the closing emote can never contradict the pose (e.g. "heart" after
+ * a hostile hiss).
+ */
+const POSE_TO_EMOTE: Record<
+  import("../services/DialogueService").SpeakerPose,
+  EmoteType
+> = {
+  friendly: "heart",
+  hostile: "hostile",
+  wary: "alert",
+  curious: "curious",
+  submissive: "curious",
+  sleeping: "sleep",
+};
+
+/**
+ * Emotes that are inconsistent with a hostile pose. A cat mid-hiss must
+ * never flash a heart or friendly cue: when the dialogue response pairs
+ * one of these emotes with a hostile pose, we override the emote to stay
+ * on-model.
+ */
+const POSITIVE_EMOTES: ReadonlySet<EmoteType> = new Set(["heart"]);
 const DEFAULT_ZOOM = 2.5;
 const PEEK_ZOOM = 0.8;
 const ZOOM_DURATION = 500;
@@ -3352,19 +3378,25 @@ export class GameScene extends Phaser.Scene {
       this.player.faceToward(cat.x, cat.y);
       this.engagedDialogueNPC = cat;
 
+      // Normalise the response so the closing emote can never contradict
+      // the opening pose (e.g. a hostile hiss must not end on a heart).
+      // We mutate in place so processDialogueResponse at dialogue-close
+      // uses the corrected value.
+      if (response.speakerPose === "hostile" && response.emote) {
+        if (POSITIVE_EMOTES.has(response.emote as EmoteType)) {
+          response.emote = POSE_TO_EMOTE.hostile;
+        }
+      }
+
       if (response.speakerPose) {
-        const poseEmote: Record<
-          import("../services/DialogueService").SpeakerPose,
-          import("../systems/EmoteSystem").EmoteType
-        > = {
-          friendly: "heart",
-          hostile: "hostile",
-          wary: "alert",
-          curious: "curious",
-          submissive: "curious",
-          sleeping: "sleep",
-        };
-        this.emotes.show(this, cat, poseEmote[response.speakerPose]);
+        this.emotes.show(this, cat, POSE_TO_EMOTE[response.speakerPose]);
+
+        // A hostile pose is the dialogue-time "hissing" signal. Play the
+        // growl cue exactly once alongside the opening emote so the audio
+        // and visual land together; AudioSystem rate-limits further plays.
+        if (response.speakerPose === "hostile") {
+          this.audio.playCatGrowl();
+        }
       }
 
       if (response.narration) {
