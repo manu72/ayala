@@ -163,9 +163,16 @@ export class GameScene extends Phaser.Scene {
    * press (or held key) chains straight into the next scripted response —
    * turning Blacky's first-meeting dialogue into the "Still here? Good..."
    * return dialogue immediately, with no time having elapsed in-world.
-   * Cleared in `updateNPCs` once the player steps outside `INTERACTION_DISTANCE`.
+   *
+   * Cleared in `updateNPCs` when EITHER the player steps outside
+   * `INTERACTION_DISTANCE`, OR `LAST_PARTNER_HOLD_MS` elapses. The time
+   * expiry rescues the stationary-Mamma case: if the player closes a
+   * dialogue and doesn't move, waiting a beat is enough to re-engage —
+   * without it, the only way out was to walk a pixel away and back.
    */
   private lastDialoguePartner: NPCCat | null = null;
+  private lastDialoguePartnerAt = 0;
+  private static readonly LAST_PARTNER_HOLD_MS = 1500;
 
   // Snatcher tracking
   private snatchers: HumanNPC[] = [];
@@ -255,6 +262,7 @@ export class GameScene extends Phaser.Scene {
       this.engagedDialogueNPC = null;
     }
     this.lastDialoguePartner = null;
+    this.lastDialoguePartnerAt = 0;
     this.player?.stopGreeting();
     this.collapseWitness = null;
     this.wasCollapsed = false;
@@ -965,6 +973,16 @@ export class GameScene extends Phaser.Scene {
 
     // ──── Interact (Space tap) ────
     const spaceJust = this.spaceKey && Phaser.Input.Keyboard.JustDown(this.spaceKey);
+    if (spaceJust && (this.dialogue.isActive || this.playerInputFrozen) && import.meta.env.DEV) {
+      // console.log (not .debug) so the diagnostic shows at Chrome's
+      // "Default levels" filter — .debug maps to Verbose which is hidden
+      // by default, making Space-press bugs impossible to self-diagnose.
+      console.log("[interact]", {
+        outcome: "space blocked at outer gate",
+        dialogueActive: this.dialogue.isActive,
+        frozen: this.playerInputFrozen,
+      });
+    }
     if (spaceJust && !this.dialogue.isActive && !this.playerInputFrozen) {
       const usedSource = this.foodSources.tryInteract(
         this.player.x,
@@ -2215,10 +2233,16 @@ export class GameScene extends Phaser.Scene {
       const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, cat.x, cat.y);
 
       // Clear the "just spoke to" guard once the player leaves interaction
-      // range, so coming back later naturally triggers the next scripted
-      // response instead of it chaining from the last one.
-      if (this.lastDialoguePartner === cat && dist > INTERACTION_DISTANCE) {
-        this.lastDialoguePartner = null;
+      // range OR enough time has elapsed, so coming back later naturally
+      // triggers the next scripted response instead of it chaining from the
+      // last one. The time branch prevents stationary Mamma from being
+      // locked out of re-engaging a cat she didn't walk away from.
+      if (this.lastDialoguePartner === cat) {
+        const elapsedSinceChat = now - this.lastDialoguePartnerAt;
+        if (dist > INTERACTION_DISTANCE || elapsedSinceChat >= GameScene.LAST_PARTNER_HOLD_MS) {
+          this.lastDialoguePartner = null;
+          this.lastDialoguePartnerAt = 0;
+        }
       }
 
       if (!indicator.known) {
@@ -2957,10 +2981,13 @@ export class GameScene extends Phaser.Scene {
   /** Per-human wait between AI ambient bubbles, ms. */
   private static readonly HUMAN_AI_BUBBLE_COOLDOWN_MS = 30_000;
   /**
-   * Tight budget for ambient bubble LLM calls, ms. Well below the 8s engaged
-   * dialogue budget so a slow model never stalls the scene.
+   * Budget for ambient bubble LLM calls, ms. Observed proxy round-trips run
+   * 2000–4500 ms, so anything tighter forces almost every bubble through the
+   * scripted fallback (and spams the console). 3500 ms catches the common
+   * case while still well below the 8s engaged dialogue budget so a slow
+   * model can't stall the scene.
    */
-  private static readonly HUMAN_AI_BUBBLE_TIMEOUT_MS = 1500;
+  private static readonly HUMAN_AI_BUBBLE_TIMEOUT_MS = 3500;
 
   // ──────────── Food Sources ────────────
 
@@ -3061,17 +3088,29 @@ export class GameScene extends Phaser.Scene {
 
   private tryInteract(): void {
     // Greeting locks the player; ignore re-presses until it finishes.
-    if (this.player.isGreeting) return;
+    if (this.player.isGreeting) {
+      this.logInteractDiag("skipped: player mid-greeting", null, Infinity, null, Infinity);
+      return;
+    }
 
     let nearestEntry: NPCEntry | null = null;
     let nearestDist = Infinity;
+    // Track the absolute-nearest cat ignoring the `lastDialoguePartner`
+    // skip, so the diagnostic can tell "no cat in range" apart from "a cat
+    // is right next to you but is being intentionally skipped".
+    let nearestRawEntry: NPCEntry | null = null;
+    let nearestRawDist = Infinity;
     for (const entry of this.npcs) {
+      const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, entry.cat.x, entry.cat.y);
+      if (dist < nearestRawDist) {
+        nearestRawEntry = entry;
+        nearestRawDist = dist;
+      }
       // Skip the cat we just finished talking to until the player has stepped
       // out of range. Without this guard, a single Space press can both close
       // the current dialogue (Phaser dispatches key events before update())
       // and immediately re-open the next scripted response for the same NPC.
       if (entry.cat === this.lastDialoguePartner) continue;
-      const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, entry.cat.x, entry.cat.y);
       if (dist < INTERACTION_DISTANCE && dist < nearestDist) {
         nearestEntry = entry;
         nearestDist = dist;
@@ -3083,20 +3122,60 @@ export class GameScene extends Phaser.Scene {
       // is open, consume the press as the "yes, take me home" answer.
       // acceptBeat5() fires Mamma's greeting animation itself so we return
       // early here and do NOT double-trigger startGreeting().
-      if (this.tryAcceptBeat5Decision()) return;
+      if (this.tryAcceptBeat5Decision()) {
+        this.logInteractDiag("consumed by Beat-5 decision", null, Infinity, nearestRawEntry, nearestRawDist);
+        return;
+      }
       // No cat in range — space becomes a free Mamma-Cat greeting action.
       // This is NOT proximity-gated and does NOT target any NPC: the player
       // can greet anywhere, any time. The humans' own passive proximity greet
       // loop in updateHumans() is untouched and still runs independently.
+      this.logInteractDiag("free greet (no cat in range)", null, Infinity, nearestRawEntry, nearestRawDist);
       this.player.startGreeting();
       return;
     }
     const cat = nearestEntry.cat;
     if (cat.state === "sleeping") {
+      this.logInteractDiag("alerted sleeping cat", nearestEntry, nearestDist, nearestRawEntry, nearestRawDist);
       cat.triggerAlert();
       return;
     }
+    this.logInteractDiag("engaging dialogue", nearestEntry, nearestDist, nearestRawEntry, nearestRawDist);
     this.showCatDialogue(cat);
+  }
+
+  /**
+   * DEV-only one-line breakdown of every Space-interact press, so "why
+   * didn't that do anything?" is self-diagnosing. Prints the guard state
+   * (dialogue/frozen/greeting), the selected target (respecting the
+   * `lastDialoguePartner` skip), and the absolute-nearest cat so you can
+   * see at a glance whether proximity or the just-spoke-to guard was what
+   * blocked engagement. No-ops in production builds.
+   *
+   * Uses `console.log` (not `.debug`) because Chrome's "Default levels"
+   * filter hides `.debug` under the Verbose bucket — the whole point of
+   * this diagnostic is to be visible without tweaking DevTools.
+   */
+  private logInteractDiag(
+    outcome: string,
+    selected: NPCEntry | null,
+    selectedDist: number,
+    rawNearest: NPCEntry | null,
+    rawNearestDist: number,
+  ): void {
+    if (!import.meta.env.DEV) return;
+    console.log("[interact]", {
+      outcome,
+      dialogueActive: this.dialogue.isActive,
+      frozen: this.playerInputFrozen,
+      isGreeting: this.player.isGreeting,
+      lastPartner: this.lastDialoguePartner?.npcName ?? null,
+      selected: selected ? { name: selected.cat.npcName, dist: Math.round(selectedDist) } : null,
+      nearestAny: rawNearest
+        ? { name: rawNearest.cat.npcName, dist: Math.round(rawNearestDist) }
+        : null,
+      interactDist: INTERACTION_DISTANCE,
+    });
   }
 
   private showCatDialogue(cat: NPCCat): void {
@@ -3192,6 +3271,7 @@ export class GameScene extends Phaser.Scene {
         cat.disengageDialogue();
         this.engagedDialogueNPC = null;
         this.lastDialoguePartner = cat;
+        this.lastDialoguePartnerAt = this.time.now;
         this.processDialogueResponse(cat, name, trustBefore, response);
       });
     } catch (err) {
@@ -3570,6 +3650,7 @@ export class GameScene extends Phaser.Scene {
     // partner pointer.
     if (this.lastDialoguePartner === cat) {
       this.lastDialoguePartner = null;
+      this.lastDialoguePartnerAt = 0;
     }
 
     const prev = this.registry.get(StoryKeys.CATS_SNATCHED);

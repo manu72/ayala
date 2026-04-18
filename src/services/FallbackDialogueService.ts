@@ -28,7 +28,17 @@ export class FallbackDialogueService implements DialogueService {
         getDialogue(r: DialogueRequest, o?: AIDialogueCallOptions): Promise<DialogueResponse>;
       }).getDialogue(request, callOpts);
     } catch (err) {
-      console.warn("[Dialogue] AI failed; using scripted fallback", err);
+      // AbortError is the designed abort path (player moved away, or the
+      // caller's tight per-call budget elapsed). Log at debug so it doesn't
+      // masquerade as a failure. Real upstream / parse errors stay at warn.
+      const isAbort =
+        err instanceof DOMException && err.name === "AbortError" ||
+        (err instanceof Error && err.name === "AbortError");
+      if (isAbort) {
+        console.debug("[Dialogue] AI aborted; using scripted fallback", err);
+      } else {
+        console.warn("[Dialogue] AI failed; using scripted fallback", err);
+      }
       return this.secondary.getDialogue(request);
     }
   }
