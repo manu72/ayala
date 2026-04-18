@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   handleRequest,
   isOriginAllowed,
@@ -216,5 +216,51 @@ describe("CORS", () => {
     const res = await handleRequest(req, env);
     expect(res.status).toBe(403);
     expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
+  });
+});
+
+describe("upstream failure semantics", () => {
+  const ALLOWED = "http://localhost:5173";
+  const env = {
+    ALLOWED_ORIGINS: ALLOWED,
+    DEEPSEEK_API_KEY: "test-key",
+  };
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function buildPost(): Request {
+    return new Request("https://example.com/api/ai/chat", {
+      method: "POST",
+      headers: { Origin: ALLOWED, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        provider: "deepseek",
+        messages: [{ role: "user", content: "hi" }],
+        max_tokens: 16,
+      }),
+    });
+  }
+
+  it("returns 502 when upstream fetch rejects with a non-abort error", async () => {
+    vi.stubGlobal("fetch", () => Promise.reject(new TypeError("fetch failed")));
+    const res = await handleRequest(buildPost(), env);
+    expect(res.status).toBe(502);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe(ALLOWED);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("upstream error");
+  });
+
+  it("returns 504 when the upstream call is aborted (timeout)", async () => {
+    vi.stubGlobal("fetch", () => {
+      const err = new Error("aborted");
+      err.name = "AbortError";
+      return Promise.reject(err);
+    });
+    const res = await handleRequest(buildPost(), env);
+    expect(res.status).toBe(504);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe(ALLOWED);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("upstream timeout");
   });
 });

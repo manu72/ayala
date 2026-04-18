@@ -216,10 +216,15 @@ async function forwardChat(
       },
     });
   } catch (e) {
+    // 504 only when our own timeout fired (AbortController → AbortError).
+    // 502 for everything else fetch() can reject with: DNS failure, TCP
+    // reset, TLS error, connection refused, etc. — classic "bad gateway"
+    // cases where the upstream never produced a usable response.
     const aborted = e instanceof Error && e.name === "AbortError";
+    const status = aborted ? 504 : 502;
     return jsonResponse(
       { error: aborted ? "upstream timeout" : "upstream error" },
-      504,
+      status,
       cors,
     );
   } finally {
