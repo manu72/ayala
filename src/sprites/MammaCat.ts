@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 
-const BASE_SPEED = 120;
-const RUN_SPEED = 240;
+const BASE_SPEED = 80;
+const RUN_SPEED = 160;
 const CROUCH_SPEED = 48;
 const WAKE_DELAY_MS = 500;
 const CROUCH_TAP_THRESHOLD_MS = 180;
@@ -94,14 +94,7 @@ const LABEL_OFFSET_Y = -12;
 
 const CROUCH_WALK_FPS = 4;
 
-export type PlayerState =
-  | "normal"
-  | "crouching"
-  | "catloaf"
-  | "resting"
-  | "waking"
-  | "greeting"
-  | "consuming";
+export type PlayerState = "normal" | "crouching" | "catloaf" | "resting" | "waking" | "greeting" | "consuming";
 
 export class MammaCat extends Phaser.Physics.Arcade.Sprite {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
@@ -305,11 +298,7 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
    * Returns `true` if the greeting started, `false` if the call was ignored.
    */
   startGreeting(): boolean {
-    if (
-      this.playerState === "resting" ||
-      this.playerState === "waking" ||
-      this.playerState === "greeting"
-    ) {
+    if (this.playerState === "resting" || this.playerState === "waking" || this.playerState === "greeting") {
       return false;
     }
 
@@ -336,11 +325,7 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
 
     // `ignoreIfPlaying: false` so a re-press restarts the animation cleanly.
     this.anims.play(anim, false);
-    this.once(
-      Phaser.Animations.Events.ANIMATION_COMPLETE_KEY + anim,
-      this.stopGreeting,
-      this,
-    );
+    this.once(Phaser.Animations.Events.ANIMATION_COMPLETE_KEY + anim, this.stopGreeting, this);
     return true;
   }
 
@@ -397,11 +382,7 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
     }
 
     this.anims.play(anim, false);
-    this.once(
-      Phaser.Animations.Events.ANIMATION_COMPLETE_KEY + anim,
-      this.stopConsuming,
-      this,
-    );
+    this.once(Phaser.Animations.Events.ANIMATION_COMPLETE_KEY + anim, this.stopConsuming, this);
     return true;
   }
 
