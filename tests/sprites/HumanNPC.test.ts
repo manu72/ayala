@@ -224,6 +224,7 @@ function makeHuman(overrides: Partial<HumanConfig> & { type: HumanConfig['type']
     lingerSec: overrides.lingerSec,
     lingerWaypointIndex: overrides.lingerWaypointIndex,
     exitAfterLinger: overrides.exitAfterLinger,
+    identityName: overrides.identityName,
   }
   const npc = new HumanNPC(harness.scene, cfg)
   return { npc, ...harness }
@@ -591,5 +592,37 @@ describe('HumanNPC.glanceAt — throttling', () => {
     expect((npc.anims.play as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(
       playsAfterFirstExpire,
     )
+  })
+})
+
+// ──────────────────────────────────────────────────────────────
+// Persona identity wiring
+// ──────────────────────────────────────────────────────────────
+
+describe('HumanNPC.identityName — persona wiring', () => {
+  it('defaults named types to their canonical persona key', () => {
+    const cases: Array<[HumanConfig['type'], string]> = [
+      ['camille', 'Camille'],
+      ['manu', 'Manu'],
+      ['kish', 'Kish'],
+    ]
+    for (const [type, expected] of cases) {
+      const { npc } = makeHuman({ type })
+      expect(npc.identityName).toBe(expected)
+    }
+  })
+
+  it('leaves anonymous types null by default (feeders, joggers, dogwalkers)', () => {
+    for (const type of ['feeder', 'jogger', 'jogger_male', 'dogwalker'] as const) {
+      const { npc } = makeHuman({ type })
+      expect(npc.identityName).toBeNull()
+    }
+  })
+
+  it('honours explicit identityName override (feeders opted in by name)', () => {
+    const { npc: rose } = makeHuman({ type: 'feeder', identityName: 'Rose' })
+    const { npc: ben } = makeHuman({ type: 'feeder', identityName: 'Ben' })
+    expect(rose.identityName).toBe('Rose')
+    expect(ben.identityName).toBe('Ben')
   })
 })

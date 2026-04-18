@@ -15,6 +15,13 @@ export interface HumanConfig {
   path: Array<{ x: number; y: number }>;
   speed: number;
   activePhases: TimeOfDay[];
+  /**
+   * Optional persona identity name — must match a key in
+   * {@link ../ai/personas.AI_PERSONAS} when this human should use AI-driven
+   * dialogue. Examples: "Camille", "Manu", "Kish", "Rose", "Ben".
+   * Unset = scripted-only (joggers, dogwalkers, snatchers).
+   */
+  identityName?: string;
   /** Seconds to linger at feeding station (feeders only). */
   lingerSec?: number;
   /** Waypoint index where feeder should linger (defaults to 1). */
@@ -38,6 +45,25 @@ export interface HumanConfig {
   loopPauseSec?: number;
 }
 
+/**
+ * Default identity name per `HumanType` when `config.identityName` is unset.
+ * Named characters have a single canonical identity; feeders are anonymous by
+ * default (two feeder instances would otherwise share the same key) so the
+ * caller must pass `identityName` explicitly to opt a feeder into AI dialogue.
+ */
+function defaultIdentityNameFor(type: HumanType): string | null {
+  switch (type) {
+    case "camille":
+      return "Camille";
+    case "manu":
+      return "Manu";
+    case "kish":
+      return "Kish";
+    default:
+      return null;
+  }
+}
+
 /** Park exit waypoints — on the road perimeter, avoiding interior obstacles. */
 const PARK_EXITS: ReadonlyArray<{ x: number; y: number }> = [
   { x: 2400, y: 380 },   // Paseo de Roxas (northeast, past the escalator)
@@ -53,6 +79,12 @@ const PARK_EXITS: ReadonlyArray<{ x: number; y: number }> = [
 export class HumanNPC extends BaseNPC {
   readonly humanType: HumanType;
   readonly config: HumanConfig;
+  /**
+   * Persona identity name used to key into `AI_PERSONAS` and
+   * `ConversationStore` when this human participates in AI dialogue.
+   * `null` means scripted-only. Camille/Manu/Kish/Rose/Ben get a value here.
+   */
+  readonly identityName: string | null;
 
   private waypointPath: Array<{ x: number; y: number }>;
   private currentWaypoint = 0;
@@ -88,6 +120,7 @@ export class HumanNPC extends BaseNPC {
     super(scene, start.x, start.y, textureKey);
     this.humanType = config.type;
     this.config = config;
+    this.identityName = config.identityName ?? defaultIdentityNameFor(config.type);
     this.profile = prof;
     this.waypointPath = config.path;
     this.activePhases = new Set(config.activePhases);

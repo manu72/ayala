@@ -29,13 +29,14 @@ import { computeBackgroundSpawnCount, decrementColonyTotal } from "../utils/colo
 import {
   ScriptedDialogueService,
   type DialogueService,
+  type DialogueRequest,
   type DialogueResponse,
   type ConversationEntry,
 } from "../services/DialogueService";
 import { AIDialogueService } from "../services/AIDialogueService";
 import { FallbackDialogueService } from "../services/FallbackDialogueService";
 import { storeConversation, getRecentConversations } from "../services/ConversationStore";
-import { CAT_PERSONAS } from "../ai/personas";
+import { AI_PERSONAS } from "../ai/personas";
 import { CAT_DIALOGUE_SCRIPTS, getRandomColonyLine } from "../data/cat-dialogue";
 import { resolveSnatcherSpawnAction } from "../systems/SnatcherSystem";
 import { hasLineOfSightTiles } from "../utils/lineOfSight";
@@ -124,6 +125,25 @@ export class GameScene extends Phaser.Scene {
   private dialogueRequestInFlight = false;
   /** Fires a subtle "thinking" emote if AI dialogue is slow to return. */
   private aiThinkingTimer: Phaser.Time.TimerEvent | null = null;
+
+  /**
+   * Per-human cooldown (wall ms) before another AI-driven ambient bubble is
+   * requested. Scripted bubbles continue firing during the cooldown so the
+   * world does not fall silent. Keyed by HumanNPC instance so named entities
+   * (Camille) and anonymous-but-identified entities (feeders) each get their
+   * own timer.
+   */
+  private humanAiBubbleCooldownUntil: WeakMap<HumanNPC, number> = new WeakMap();
+  /**
+   * Global single-flight guard: at most one AI ambient bubble may be in
+   * flight at a time. Prevents a crowded scene (Camille + Manu + Kish all
+   * approaching cats at once) from burning a burst of LLM calls. Engaged
+   * (Space-triggered) cat dialogue uses its own `dialogueRequestInFlight`
+   * guard and is independent.
+   */
+  private humanAiBubbleInFlight = false;
+  /** Abort controller for the currently in-flight human bubble (if any). */
+  private humanAiBubbleAbort: AbortController | null = null;
 
   /**
    * NPC the player just finished a conversation with. The player must leave
@@ -307,7 +327,7 @@ export class GameScene extends Phaser.Scene {
         ? new FallbackDialogueService(
             new AIDialogueService({
               proxyUrl,
-              personas: CAT_PERSONAS,
+              personas: AI_PERSONAS,
               primaryProvider: primary,
               secondaryProvider: secondary,
             }),
@@ -1341,6 +1361,50 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
+  /**
+   * Authored fallback lines + beat objectives for Camille's five encounters.
+   *
+   * Beat 1 and beat 5 stay scripted (pure narrator POV, plus the chapter-6
+   * handoff at the end) — those beats carry crucial story weight and must
+   * survive LLM failure byte-for-byte. Beats 2-4 attempt AI dialogue sourced
+   * from Camille's persona with the `encounterBeat` objective; on timeout,
+   * parse failure, or any network issue the `fallbackLines` array is shown
+   * so the player always sees the beat.
+   *
+   * All registry/trust/chapter side-effects live in {@link runCamilleEncounterBeat}
+   * — the LLM never controls story progression.
+   */
+  private readonly camilleEncounterBeats: Record<
+    2 | 3 | 4,
+    { objective: string; fallbackLines: string[] }
+  > = {
+    2: {
+      objective:
+        "Second meeting. She recognises Mamma Cat. She stays a respectful distance, crouches, and places a treat on the ground between them. She does not reach; she waits. 1–2 short lines.",
+      fallbackLines: [
+        "She sees you. She's not coming closer. She's... waiting. For you.",
+        "She places a treat on the ground between you. Doesn't move closer.",
+      ],
+    },
+    3: {
+      objective:
+        "Third meeting. She slow-blinks at Mamma Cat — cat trust language she's learnt. She invites a slow blink back. 2–3 short lines.",
+      fallbackLines: [
+        "She closes her eyes. Slowly. Opens them again. That means... trust.",
+        "You've seen other cats do this.",
+        "Slow blink back?",
+      ],
+    },
+    4: {
+      objective:
+        "Fourth meeting. Mamma Cat finally lets her fingers touch — first physical contact. Her niece Kish is loud nearby; Camille keeps her steady. 1–2 short lines, warm but restrained.",
+      fallbackLines: [
+        "Her hand smells like fish treats and soap. And something else. Home.",
+        "You push your head against her fingers. You haven't done this since... before.",
+      ],
+    },
+  };
+
   private playCamilleEncounterNarrative(encounterNum: number): void {
     const hud = this.scene.get("HUDScene") as HUDScene | undefined;
     hud?.pulseEdge(0x332200, 0.2, 2000);
@@ -1356,58 +1420,19 @@ export class GameScene extends Phaser.Scene {
 
       case 2:
         this.scheduleCamilleEncounterDialogue(8000, 2, () => {
-          this.registry.set(StoryKeys.CAMILLE_ENCOUNTER, encounterNum);
-          this.registry.set(StoryKeys.CAMILLE_ENCOUNTER_DAY, this.dayNight.dayCount);
-          this.camilleNPC?.playCrouchToward(this.player.x);
-          this.dialogue.show(
-            [
-              "She sees you. She's not coming closer. She's... waiting. For you.",
-              "She places a treat on the ground between you. Doesn't move closer.",
-            ],
-            () => {
-              hud?.showNarration("She watches you eat. She doesn't reach for you. She understands.");
-              this.stats.restore("hunger", 30);
-            },
-          );
+          this.runCamilleEncounterBeat(2, hud);
         });
         break;
 
       case 3:
         this.scheduleCamilleEncounterDialogue(10000, 3, () => {
-          this.registry.set(StoryKeys.CAMILLE_ENCOUNTER, encounterNum);
-          this.registry.set(StoryKeys.CAMILLE_ENCOUNTER_DAY, this.dayNight.dayCount);
-          this.camilleNPC?.playCrouchToward(this.player.x);
-          this.dialogue.show(
-            [
-              "She closes her eyes. Slowly. Opens them again. That means... trust.",
-              "You've seen other cats do this.",
-              "Slow blink back?",
-            ],
-            () => {
-              this.emotes.show(this, this.player, "heart");
-              if (this.camilleNPC) this.emotes.show(this, this.camilleNPC, "heart");
-              hud?.showNarration("Something shifts between you. A thread, invisible but real.");
-            },
-          );
+          this.runCamilleEncounterBeat(3, hud);
         });
         break;
 
       case 4:
         this.scheduleCamilleEncounterDialogue(10000, 4, () => {
-          this.registry.set(StoryKeys.CAMILLE_ENCOUNTER, encounterNum);
-          this.registry.set(StoryKeys.CAMILLE_ENCOUNTER_DAY, this.dayNight.dayCount);
-          this.camilleNPC?.playCrouchToward(this.player.x);
-          this.dialogue.show(
-            [
-              "Her hand smells like fish treats and soap. And something else. Home.",
-              "You push your head against her fingers. You haven't done this since... before.",
-            ],
-            () => {
-              this.emotes.show(this, this.player, "heart");
-              if (this.camilleNPC) this.emotes.show(this, this.camilleNPC, "heart");
-              hud?.showNarration("The small one is loud. But Camille keeps her still. She understands you.");
-            },
-          );
+          this.runCamilleEncounterBeat(4, hud);
         });
         break;
 
@@ -1415,6 +1440,8 @@ export class GameScene extends Phaser.Scene {
         this.scheduleCamilleEncounterDialogue(12000, 5, () => {
           this.registry.set(StoryKeys.CAMILLE_ENCOUNTER, encounterNum);
           this.registry.set(StoryKeys.CAMILLE_ENCOUNTER_DAY, this.dayNight.dayCount);
+          // Beat 5 stays scripted — it's the chapter-6 handoff and needs to
+          // run verbatim regardless of LLM availability.
           this.dialogue.show(
             [
               "She has a box. You've seen boxes before. Cats go in. They don't come back.",
@@ -1431,6 +1458,135 @@ export class GameScene extends Phaser.Scene {
           );
         });
         break;
+    }
+  }
+
+  /**
+   * Execute one of Camille's middle encounter beats (2/3/4).
+   *
+   * Flow:
+   *  1. Pin registry side-effects *before* any async work so pause/resume
+   *     doesn't re-trigger the beat.
+   *  2. Play Camille's crouch animation.
+   *  3. Try AI dialogue with the beat objective; on success, show those lines;
+   *     on any failure, show the authored fallback lines.
+   *  4. Apply beat-specific side-effects in the `onComplete` (stats restore,
+   *     emotes, HUD narration) so they run regardless of which dialogue path
+   *     was taken.
+   */
+  private runCamilleEncounterBeat(n: 2 | 3 | 4, hud: HUDScene | undefined): void {
+    this.registry.set(StoryKeys.CAMILLE_ENCOUNTER, n);
+    this.registry.set(StoryKeys.CAMILLE_ENCOUNTER_DAY, this.dayNight.dayCount);
+    this.camilleNPC?.playCrouchToward(this.player.x);
+
+    const beat = this.camilleEncounterBeats[n];
+    const onComplete = (): void => {
+      switch (n) {
+        case 2:
+          hud?.showNarration("She watches you eat. She doesn't reach for you. She understands.");
+          this.stats.restore("hunger", 30);
+          break;
+        case 3:
+          this.emotes.show(this, this.player, "heart");
+          if (this.camilleNPC) this.emotes.show(this, this.camilleNPC, "heart");
+          hud?.showNarration("Something shifts between you. A thread, invisible but real.");
+          break;
+        case 4:
+          this.emotes.show(this, this.player, "heart");
+          if (this.camilleNPC) this.emotes.show(this, this.camilleNPC, "heart");
+          hud?.showNarration("The small one is loud. But Camille keeps her still. She understands you.");
+          break;
+      }
+    };
+
+    void this.requestCamilleEncounterLines(n, beat.objective)
+      .then((lines) => {
+        const finalLines = lines ?? beat.fallbackLines;
+        this.dialogue.show(finalLines, onComplete);
+      })
+      .catch(() => {
+        this.dialogue.show(beat.fallbackLines, onComplete);
+      });
+  }
+
+  /**
+   * Ask Camille's AI persona for beat-appropriate lines. Returns the lines on
+   * success, or `null` on any failure (so the caller can substitute authored
+   * fallback text without error propagation).
+   */
+  private async requestCamilleEncounterLines(
+    n: 2 | 3 | 4,
+    objective: string,
+  ): Promise<string[] | null> {
+    if (!(this.dialogueService instanceof FallbackDialogueService)) {
+      return null;
+    }
+    if (!("Camille" in AI_PERSONAS)) return null;
+
+    try {
+      const history = await getRecentConversations("Camille", 20);
+      const conversationHistory: ConversationEntry[] = history.map((r) => ({
+        timestamp: r.timestamp,
+        speaker: r.speaker,
+        text: r.lines.join(" "),
+      }));
+
+      const request: DialogueRequest = {
+        speaker: "Camille",
+        speakerType: "human",
+        target: "Mamma Cat",
+        gameState: {
+          chapter: this.chapters.chapter,
+          timeOfDay: this.dayNight.currentPhase,
+          trustGlobal: this.trust.global,
+          trustWithSpeaker: this.trust.global,
+          hunger: this.stats.hunger,
+          thirst: this.stats.thirst,
+          energy: this.stats.energy,
+          daysSurvived: this.dayNight.dayCount,
+          knownCats: Array.from(this.knownCats),
+          recentEvents: [],
+        },
+        conversationHistory,
+        encounterBeat: { kind: "camille_encounter", n, objective },
+      };
+
+      const response = await this.dialogueService.getDialogue(request, {
+        // Engaged-style budget: encounters are modal beats, the player is
+        // committed to the beat and can tolerate a longer wait than an
+        // ambient bubble.
+        timeoutMs: 5000,
+      });
+
+      const lines = response.lines
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0);
+      if (lines.length === 0) return null;
+
+      const snapshotTrust = this.trust.global;
+      await storeConversation({
+        speaker: "Camille",
+        timestamp: this.dayNight.totalGameTimeMs,
+        realTimestamp: Date.now(),
+        gameDay: this.dayNight.dayCount,
+        lines,
+        trustBefore: snapshotTrust,
+        trustAfter: snapshotTrust,
+        chapter: this.chapters.chapter,
+        playerAction: `camille_encounter_${n}`,
+        gameStateSnapshot: {
+          trustWithSpeaker: snapshotTrust,
+          trustGlobal: this.trust.global,
+          timeOfDay: this.dayNight.currentPhase,
+          hunger: this.stats.hunger,
+          thirst: this.stats.thirst,
+          energy: this.stats.energy,
+        },
+      });
+
+      return lines;
+    } catch {
+      return null;
     }
   }
 
@@ -2007,6 +2163,7 @@ export class GameScene extends Phaser.Scene {
     return [
       {
         type: "feeder",
+        identityName: "Rose",
         speed: 40,
         activePhases: ["dawn", "evening"],
         lingerSec: 45,
@@ -2016,6 +2173,7 @@ export class GameScene extends Phaser.Scene {
       },
       {
         type: "feeder",
+        identityName: "Ben",
         speed: 38,
         activePhases: ["dawn", "evening"],
         lingerSec: 40,
@@ -2187,19 +2345,157 @@ export class GameScene extends Phaser.Scene {
     feeder: ["Hi sweetie.", "Kamusta, pusa.", "There you are.", "Good kitty."],
   };
 
+  /**
+   * Show a single greeting bubble above `human` using the best available
+   * source in priority order: caller-forced line > AI persona > scripted pool.
+   *
+   * AI path: eligible when the human has an `identityName` registered in
+   * `AI_PERSONAS`, its per-human cooldown has elapsed, no other AI bubble is
+   * in flight, and no caller-forced line was passed. On success, stores the
+   * exchange in `ConversationStore` keyed by the identity name so future
+   * bubbles (and engaged dialogue if we ever wire humans to Space) pick up
+   * prior beats. On timeout/failure, quietly falls back to the scripted pool.
+   *
+   * Timing: AI path uses a 1.5s budget (vs 8s for engaged cat dialogue) so
+   * ambient bubbles never stall the scene. Caller's emote + greeting animation
+   * fire synchronously in `updateHumans` regardless of which path is chosen.
+   */
   private showGreetingBubble(human: HumanNPC, opts?: { line?: string; nearNpcCat?: NPCCat }): void {
-    let line = opts?.line;
-    if (!line && opts?.nearNpcCat && human.humanType === "camille") {
-      const named = this.camillePersonalLines[opts.nearNpcCat.npcName];
-      if (named?.length) {
-        line = named[Math.floor(Math.random() * named.length)]!;
-      }
-    }
-    if (!line) {
-      const lines = this.catPersonGreetings[human.humanType] ?? this.catPersonGreetings.feeder!;
-      line = lines[Math.floor(Math.random() * lines.length)]!;
+    if (opts?.line) {
+      this.renderGreetingBubble(human, opts.line);
+      return;
     }
 
+    const identity = human.identityName;
+    const hasPersona = identity !== null && identity in AI_PERSONAS;
+    const now = this.time.now;
+    const cooldownUntil = this.humanAiBubbleCooldownUntil.get(human) ?? 0;
+    const aiEligible =
+      hasPersona &&
+      !this.humanAiBubbleInFlight &&
+      now >= cooldownUntil &&
+      this.dialogueService instanceof FallbackDialogueService;
+
+    if (aiEligible && identity !== null) {
+      // Per-human cooldown is set up front (regardless of success) so a burst
+      // of proximity events can't fire multiple AI calls for the same speaker.
+      this.humanAiBubbleCooldownUntil.set(human, now + GameScene.HUMAN_AI_BUBBLE_COOLDOWN_MS);
+      void this.requestHumanBubbleLine(human, identity, opts?.nearNpcCat).catch(() => {
+        /* fallbackLine branch inside already renders scripted on failure */
+      });
+      return;
+    }
+
+    this.renderGreetingBubble(human, this.pickScriptedGreeting(human, opts?.nearNpcCat));
+  }
+
+  /**
+   * Ask the AI service for a single ambient line and render it. Falls back to
+   * a scripted line on timeout, network failure, parse failure, or if the
+   * human becomes ineligible (off-screen, exited) mid-flight.
+   */
+  private async requestHumanBubbleLine(
+    human: HumanNPC,
+    speaker: string,
+    nearNpcCat: NPCCat | undefined,
+  ): Promise<void> {
+    this.humanAiBubbleInFlight = true;
+    const abort = new AbortController();
+    this.humanAiBubbleAbort = abort;
+
+    const renderFallback = (): void => {
+      if (!human.active || !human.visible) return;
+      this.renderGreetingBubble(human, this.pickScriptedGreeting(human, nearNpcCat));
+    };
+
+    try {
+      const history = await getRecentConversations(speaker, 10);
+      const conversationHistory: ConversationEntry[] = history.map((r) => ({
+        timestamp: r.timestamp,
+        speaker: r.speaker,
+        text: r.lines.join(" "),
+      }));
+
+      const request: DialogueRequest = {
+        speaker,
+        speakerType: "human",
+        target: "Mamma Cat",
+        gameState: {
+          chapter: this.chapters.chapter,
+          timeOfDay: this.dayNight.currentPhase,
+          trustGlobal: this.trust.global,
+          trustWithSpeaker: this.trust.global,
+          hunger: this.stats.hunger,
+          thirst: this.stats.thirst,
+          energy: this.stats.energy,
+          daysSurvived: this.dayNight.dayCount,
+          knownCats: Array.from(this.knownCats),
+          recentEvents: [],
+        },
+        conversationHistory,
+        nearbyCat: nearNpcCat?.npcName,
+      };
+
+      const response = await (this.dialogueService as FallbackDialogueService).getDialogue(
+        request,
+        { timeoutMs: GameScene.HUMAN_AI_BUBBLE_TIMEOUT_MS, signal: abort.signal },
+      );
+
+      if (abort.signal.aborted || !human.active || !human.visible) {
+        return;
+      }
+      const line = response.lines[0]?.trim();
+      if (!line) {
+        renderFallback();
+        return;
+      }
+      this.renderGreetingBubble(human, line);
+
+      // Persist for future bubbles. Store is keyed by speaker so per-human
+      // history stays consistent whether the player talks to this human via
+      // bubbles or via an encounter beat.
+      const snapshotTrust = this.trust.global;
+      await storeConversation({
+        speaker,
+        timestamp: this.dayNight.totalGameTimeMs,
+        realTimestamp: Date.now(),
+        gameDay: this.dayNight.dayCount,
+        lines: response.lines,
+        trustBefore: snapshotTrust,
+        trustAfter: snapshotTrust,
+        chapter: this.chapters.chapter,
+        playerAction: "ambient_greeting",
+        gameStateSnapshot: {
+          trustWithSpeaker: snapshotTrust,
+          trustGlobal: this.trust.global,
+          timeOfDay: this.dayNight.currentPhase,
+          hunger: this.stats.hunger,
+          thirst: this.stats.thirst,
+          energy: this.stats.energy,
+        },
+      });
+    } catch {
+      renderFallback();
+    } finally {
+      this.humanAiBubbleInFlight = false;
+      if (this.humanAiBubbleAbort === abort) this.humanAiBubbleAbort = null;
+    }
+  }
+
+  /** Pick a scripted line for a human greeting, honouring Camille's per-cat overrides. */
+  private pickScriptedGreeting(human: HumanNPC, nearNpcCat: NPCCat | undefined): string {
+    if (nearNpcCat && human.humanType === "camille") {
+      const named = this.camillePersonalLines[nearNpcCat.npcName];
+      if (named?.length) {
+        return named[Math.floor(Math.random() * named.length)]!;
+      }
+    }
+    const lines = this.catPersonGreetings[human.humanType] ?? this.catPersonGreetings.feeder!;
+    return lines[Math.floor(Math.random() * lines.length)]!;
+  }
+
+  /** Render a floating greeting bubble — shared by scripted and AI paths. */
+  private renderGreetingBubble(human: HumanNPC, line: string): void {
     const bubble = this.add
       .text(human.x, human.y - 30, line, {
         fontFamily: "Arial, Helvetica, sans-serif",
@@ -2222,6 +2518,14 @@ export class GameScene extends Phaser.Scene {
       onComplete: () => bubble.destroy(),
     });
   }
+
+  /** Per-human wait between AI ambient bubbles, ms. */
+  private static readonly HUMAN_AI_BUBBLE_COOLDOWN_MS = 30_000;
+  /**
+   * Tight budget for ambient bubble LLM calls, ms. Well below the 8s engaged
+   * dialogue budget so a slow model never stalls the scene.
+   */
+  private static readonly HUMAN_AI_BUBBLE_TIMEOUT_MS = 1500;
 
   // ──────────── Food Sources ────────────
 

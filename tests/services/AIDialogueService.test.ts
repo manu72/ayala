@@ -64,11 +64,46 @@ describe("parseAIJson", () => {
 });
 
 describe("buildSystemPrompt", () => {
-  it("includes persona and scene facts", () => {
+  it("includes persona and scene facts for cats", () => {
     const p = buildSystemPrompt("# Blacky\nCat.", baseReq());
     expect(p).toContain("Blacky");
     expect(p).toContain("Chapter: 2");
     expect(p).toContain("Tiger");
+    expect(p).toContain("Speaker species: cat");
+    expect(p).toContain("cat-speak");
+  });
+
+  it("gives humans plain-speech guidance and a human example", () => {
+    const req = baseReq();
+    req.speaker = "Camille";
+    req.speakerType = "human";
+    const p = buildSystemPrompt("# Camille\nHuman.", req);
+    expect(p).toContain("Speaker species: human");
+    expect(p).toContain("Humans speak plainly");
+    expect(p).not.toContain('"Meow to you mamma cat');
+  });
+
+  it("includes nearbyCat context when provided", () => {
+    const req = baseReq();
+    req.speaker = "Rose";
+    req.speakerType = "human";
+    req.nearbyCat = "Tiger";
+    const p = buildSystemPrompt("# Rose\n", req);
+    expect(p).toContain("Cat currently near you: Tiger");
+  });
+
+  it("includes encounterBeat context when provided", () => {
+    const req = baseReq();
+    req.speaker = "Camille";
+    req.speakerType = "human";
+    req.encounterBeat = {
+      kind: "camille_encounter",
+      n: 3,
+      objective: "Slow blink trust exchange.",
+    };
+    const p = buildSystemPrompt("# Camille\n", req);
+    expect(p).toContain("Encounter 3 of 5");
+    expect(p).toContain("Slow blink trust exchange.");
   });
 });
 
@@ -79,6 +114,40 @@ describe("buildMessages", () => {
     const m = buildMessages(req);
     expect(m.some((x) => x.role === "assistant" && x.content === "Earlier.")).toBe(true);
     expect(m[m.length - 1]!.role).toBe("user");
+  });
+
+  it("uses a 20-turn window for tier-1 speakers (Blacky)", () => {
+    const req = baseReq();
+    req.speaker = "Blacky";
+    req.conversationHistory = Array.from({ length: 25 }, (_, i) => ({
+      timestamp: i,
+      speaker: "Blacky",
+      text: `line ${i}`,
+    }));
+    const m = buildMessages(req);
+    // Each history entry contributes 2 messages (user + assistant); plus the
+    // final user turn. 20 turns * 2 + 1 = 41.
+    expect(m.length).toBe(41);
+    // The last assistant echo should be the most recent of the 20 kept.
+    const assistants = m.filter((x) => x.role === "assistant");
+    expect(assistants[assistants.length - 1]!.content).toBe("line 24");
+    expect(assistants[0]!.content).toBe("line 5");
+  });
+
+  it("uses a 10-turn window for tier-2 speakers (Kish)", () => {
+    const req = baseReq();
+    req.speaker = "Kish";
+    req.speakerType = "human";
+    req.conversationHistory = Array.from({ length: 25 }, (_, i) => ({
+      timestamp: i,
+      speaker: "Kish",
+      text: `line ${i}`,
+    }));
+    const m = buildMessages(req);
+    // 10 * 2 + 1 = 21.
+    expect(m.length).toBe(21);
+    const assistants = m.filter((x) => x.role === "assistant");
+    expect(assistants[0]!.content).toBe("line 15");
   });
 });
 
@@ -144,6 +213,63 @@ describe("AIDialogueService.getDialogue", () => {
     const bodies = fetchImpl.mock.calls.map((c) => JSON.parse(c[1]!.body as string));
     expect(bodies[0]!.provider).toBe("deepseek");
     expect(bodies[1]!.provider).toBe("openai");
+  });
+});
+
+describe("AIDialogueService human dialogue", () => {
+  it("resolves human persona and includes encounterBeat in system prompt", async () => {
+    let capturedBody: string | undefined;
+    const fetchImpl = vi.fn().mockImplementation((_url, init: RequestInit) => {
+      capturedBody = init.body as string;
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: '{"lines":["You came back."],"speakerPose":"friendly","emote":"heart"}' } }],
+          }),
+          { status: 200 },
+        ),
+      );
+    });
+    const svc = new AIDialogueService({
+      proxyUrl: "/api/ai/chat",
+      personas: { Camille: "# Camille\nHuman." },
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    const req = baseReq();
+    req.speaker = "Camille";
+    req.speakerType = "human";
+    req.encounterBeat = {
+      kind: "camille_encounter",
+      n: 2,
+      objective: "Second meeting — places treat, waits.",
+    };
+    const out = await svc.getDialogue(req);
+    expect(out.lines).toEqual(["You came back."]);
+    const parsed = JSON.parse(capturedBody!) as { messages: Array<{ role: string; content: string }> };
+    const systemMessage = parsed.messages.find((m) => m.role === "system");
+    expect(systemMessage?.content).toContain("Encounter 2 of 5");
+    expect(systemMessage?.content).toContain("Speaker species: human");
+  });
+
+  it("aborts the request when the per-call timeout elapses", async () => {
+    const fetchImpl = vi.fn().mockImplementation((_url, init: RequestInit) => {
+      return new Promise((_resolve, reject) => {
+        init.signal?.addEventListener("abort", () => {
+          reject(new DOMException("aborted", "AbortError"));
+        });
+      });
+    });
+    const svc = new AIDialogueService({
+      proxyUrl: "/api/ai/chat",
+      personas: { Rose: "# Rose\nHuman." },
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    const req = baseReq();
+    req.speaker = "Rose";
+    req.speakerType = "human";
+    await expect(
+      svc.getDialogue(req, { timeoutMs: 10 }),
+    ).rejects.toThrow();
   });
 });
 

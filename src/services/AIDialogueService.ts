@@ -3,6 +3,7 @@
  * Story progression `event` is taken from scripted conditions (authoritative).
  */
 
+import { PERSONA_TIER } from "../ai/personas";
 import { CAT_DIALOGUE_SCRIPTS } from "../data/cat-dialogue";
 import type { DialogueRequest, DialogueResponse, DialogueService, SpeakerPose } from "./DialogueService";
 
@@ -13,25 +14,12 @@ export class AIParseError extends Error {
   }
 }
 
-const VALID_POSES: SpeakerPose[] = [
-  "friendly",
-  "wary",
-  "hostile",
-  "sleeping",
-  "curious",
-  "submissive",
-];
+const VALID_POSES: SpeakerPose[] = ["friendly", "wary", "hostile", "sleeping", "curious", "submissive"];
 
 /** Emote keys understood by EmoteSystem (not raw glyphs). */
 const VALID_EMOTES = new Set(["heart", "alert", "curious", "sleep", "hostile", "danger"]);
 
-const HARSHER_TEMP_SPEAKERS = new Set([
-  "Tiger",
-  "Fluffy",
-  "Pedigree",
-  "Ginger",
-  "Ginger B",
-]);
+const HARSHER_TEMP_SPEAKERS = new Set(["Tiger", "Fluffy", "Pedigree", "Ginger", "Ginger B"]);
 
 interface ChatMessage {
   role: "system" | "user" | "assistant";
@@ -51,22 +39,41 @@ export interface AIDialogueServiceOptions {
   /** Primary upstream name as sent to the proxy. */
   primaryProvider?: "deepseek" | "openai";
   secondaryProvider?: "deepseek" | "openai";
+  /**
+   * Upstream request abort in milliseconds. Defaults to 8000ms (full engage).
+   * Callers that render a quick ambient bubble can pass a tighter budget via
+   * {@link AIDialogueService.getDialogue}'s per-call `timeoutMs` option.
+   */
+  defaultTimeoutMs?: number;
+}
+
+/**
+ * Per-call options that don't belong on the shared `DialogueRequest` contract.
+ * `timeoutMs` is used for tight-budget bubbles; leaving it unset keeps the
+ * default 8s budget which suits engaged (Space-triggered) dialogue.
+ */
+export interface AIDialogueCallOptions {
+  timeoutMs?: number;
+  signal?: AbortSignal;
 }
 
 export class AIDialogueService implements DialogueService {
   private readonly fetchImpl: typeof fetch;
   private readonly primaryProvider: "deepseek" | "openai";
   private readonly secondaryProvider: "deepseek" | "openai";
+  private readonly defaultTimeoutMs: number;
 
-  constructor(
-    private readonly opts: AIDialogueServiceOptions,
-  ) {
+  constructor(private readonly opts: AIDialogueServiceOptions) {
     this.fetchImpl = opts.fetchImpl ?? globalThis.fetch.bind(globalThis);
     this.primaryProvider = opts.primaryProvider ?? "deepseek";
     this.secondaryProvider = opts.secondaryProvider ?? "openai";
+    this.defaultTimeoutMs = opts.defaultTimeoutMs ?? 8000;
   }
 
-  async getDialogue(request: DialogueRequest): Promise<DialogueResponse> {
+  async getDialogue(
+    request: DialogueRequest,
+    callOpts?: AIDialogueCallOptions,
+  ): Promise<DialogueResponse> {
     const persona = this.opts.personas[request.speaker];
     if (!persona) {
       throw new Error(`No AI persona loaded for speaker: ${request.speaker}`);
@@ -77,7 +84,7 @@ export class AIDialogueService implements DialogueService {
     const messages = buildMessages(request);
     const temperature = HARSHER_TEMP_SPEAKERS.has(request.speaker) ? 0.6 : 0.8;
 
-    const raw = await this.callLLMWithFallback(systemPrompt, messages, temperature);
+    const raw = await this.callLLMWithFallback(systemPrompt, messages, temperature, callOpts);
     const parsed = parseAIJson(raw);
 
     return {
@@ -94,6 +101,7 @@ export class AIDialogueService implements DialogueService {
     systemPrompt: string,
     messages: ChatMessage[],
     temperature: number,
+    callOpts?: AIDialogueCallOptions,
   ): Promise<string> {
     const payloadBase = {
       messages: [{ role: "system" as const, content: systemPrompt }, ...messages],
@@ -101,9 +109,9 @@ export class AIDialogueService implements DialogueService {
       max_tokens: 150,
     };
 
-    let res = await this.postProvider(this.primaryProvider, payloadBase);
+    let res = await this.postProvider(this.primaryProvider, payloadBase, callOpts);
     if (shouldRetryWithFallback(res.status)) {
-      res = await this.postProvider(this.secondaryProvider, payloadBase);
+      res = await this.postProvider(this.secondaryProvider, payloadBase, callOpts);
     }
 
     if (!res.ok) {
@@ -122,9 +130,18 @@ export class AIDialogueService implements DialogueService {
   private async postProvider(
     provider: "deepseek" | "openai",
     body: { messages: ChatMessage[]; temperature: number; max_tokens: number },
+    callOpts?: AIDialogueCallOptions,
   ): Promise<Response> {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 8000);
+    const timeoutMs = callOpts?.timeoutMs ?? this.defaultTimeoutMs;
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    // Honour caller abort (e.g. player moves away mid-bubble) by bridging
+    // the external signal onto our internal controller.
+    const externalSignal = callOpts?.signal;
+    const externalAbort = externalSignal
+      ? () => controller.abort()
+      : null;
+    externalSignal?.addEventListener("abort", externalAbort!);
     try {
       return await this.fetchImpl(this.opts.proxyUrl, {
         method: "POST",
@@ -134,6 +151,9 @@ export class AIDialogueService implements DialogueService {
       });
     } finally {
       clearTimeout(timer);
+      if (externalSignal && externalAbort) {
+        externalSignal.removeEventListener("abort", externalAbort);
+      }
     }
   }
 }
@@ -151,38 +171,74 @@ export function matchScriptedResponse(request: DialogueRequest): DialogueRespons
 
 export function buildSystemPrompt(personaMarkdown: string, request: DialogueRequest): string {
   const gs = request.gameState;
-  const scene = [
+  const isHuman = request.speakerType === "human";
+  const nearbyCatLine = request.nearbyCat
+    ? `- Cat currently near you: ${request.nearbyCat}`
+    : null;
+
+  // Species-specific output guidance — cats speak cat-speak; humans speak
+  // naturally but briefly. The JSON contract is identical for both so
+  // downstream parsing stays species-agnostic.
+  const speechGuidance = isHuman
+    ? "Humans speak plainly and briefly — one short sentence per line, two at most. No cat-speak. No baby-talk. Leave room for silence."
+    : "Cats use short cat-speak (meow, mrrp, prrp, hiss, purr) — not human paragraphs. Humans are not in this reply (you are a cat).";
+  const exampleJson = isHuman
+    ? '{"lines":["You came back."],"speakerPose":"friendly","emote":"heart","narration":"She crouches low."}'
+    : '{"lines":["Meow to you mamma cat. You came back purrr."],"speakerPose":"friendly","emote":"heart","narration":"Tail tip curls."}';
+
+  const sceneLines: Array<string | null> = [
     "## Current scene (facts — follow these)",
     `- You are speaking as: ${request.speaker}`,
+    `- Speaker species: ${isHuman ? "human" : "cat"}`,
     `- You are addressing: ${request.target}`,
     `- Chapter: ${gs.chapter}`,
     `- Time of day: ${gs.timeOfDay}`,
-    `- Trust with you toward Mamma Cat: ${gs.trustWithSpeaker} (0–100)`,
+    `- Trust toward Mamma Cat: ${gs.trustWithSpeaker} (0–100)`,
     `- Global colony trust: ${gs.trustGlobal} (0–100)`,
     `- Mamma Cat hunger / thirst / energy: ${gs.hunger} / ${gs.thirst} / ${gs.energy}`,
     `- Days survived (game): ${gs.daysSurvived}`,
     `- Cats Mamma Cat knows by name: ${gs.knownCats.join(", ") || "(none listed)"}`,
+    nearbyCatLine,
+  ];
+
+  if (request.encounterBeat?.kind === "camille_encounter") {
+    sceneLines.push(
+      "",
+      "## Story beat context (follow the emotional objective)",
+      `- Encounter ${request.encounterBeat.n} of 5 with Mamma Cat.`,
+      `- Objective: ${request.encounterBeat.objective}`,
+      "- The beat's registry side-effects are handled by the game; you only supply dialogue.",
+    );
+  }
+
+  sceneLines.push(
     "",
     "## Your persona (stay in character)",
     personaMarkdown.trim(),
     "",
     "## Output format",
     "Reply with a single JSON object ONLY (no markdown fences, no extra text). Keys:",
-    '- "lines": string array, 1 to 3 short lines of dialogue for this NPC only',
+    '- "lines": string array, 1 to 3 short lines of dialogue for this speaker only',
     '- "speakerPose": one of: friendly | wary | hostile | sleeping | curious | submissive',
     '- "emote": one of: heart | alert | curious | sleep | hostile | danger',
     '- "narration": optional short third-person line describing visible body language (or omit)',
     "",
-    "Cats use short cat-speak (mrrp, prrp, hisses) — not human paragraphs. Humans are not in this reply (you are a cat).",
-    'Example: {"lines":["Mrrp. You came back."],"speakerPose":"friendly","emote":"heart","narration":"Tail tip curls."}',
-  ].join("\n");
+    speechGuidance,
+    `Example: ${exampleJson}`,
+  );
 
-  return scene;
+  return sceneLines.filter((l): l is string => l !== null).join("\n");
 }
 
 export function buildMessages(request: DialogueRequest): ChatMessage[] {
+  // Tier 2 speakers get a shorter history window so the prompt stays compact
+  // and cheap. Unknown speakers default to the richer tier-1 window so new
+  // speakers do not silently lose context.
+  const tier = PERSONA_TIER[request.speaker] ?? "tier1";
+  const windowSize = tier === "tier2" ? 10 : 20;
+
   const msgs: ChatMessage[] = [];
-  const recent = request.conversationHistory.slice(-20);
+  const recent = request.conversationHistory.slice(-windowSize);
   for (const entry of recent) {
     msgs.push({ role: "user", content: "Mamma Cat is nearby; you exchange a moment in the gardens." });
     msgs.push({ role: "assistant", content: entry.text });
@@ -198,10 +254,7 @@ export function buildMessages(request: DialogueRequest): ChatMessage[] {
   return msgs;
 }
 
-export function parseAIJson(raw: string): Pick<
-  DialogueResponse,
-  "lines" | "speakerPose" | "emote" | "narration"
-> {
+export function parseAIJson(raw: string): Pick<DialogueResponse, "lines" | "speakerPose" | "emote" | "narration"> {
   const stripped = stripCodeFences(raw.trim());
   let data: unknown;
   try {

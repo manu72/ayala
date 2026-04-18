@@ -14,7 +14,7 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 
 ## Project Status
 
-**Version 0.2.0** -- Phases 1 through 4, **Phase 4.5**, and **Phase 5 (AI-powered named cat dialogue)** are complete for the core loop. The game is playable from start to finish: survival mechanics, social systems, 6 story chapters, territory claiming, snatchers, the full adoption story arc through to the epilogue, plus intro cinematic, grounded narration hooks, and human/cat engagement polish. **Named colony cats** (Blacky through Ginger B) use LLM-backed dialogue when a same-origin proxy is configured; scripted dialogue remains the fallback if the network or API fails.
+**Version 0.3.0** -- Phases 1 through 4, **Phase 4.5**, **Phase 5** (AI-powered named cat dialogue), and **Phase 5.1** (AI-powered human NPCs: Camille, Manu, Kish, and the two named feeders Rose and Ben) are complete for the core loop. The game is playable from start to finish: survival mechanics, social systems, 6 story chapters, territory claiming, snatchers, the full adoption story arc through to the epilogue, plus intro cinematic, grounded narration hooks, and human/cat engagement polish. **Named colony cats** and **named humans** both use LLM-backed dialogue when a same-origin proxy is configured; scripted dialogue remains the fallback if the network or API fails.
 
 ### Development Roadmap
 
@@ -27,6 +27,7 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 | 4. Cam & Endgame       | Cam encounters, Chapters 4-6, snatchers, territory, epilogue, NG+                         | Complete    |
 | 4.5 Visual & Narrative | Intro cinematic, dialogue poses, cat-person circuits, witness-gated events, chapter cards | Complete    |
 | 5. AI cat dialogue + proxy | LLM personas, Cloudflare Worker proxy, scripted fallback, dist leak checks              | Complete (v0.2.0) |
+| 5.1 AI human dialogue  | Camille / Manu / Kish personas, named feeders (Rose, Ben), AI ambient bubbles, AI-sourced Camille beats 2-4 | Complete (v0.3.0) |
 | 5b. Polish & Release   | Playtesting, audio, PWA/offline, deployment                                               | Not started |
 
 ### What exists now
@@ -174,67 +175,90 @@ Set secrets via the Cloudflare dashboard or `wrangler secret put DEEPSEEK_API_KE
 
 Bind the Worker to the **same hostname** as your static site so the browser calls `/api/ai/chat` same-origin, or configure a route like `yourdomain.com/api/*` → this Worker. After each production build, run `npm run verify:dist` to confirm no secret patterns leaked into `dist/`.
 
-## AI Prompts & Cat Personalities
+## AI Prompts & Character Personalities
 
-The system prompt is **assembled per request** — it's not a static string. The persona files are the single source of truth for character; everything else (scene facts, output contract) is injected in code so the contract stays consistent across cats.
+The system prompt is **assembled per request** — it's not a static string. The persona files are the single source of truth for character; everything else (scene facts, output contract) is injected in code so the contract stays consistent across cats **and humans**.
 
 ### Where things live
 
 | Concern | File | Notes |
 | --- | --- | --- |
 | Prompt assembly (`buildSystemPrompt`, `buildMessages`) | [src/services/AIDialogueService.ts](src/services/AIDialogueService.ts) | One prompt per `getDialogue()` call; `max_tokens` 150 |
-| Cat persona markdown (one file per cat) | [src/ai/personas/*.md](src/ai/personas/) | Source of truth for character — edit these to change voice |
-| Persona → speaker map | [src/ai/personas/index.ts](src/ai/personas/index.ts) | `CAT_PERSONAS`, imported via `?raw` and keyed by exact `NPCCat.npcName` |
+| Persona markdown (one file per speaker, cats **and** humans) | [src/ai/personas/*.md](src/ai/personas/) | Source of truth for character — edit these to change voice |
+| Persona → speaker map + tier table | [src/ai/personas/index.ts](src/ai/personas/index.ts) | `AI_PERSONAS` (canonical) + `CAT_PERSONAS` alias + `PERSONA_TIER` |
 | Scripted anchors (trust, story flags) | [src/data/cat-dialogue.ts](src/data/cat-dialogue.ts) | Authoritative `trustChange` + `event` — AI never controls these |
+| Human encounter side-effects (Camille beats 1-5) | [src/scenes/GameScene.ts](src/scenes/GameScene.ts) (`runCamilleEncounterBeat`) | Registry / chapter / stats side-effects — AI never controls these |
+
+### AI-backed speakers
+
+| Speaker | Type | Tier | Where AI fires |
+| --- | --- | --- | --- |
+| Blacky, Tiger, Jayco, Fluffy, Pedigree, Ginger, Ginger B, Jayco Jr | cat | tier1 / tier2 | Space-engaged dialogue |
+| Camille | human | tier1 | Ambient greeting bubbles + encounter beats 2-4 |
+| Manu, Kish | human | tier2 | Ambient greeting bubbles |
+| Rose, Ben (named feeders) | human | tier2 | Ambient greeting bubbles while feeding |
+
+Tier 1 personas get the full **20-turn** history window for richer continuity; Tier 2 personas get **10 turns** to keep prompts compact and cheap. The split is defined in `PERSONA_TIER` and applied in `buildMessages`.
 
 ### System prompt structure
 
-`buildSystemPrompt(personaMarkdown, request)` concatenates three blocks, in this order, every call:
+`buildSystemPrompt(personaMarkdown, request)` concatenates three or four blocks:
 
-1. **`## Current scene`** — live facts from `DialogueRequest.gameState`: speaker, target, chapter, time of day, `trustWithSpeaker`, `trustGlobal`, Mamma Cat's hunger / thirst / energy, days survived, known cats. This block is **rebuilt on every turn** so the cat always reasons about current state.
-2. **`## Your persona`** — the full markdown for that speaker, inserted verbatim (trimmed) from `CAT_PERSONAS[request.speaker]`.
-3. **`## Output format`** — the JSON contract (`lines`, `speakerPose`, `emote`, optional `narration`), the cat-speak reminder, and a one-line example.
+1. **`## Current scene`** — live facts from `DialogueRequest.gameState`: speaker, species (`cat` or `human`), target, chapter, time of day, `trustWithSpeaker`, `trustGlobal`, Mamma Cat's hunger / thirst / energy, days survived, known cats, and optional `nearbyCat` for human speakers. Rebuilt every turn.
+2. **`## Story beat context`** — _optional_, only present when `DialogueRequest.encounterBeat` is set (Camille encounters 2-4). Tells the model which beat we are in and the emotional objective, with an explicit reminder that registry side-effects are owned by the game.
+3. **`## Your persona`** — full markdown for that speaker, inserted verbatim (trimmed) from `AI_PERSONAS[request.speaker]`.
+4. **`## Output format`** — the JSON contract (`lines`, `speakerPose`, `emote`, optional `narration`), a **species-specific** speech reminder ("cats use cat-speak" vs "humans speak plainly and briefly"), and a one-line example matching that species.
 
-Prior conversation turns are **not** in the system prompt. They go in as alternating `user` / `assistant` chat messages via `buildMessages()`, capped at the **last 20 turns** pulled from `ConversationStore` (IndexedDB, pruned to 100 per cat).
+Prior conversation turns are **not** in the system prompt. They go in as alternating `user` / `assistant` chat messages via `buildMessages()`, windowed per the speaker's tier (20 turns for Tier 1, 10 for Tier 2) from `ConversationStore` (IndexedDB, pruned to 100 per speaker).
 
 Per-request knobs live next to `getDialogue()`:
 
 - `temperature`: `0.6` for speakers in `HARSHER_TEMP_SPEAKERS` (tighter, colder), `0.8` for the rest.
 - `max_tokens`: `150` — keeps responses short and cheap.
-- 8-second client-side `AbortController` timeout; on 429/5xx the service retries once against the fallback provider before surfacing the error to `FallbackDialogueService`.
+- `timeoutMs`: per-call override passed through to the upstream `AbortController`. Defaults to 8s for engaged cat dialogue; **1.5s** for human ambient bubbles and **5s** for Camille encounter beats. On 429/5xx the service retries once against the fallback provider before surfacing the error to `FallbackDialogueService`.
+
+### Fallback rule (important)
+
+Every AI path has a scripted safety net. If the LLM is slow, unreachable, rate-limited, or returns malformed JSON:
+
+- **Engaged cat dialogue** → `FallbackDialogueService` delivers the scripted line from `cat-dialogue.ts`.
+- **Human ambient bubbles** → render a scripted line from `catPersonGreetings` / `camillePersonalLines` (or the caller-forced line for first-meet Camille).
+- **Camille encounter beats 2–4** → render the authored `fallbackLines` for that beat.
+- **Camille beats 1 and 5** → always authored, never LLM-sourced. Beat 1 is pure narrator POV; beat 5 is the chapter-6 handoff and must run byte-for-byte.
+
+No LLM response is allowed to mutate trust, registry keys, chapter state, or story flags. That split is enforced in `AIDialogueService.getDialogue()` (`trustChange` and `event` are always taken from `matchScriptedResponse`) and in `runCamilleEncounterBeat` (all registry / stats / emote side-effects live in `onComplete`, independent of dialogue source).
 
 ### What the persona markdown controls (and what it doesn't)
 
 The persona drives **voice and behaviour only**. Game-state progression stays deterministic.
 
-| Controlled by persona markdown | Controlled by `cat-dialogue.ts` (scripted) |
+| Controlled by persona markdown | Controlled by scripted anchors |
 | --- | --- |
-| `lines` — what the cat actually says | `trustChange` — trust deltas applied to the speaker and colony |
-| `speakerPose` — friendly / wary / hostile / sleeping / curious / submissive | `event` — story flags, chapter progression, Camille triggers, etc. |
-| `emote` — heart / alert / curious / sleep / hostile / danger | (falls back to provide `speakerPose`, `emote`, `narration` if AI omits them) |
+| `lines` — what the speaker actually says | `trustChange` — trust deltas applied to speaker and colony |
+| `speakerPose` — friendly / wary / hostile / sleeping / curious / submissive | `event` — story flags, chapter progression, Camille triggers |
+| `emote` — heart / alert / curious / sleep / hostile / danger | HUD narration, stats restore, chapter-6 handoff (Camille beats) |
 | `narration` — optional body-language line | — |
-
-This split is enforced in `AIDialogueService.getDialogue()`: the AI JSON is parsed, then `trustChange` and `event` are always pulled from `matchScriptedResponse(request)`. An AI hallucinating a big trust jump or story flag cannot break the game.
 
 ### Persona markdown format
 
-Every persona follows the same seven-section structure so prompts stay comparable:
+Every persona (cat or human) follows the same seven-section structure so prompts stay comparable:
 
 ```markdown
-# <Cat Name>
+# <Name>
 
 ## Identity
-- Species, age, appearance (one-line bullets)
+- Species (cat / human), age, appearance (one-line bullets)
 
 ## Backstory
-Short paragraph — what do they remember, where do they usually sit
+Short paragraph — what do they remember, where do they usually sit/stand
 
 ## Personality
 - 3 bullets, behaviour-led (not adjectives alone)
 
 ## Speech Style
-- Cat-speak examples ("Mrrp", "Prrp"), length rules
-- "Never long human monologues" or similar constraint
+- Length rules ("one sentence, two at most")
+- For cats: cat-speak examples ("Mrrp", "Prrp")
+- For humans: "no baby-talk, no cat-speak, speak plainly"
 
 ## Knowledge
 - What they know about the park, humans, threats, the colony
@@ -247,25 +271,60 @@ Short paragraph — what do they remember, where do they usually sit
 - What warms them, what cools them
 ```
 
-See [src/ai/personas/blacky.md](src/ai/personas/blacky.md) as the canonical example.
+See [src/ai/personas/blacky.md](src/ai/personas/blacky.md) (cat) and [src/ai/personas/camille.md](src/ai/personas/camille.md) (human) as canonical examples.
 
-### Editing or adding a cat
+### Camille encounter beats (AI + scripted split)
 
-**Editing an existing cat's voice.** Edit the `.md` file. No code change, no rebuild config. Vite hot-reloads the raw import and the next conversation turn uses the updated markdown — previous turns in the history still reflect the old voice (they're replayed from IndexedDB).
+Camille's 5-encounter story arc routes through AI + scripted fallback beat-by-beat:
+
+| Beat | Source | Why |
+| --- | --- | --- |
+| 1 — First sighting | Scripted narration only (no dialogue) | Mamma Cat's POV reaction, not Camille speaking |
+| 2 — Places a treat | AI (Camille persona) with `encounterBeat.n = 2` | "Objective: she waits, places treat, does not reach" |
+| 3 — Slow blink | AI (Camille persona) with `encounterBeat.n = 3` | "Objective: slow-blink trust exchange" |
+| 4 — First touch | AI (Camille persona) with `encounterBeat.n = 4` | "Objective: first physical contact, Kish is loud nearby" |
+| 5 — Carrier / chapter-6 handoff | Scripted verbatim | Must run byte-for-byte regardless of LLM state |
+
+Authored fallback lines for beats 2-4 live in `camilleEncounterBeats` in `GameScene.ts` alongside each beat's objective — tweak the objective to change the AI's emotional target, tweak `fallbackLines` to change what players see when the LLM is down.
+
+### Human ambient bubbles (throttling)
+
+When a cat person (Camille, Manu, Kish, Rose, Ben) gets within greet range of Mamma Cat or a named colony cat:
+
+- **Per-human cooldown:** 30s between AI-sourced bubbles for that specific human. During the cooldown, scripted bubbles still fire from the existing pools so the world does not fall silent.
+- **Global single-flight:** at most one AI ambient bubble may be in flight at any time across all humans. A second proximity event falls through to scripted.
+- **Tight budget:** 1.5s `timeoutMs` for the upstream call. Anything slower renders the scripted line.
+- **Abort on disappearance:** if the human becomes inactive mid-flight (walked off-screen, deactivated), the scripted path is skipped and nothing renders.
+
+These knobs live as `HUMAN_AI_BUBBLE_COOLDOWN_MS` / `HUMAN_AI_BUBBLE_TIMEOUT_MS` in `GameScene.ts`.
+
+### Editing or adding a character
+
+**Editing voice.** Edit the `.md` file. No code change, no rebuild config. Vite hot-reloads the raw import and the next turn uses the updated markdown — earlier turns in history still reflect the old voice (they're replayed from IndexedDB).
 
 **Adding a new AI-backed cat.**
 
 1. Create `src/ai/personas/<slug>.md` using the seven-section format above.
-2. Register it in [src/ai/personas/index.ts](src/ai/personas/index.ts) with the `?raw` import, keyed by the **exact** `NPCCat.npcName` set in [GameScene.ts](src/scenes/GameScene.ts). A mismatch throws `No AI persona loaded for speaker: <name>` and the service falls back to scripted dialogue.
-3. Add the expected key to [tests/ai/personas.test.ts](tests/ai/personas.test.ts) so the persona file is guaranteed to load with non-trivial content.
+2. Register it in [src/ai/personas/index.ts](src/ai/personas/index.ts) with the `?raw` import, keyed by the **exact** `NPCCat.npcName` set in [GameScene.ts](src/scenes/GameScene.ts). Also add it to `PERSONA_TIER`.
+3. Add the expected key to [tests/ai/personas.test.ts](tests/ai/personas.test.ts) so the persona file is guaranteed to load.
 4. If the cat should read as colder or more clipped, add the name to `HARSHER_TEMP_SPEAKERS` in [AIDialogueService.ts](src/services/AIDialogueService.ts) to drop their temperature to `0.6`.
-5. Add scripted anchor entries to [src/data/cat-dialogue.ts](src/data/cat-dialogue.ts) for any trust deltas or story events this cat should drive — AI alone cannot create them.
+5. Add scripted anchor entries to [src/data/cat-dialogue.ts](src/data/cat-dialogue.ts) for any trust deltas or story events — AI alone cannot create them.
+
+**Adding a new AI-backed human.**
+
+1. Create `src/ai/personas/<slug>.md` using the seven-section format (Identity states `Species: human, ...`).
+2. Register in `src/ai/personas/index.ts` — key by the exact `HumanNPC.identityName`, add to `PERSONA_TIER` (tier2 unless they deserve tier1 memory like Camille).
+3. Wire `identityName` on the `HumanConfig` so the `HumanNPC` instance links to the persona. For named types (`camille` / `manu` / `kish`) the default identity name is auto-derived; for anonymous types (`feeder`) pass `identityName: "Rose"` etc. explicitly.
+4. If they're involved in an encounter beat, extend `camilleEncounterBeats` (or add a sibling table) and route the beat through `runCamilleEncounterBeat` so side-effects stay deterministic.
+5. Extend [tests/ai/personas.test.ts](tests/ai/personas.test.ts) with the new key.
 
 ### Tuning tips
 
 - **Too rambly?** Reinforce the "one sentence per line, two at most" rule in the persona's `Speech Style`. `max_tokens=150` is already a hard ceiling.
 - **Out of character?** Tighten `Personality` and `Rules of Engagement` with concrete do/don't bullets; persona markdown is prompt-weight, so specific beats abstract.
-- **Ignoring the scene?** The `## Current scene` block already surfaces chapter / trust / stats; if you want the cat to react to more, extend `DialogueRequest.gameState` in [DialogueService.ts](src/services/DialogueService.ts) and add a line to `buildSystemPrompt`.
+- **Ignoring the scene?** The `## Current scene` block already surfaces chapter / trust / stats / nearbyCat; if you want the speaker to react to more, extend `DialogueRequest.gameState` in [DialogueService.ts](src/services/DialogueService.ts) and add a line to `buildSystemPrompt`.
+- **Camille encounter beat feels off?** Edit the `objective` string in `camilleEncounterBeats` — that's the one-sentence brief the LLM sees under `## Story beat context`.
+- **Humans sound too formal?** The human example line in `buildSystemPrompt` deliberately shows one short, warm sentence. Adjust it there or tighten the persona's `Speech Style` with concrete examples.
 - **Breaking JSON?** `parseAIJson` strips markdown fences and validates enums; on parse failure `FallbackDialogueService` delivers the scripted line instead, so a malformed reply degrades gracefully rather than crashing.
 
 ## Local Development & Testing
@@ -306,7 +365,7 @@ Vite's `server.proxy` in [vite.config.ts](vite.config.ts) forwards `/api/ai/chat
 
 ### Smoke-test AI dialogue in the browser
 
-Approach one of the **eight AI cats** (Blacky, Tiger, Jayco, Jayco Jr, Fluffy, Pedigree, Ginger, Ginger B) and press **Space**. Verify:
+**Engaged cat dialogue.** Approach one of the **eight AI cats** (Blacky, Tiger, Jayco, Jayco Jr, Fluffy, Pedigree, Ginger, Ginger B) and press **Space**. Verify:
 
 | Check | Where to look |
 | --- | --- |
@@ -317,6 +376,18 @@ Approach one of the **eight AI cats** (Blacky, Tiger, Jayco, Jayco Jr, Fluffy, P
 | Second conversation references the first | Re-approach the same cat |
 
 Each Space on a named cat should produce one `POST /api/ai/chat` with status **200** in DevTools → Network. Body shape: `{ provider, messages, temperature, max_tokens }`.
+
+**Human ambient bubbles.** Walk near **Camille / Manu / Kish** (evening Chapter 5+) or **Rose / Ben** (dawn/evening feeder circuit). Verify:
+
+| Check | Where to look |
+| --- | --- |
+| Bubble appears within ~1.5s of proximity | Floating text above the human |
+| Line reflects their persona (Rose warm Tita voice, Ben gruff one-liner, Kish excited, etc.) | Bubble contents |
+| Same human does **not** fire another AI bubble for 30s | DevTools → Network (no repeat `/api/ai/chat`) |
+| Scripted line still fires during cooldown when approaching again | Bubble contents (shorter, from pool) |
+| When Worker is stopped, scripted fallback fires within 1.5s | Bubble still appears; console shows `AI failed; using scripted fallback` |
+
+**Camille encounter beats 2-4.** Progress to Chapter 5 and trigger a Camille encounter (one per eligible evening). Verify beats 2, 3, 4 show AI-sourced Camille lines matching the beat objective; beats 1 and 5 always show the authored narrator-POV text regardless of Worker state. The `CAMILLE_ENCOUNTER` registry key should increment exactly once per beat even if the LLM fails.
 
 ### Test the fallback paths (do not skip)
 
@@ -450,7 +521,7 @@ ayala/
 │   ├── data/                           #   cat-dialogue script conditions
 │   └── sprites/                        #   BaseNPC helpers, SpriteProfiles
 ├── vitest.config.ts                     # Vitest configuration
-└── VERSION                              # 0.2.0
+└── VERSION                              # 0.3.0
 ```
 
 ## Asset Generation

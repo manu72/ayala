@@ -27,6 +27,22 @@ export interface DialogueRequest {
     recentEvents: string[];
   };
   conversationHistory: ConversationEntry[];
+  /**
+   * Optional: name of a nearby cat the speaker is engaging (e.g. a feeder
+   * greeting a named cat). Used to flavour ambient bubble lines with the
+   * cat's identity without changing `target` (which stays "Mamma Cat").
+   */
+  nearbyCat?: string;
+  /**
+   * Optional: pinned story beat context for Camille's 5-encounter sequence.
+   * Deterministic side-effects (trust, registry, chapter gating) are owned by
+   * GameScene; this field tells the LLM the emotional objective of the beat.
+   */
+  encounterBeat?: {
+    kind: "camille_encounter";
+    n: 1 | 2 | 3 | 4 | 5;
+    objective: string;
+  };
 }
 
 export interface ConversationEntry {

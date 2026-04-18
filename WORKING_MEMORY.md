@@ -2,7 +2,7 @@
 
 > Persistent memory layer for AI-assisted development sessions.
 > Last Updated: 2026-04-18
-> Version: 0.2.0
+> Version: 0.3.0
 
 ---
 
@@ -27,6 +27,7 @@
 | 4. Camille & Endgame | Complete    | DialogueService, Chs 4-6, snatchers, territory, epilogue, NG+  |
 | 4.5 Visual & Narrative | Complete  | Intro cinematic, dialogue poses, human circuits, witness gates, chapter cards, reduced-motion |
 | 5. AI cat dialogue + proxy | Complete | AIDialogueService, Cloudflare Worker proxy, personas, scripted fallback |
+| 5.1 AI human dialogue | Complete | Camille/Manu/Kish/Rose/Ben personas, ambient AI bubbles with 30s cooldown + 1.5s budget, AI-sourced Camille encounter beats 2-4 |
 | 5b. Polish & Release | Not started | Audio, PWA, playtesting, deployment                            |
 
 ---
@@ -243,9 +244,20 @@ SmallDog.png, WhiteDog.png, BrownDog.png — randomly assigned to dog walkers
 - **No client secrets:** `VITE_AI_PROXY_URL` is a path only (e.g. `/api/ai/chat`). Provider keys live in the Cloudflare Worker (`proxy/`) or `proxy/.dev.vars` locally — never in `VITE_*` or `dist/`. CI runs `npm run verify:dist` after build to grep common leak patterns.
 - **Authoritative events:** `AIDialogueService` generates lines/narration/emote/pose from the LLM but **`event` is always derived from the same scripted condition match** as `ScriptedDialogueService` (`CAT_DIALOGUE_SCRIPTS`) so story flags and trust awards stay deterministic.
 - **Fallback chain:** Provider retry (Deepseek → OpenAI) inside `AIDialogueService`; if parsing or network fails entirely, `FallbackDialogueService` uses full scripted dialogue.
-- **Personas:** Markdown in `src/ai/personas/*.md`, bundled with `?raw`; map keys must match `npcName` strings in `GameScene` / `CAT_PERSONAS`.
+- **Personas:** Markdown in `src/ai/personas/*.md`, bundled with `?raw`; map keys must match `npcName` strings in `GameScene` / `AI_PERSONAS`.
 - **Dev UX:** If AI is slow (>400ms), `GameScene` shows a one-shot `curious` emote on the cat; `requestCatDialogue` uses an 8s client abort inside `AIDialogueService`.
 - **Conversation cap:** `storeConversation` triggers `pruneConversations(speaker, 100)` to bound IndexedDB growth.
+
+### Phase 5.1 — AI dialogue for named humans (Camille / Manu / Kish / Rose / Ben)
+
+- **Persona registry is unified:** `AI_PERSONAS` (in `src/ai/personas/index.ts`) now holds cats *and* humans. `CAT_PERSONAS` remains as a backward-compat alias only — all new code uses `AI_PERSONAS`. A new `PERSONA_TIER` map pins Camille + the deep cats (Blacky/Tiger/Jayco) as `tier1` (20-turn history) and everyone else as `tier2` (10-turn history). `buildMessages` reads the tier; unknown speakers default to `tier1` so a missed registration does not silently lose context.
+- **Species-aware prompt:** `buildSystemPrompt` branches on `request.speakerType`: cats get cat-speak guidance + a cat example line; humans get "plain speech, one sentence per line" guidance + a human example. `Speaker species: cat|human` is in the scene block so the model can't miss it even if the persona markdown is being edited.
+- **Encounter beat context:** `DialogueRequest` gained optional `nearbyCat` (for human ambient bubbles — e.g. "Rose is near Tiger") and `encounterBeat: { kind: "camille_encounter"; n: 1–5; objective: string }`. The encounter beat context is appended as `## Story beat context` with an explicit reminder that registry side-effects are handled by the game.
+- **Human identity wiring:** `HumanNPC` now exposes `identityName: string | null`. `defaultIdentityNameFor(type)` returns `Camille` / `Manu` / `Kish` for those types; feeders default to `null` (anonymous) and must be opted in explicitly — the feeder configs in `GameScene.buildFeederConfigs` pass `identityName: "Rose"` and `identityName: "Ben"`. This cleanly separates "has a persona" from "is a single canonical instance" so future feeder waves won't collide on the same key.
+- **Ambient bubble throttling (`showGreetingBubble`):** AI path is eligible only when the human has an `identityName` in `AI_PERSONAS`, **per-human 30s cooldown has elapsed** (`humanAiBubbleCooldownUntil` WeakMap), **no other AI bubble is in flight** (`humanAiBubbleInFlight` global guard), and `DialogueService` is actually `FallbackDialogueService`. Cooldown is set up-front regardless of success so proximity bursts can't spam calls. Tight 1.5s `timeoutMs` passed to `AIDialogueService.getDialogue` so a slow model never stalls the scene — on any failure `pickScriptedGreeting` renders the existing scripted line pool. Bubbles are stored in `ConversationStore` keyed by identity name so memory is preserved across bubbles and encounter beats.
+- **Camille encounter beats 2-4 go through AI, beats 1 and 5 stay scripted.** `runCamilleEncounterBeat(n, hud)` pins registry state (`CAMILLE_ENCOUNTER`, `CAMILLE_ENCOUNTER_DAY`) *before* any async work, plays the crouch animation, fetches AI lines via `requestCamilleEncounterLines` with `encounterBeat` context and a 5s budget, then applies per-beat `onComplete` side-effects (HUD narration, `stats.restore("hunger", 30)` for beat 2, heart emotes for 3 & 4) inside `dialogue.show`'s completion callback. The per-beat fallback lines + `objective` strings live in `camilleEncounterBeats`. Beat 1 is pure narrator text; beat 5 is the chapter-6 handoff and runs verbatim — both bypass AI entirely because losing either to an LLM hiccup would break the story.
+- **Per-call `AIDialogueCallOptions`:** New optional second arg on `AIDialogueService.getDialogue` (and forwarded by `FallbackDialogueService`) carries `timeoutMs` and `signal`. External abort is bridged onto the internal `AbortController` so callers can cancel (e.g. human walks off-screen). The scripted fallback path ignores these options — it's synchronous.
+- **Deterministic story progression is preserved end-to-end:** Same principle as Phase 5 applies to human beats. AI supplies `lines`/`speakerPose`/`emote`/`narration` only. All registry mutations, stats restores, chapter triggers, and HUD narration live in game-owned callbacks. On LLM failure the player still sees authored text; on LLM success the registry side-effect for that beat has already been pinned.
 
 ### Scene Restart Data Passing
 
