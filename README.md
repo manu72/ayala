@@ -14,7 +14,7 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 
 ## Project Status
 
-**Version 0.3.0** -- Phases 1 through 4, **Phase 4.5**, **Phase 5** (AI-powered named cat dialogue), and **Phase 5.1** (AI-powered human NPCs: Camille, Manu, Kish, and the two named feeders Rose and Ben) are complete for the core loop. The game is playable from start to finish: survival mechanics, social systems, 6 story chapters, territory claiming, snatchers, the full adoption story arc through to the epilogue, plus intro cinematic, grounded narration hooks, and human/cat engagement polish. **Named colony cats** and **named humans** both use LLM-backed dialogue when a same-origin proxy is configured; scripted dialogue remains the fallback if the network or API fails.
+**Version 0.3.2** -- Phases 1 through 4, **Phase 4.5**, **Phase 5** (AI-powered named cat dialogue), **Phase 5.1** (AI-powered human NPCs), **Phase 5.1a** (consolidated human-spoken bubbles + paired narrator/spoken beats), and **Phase 5.1b** (Camille beat-5 player-consent decision gate + stationary greeting cap) are complete for the core loop. The game is playable from start to finish: survival mechanics, social systems, 6 story chapters, territory claiming, snatchers, the full adoption story arc through to the epilogue, plus intro cinematic, grounded narration hooks, and human/cat engagement polish. **Named colony cats** and **named humans** both use LLM-backed dialogue when a same-origin proxy is configured; scripted dialogue remains the fallback if the network or API fails.
 
 ### Development Roadmap
 
@@ -29,6 +29,7 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 | 5. AI cat dialogue + proxy | LLM personas, Cloudflare Worker proxy, scripted fallback, dist leak checks              | Complete (v0.2.0) |
 | 5.1 AI human dialogue  | Camille / Manu / Kish personas, named feeders (Rose, Ben), AI ambient bubbles, AI-sourced Camille beats 2-4 | Complete (v0.3.0) |
 | 5.1a Consolidated human bubbles | All human-spoken dialogue renders in the floating bubble channel; Camille encounter beats are paired narrator (modal) + spoken (bubble) | Complete (v0.3.1) |
+| 5.1b Beat-5 consent gate + greet cap | Humans freeze during encounter beats; beat 5 has a 10s player-consent window (approach Camille + Space to say yes); stationary Mamma Cat no longer traps cat-persons in endless greeting loops | Complete (v0.3.2) |
 | 5b. Polish & Release   | Playtesting, audio, PWA/offline, deployment                                               | Not started |
 
 ### What exists now

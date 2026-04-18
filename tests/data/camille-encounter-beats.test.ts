@@ -10,6 +10,10 @@ import { describe, expect, it } from "vitest";
 import {
   CAMILLE_ENCOUNTER_BEATS,
   CAMILLE_ENCOUNTER_5_STEPS,
+  CAMILLE_ENCOUNTER_5_PREDECISION_STEPS,
+  CAMILLE_ENCOUNTER_5_JOURNEY_STEPS,
+  CAMILLE_BEAT5_ACCEPT_LINE,
+  CAMILLE_BEAT5_TIMEOUT_LINE,
 } from "../../src/data/camille-encounter-beats";
 
 describe("CAMILLE_ENCOUNTER_BEATS (beats 2–4)", () => {
@@ -81,5 +85,36 @@ describe("CAMILLE_ENCOUNTER_5_STEPS", () => {
       (s) => typeof s.spoken === "string",
     ).length;
     expect(spokenCount).toBeGreaterThan(0);
+  });
+});
+
+describe("CAMILLE_ENCOUNTER_5 predecision / journey split (v0.3.2 decision gate)", () => {
+  it("predecision + journey concatenation matches the legacy combined export", () => {
+    expect([
+      ...CAMILLE_ENCOUNTER_5_PREDECISION_STEPS,
+      ...CAMILLE_ENCOUNTER_5_JOURNEY_STEPS,
+    ]).toEqual(CAMILLE_ENCOUNTER_5_STEPS);
+  });
+
+  it("predecision phase has Camille ask the question (at least one spoken line)", () => {
+    const spoken = CAMILLE_ENCOUNTER_5_PREDECISION_STEPS.filter(
+      (s) => typeof s.spoken === "string" && s.spoken.trim().length > 0,
+    );
+    expect(spoken.length).toBeGreaterThan(0);
+  });
+
+  it("journey phase is narrator-only (no spoken lines — pickup tween plays underneath)", () => {
+    for (const step of CAMILLE_ENCOUNTER_5_JOURNEY_STEPS) {
+      expect(step.spoken).toBeUndefined();
+    }
+  });
+
+  it("accept line is non-empty and does not embed a literal heart glyph (emote handles the heart visual)", () => {
+    expect(CAMILLE_BEAT5_ACCEPT_LINE.trim().length).toBeGreaterThan(0);
+    expect(CAMILLE_BEAT5_ACCEPT_LINE).not.toMatch(/❤|♥|💕|💖/);
+  });
+
+  it("timeout line is non-empty and reads gently (Camille stands down; beat re-arms)", () => {
+    expect(CAMILLE_BEAT5_TIMEOUT_LINE.trim().length).toBeGreaterThan(0);
   });
 });

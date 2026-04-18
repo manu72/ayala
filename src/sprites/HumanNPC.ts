@@ -101,6 +101,23 @@ export class HumanNPC extends BaseNPC {
   private greetedCats = new WeakSet<object>();
   private glanceTimer = 0;
 
+  /**
+   * Caller-controlled pause for encounter beats. While true, {@link update}
+   * zeroes velocity and does not advance the waypoint path. Crouch anim is
+   * played once in {@link pauseForEncounter}; callers must not rely on any
+   * automatic timeout — {@link resumeFromEncounter} is the only release path.
+   */
+  private encounterPaused = false;
+
+  /**
+   * Count of automatic proximity greetings this human has fired at a
+   * stationary Mamma Cat since her last significant movement. Reset by the
+   * scene (via {@link resetStationaryGreet}) once Mamma moves beyond
+   * STATIONARY_MOVE_THRESHOLD_PX. The scene enforces the cap; this class
+   * just records and exposes the count.
+   */
+  private stationaryGreet = 0;
+
   /** Manu greets only every 3rd eligible cat (Phase 4.5). */
   private manuGreetWave = 0;
   /** Simple bowl graphic while feeder lingers at a station. */
@@ -206,6 +223,50 @@ export class HumanNPC extends BaseNPC {
     this.greetedCats = new WeakSet<object>();
   }
 
+  /**
+   * Pause this human for an encounter beat. Movement is zeroed and the
+   * crouch animation (if the profile defines one) is played facing the
+   * target world X. {@link update} will early-return for subsequent ticks
+   * until {@link resumeFromEncounter} is called.
+   *
+   * Idempotent: safe to call repeatedly (e.g. to re-face the player
+   * between paired-beat steps).
+   */
+  pauseForEncounter(faceTargetX: number): void {
+    this.encounterPaused = true;
+    this.setVelocity(0);
+    const facingRight = faceTargetX >= this.x;
+    const crouchAnim = `${this.profile.key}-crouch-${facingRight ? "right" : "left"}`;
+    if (this.scene.anims.exists(crouchAnim)) {
+      this.anims.play(crouchAnim, true);
+    }
+  }
+
+  /** Release an encounter pause. Path-following resumes on the next update. */
+  resumeFromEncounter(): void {
+    this.encounterPaused = false;
+  }
+
+  /** Is this human currently frozen for an encounter beat? */
+  get isEncounterPaused(): boolean {
+    return this.encounterPaused;
+  }
+
+  /** See {@link stationaryGreet}. */
+  get stationaryGreetCount(): number {
+    return this.stationaryGreet;
+  }
+
+  /** Increment this human's stationary-greet counter. */
+  incrementStationaryGreet(): void {
+    this.stationaryGreet += 1;
+  }
+
+  /** Reset this human's stationary-greet counter (call when Mamma moves). */
+  resetStationaryGreet(): void {
+    this.stationaryGreet = 0;
+  }
+
   glanceAt(targetX: number, targetY: number): void {
     if (this.glanceTimer > 0) return;
     this.glanceTimer = 1500;
@@ -243,6 +304,11 @@ export class HumanNPC extends BaseNPC {
 
     if (this.exiting) {
       this.updateExiting();
+      return;
+    }
+
+    if (this.encounterPaused) {
+      this.setVelocity(0);
       return;
     }
 
@@ -406,6 +472,8 @@ export class HumanNPC extends BaseNPC {
     this.exitTarget = null;
     this.loopPausing = false;
     this.loopPauseTimer = 0;
+    this.encounterPaused = false;
+    this.stationaryGreet = 0;
     this.feedingStationProp?.destroy();
     this.feedingStationProp = null;
     this.setVisible(false);

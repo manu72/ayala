@@ -18,8 +18,44 @@ export const GP = {
   /** NPC cats flee snatcher when within this range. */
   NPC_FLEE_SNATCHER_DIST: 160,
   CAMILLE_ENCOUNTER_DIST: 64,
+  /**
+   * "Close enough to touch" distance used by Camille's beat 5 decision gate.
+   * The player must walk Mamma Cat within this radius of Camille and press
+   * Space to greet within {@link CAMILLE_BEAT5_DECISION_MS} for the beat to
+   * resolve as "yes, take me home". Kept slightly tighter than
+   * CAT_PERSON_PLAYER_GREET_DIST so the choice reads as deliberate.
+   */
+  CAMILLE_BEAT5_TOUCH_DIST: 40,
   TILE_SIZE: 32,
 } as const;
+
+/**
+ * Duration (ms) of the beat 5 decision window. Camille has asked "Would you
+ * like to come home with me?" — the player has this long to approach and
+ * press Space to greet. On timeout Camille stands down and the beat re-arms
+ * for the next proximity trigger.
+ */
+export const CAMILLE_BEAT5_DECISION_MS = 10_000;
+
+/**
+ * Max number of automatic proximity greetings a single human NPC may fire at
+ * Mamma Cat while she is stationary. Before this cap was introduced, cat-
+ * persons would loop `startGreeting` → idle cooldown → `startGreeting` again
+ * indefinitely against a stationary or resting Mamma Cat, trapping both
+ * NPCs in a greeting stall. Counter resets for every human the moment Mamma
+ * moves {@link STATIONARY_MOVE_THRESHOLD_PX} from her last anchor.
+ *
+ * The cap applies only to passive proximity greetings in `updateHumans`.
+ * Player-initiated greetings (Space) and encounter beats are unaffected.
+ */
+export const STATIONARY_GREET_CAP = 2;
+
+/**
+ * World-pixel distance Mamma Cat must travel from her current anchor before
+ * all humans' stationary greeting counters are reset. Chosen slightly below
+ * one tile (32 px) so a single step in any direction releases the cap.
+ */
+export const STATIONARY_MOVE_THRESHOLD_PX = 24;
 
 /** Duration (ms) the player must hold the rest key to enter resting state. */
 export const REST_HOLD_MS = 1000;

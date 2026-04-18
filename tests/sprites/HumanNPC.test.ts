@@ -599,6 +599,127 @@ describe('HumanNPC.glanceAt — throttling', () => {
 // Persona identity wiring
 // ──────────────────────────────────────────────────────────────
 
+// ──────────────────────────────────────────────────────────────
+// Encounter pause (beat-5 stationary Camille fix)
+// ──────────────────────────────────────────────────────────────
+
+describe('HumanNPC — encounter pause', () => {
+  it('pauseForEncounter flips isEncounterPaused and zeroes velocity', () => {
+    const { npc } = makeHuman({ type: 'camille', activePhases: ['evening'] })
+    npc.setPhase('evening')
+    expect(npc.isEncounterPaused).toBe(false)
+
+    const setVel = vi.spyOn(npc, 'setVelocity')
+    npc.pauseForEncounter(npc.x + 50)
+    expect(npc.isEncounterPaused).toBe(true)
+    expect(setVel).toHaveBeenCalledWith(0)
+  })
+
+  it('pauseForEncounter plays the correct crouch animation facing the target', () => {
+    const { npc } = makeHuman({ type: 'camille', activePhases: ['evening'] })
+    npc.setPhase('evening')
+    const playSpy = npc.anims.play as ReturnType<typeof vi.fn>
+    playSpy.mockClear()
+
+    npc.pauseForEncounter(npc.x + 50) // target to the right
+    expect(playSpy).toHaveBeenCalledWith('camille-crouch-right', true)
+
+    npc.pauseForEncounter(npc.x - 50) // target to the left
+    expect(playSpy).toHaveBeenCalledWith('camille-crouch-left', true)
+  })
+
+  it('while paused, update() skips path-following entirely (velocity stays zero)', () => {
+    const { npc } = makeHuman({
+      type: 'camille',
+      activePhases: ['evening'],
+      speed: 100,
+      path: [
+        { x: 0, y: 0 },
+        { x: 400, y: 0 },
+      ],
+    })
+    npc.setPhase('evening')
+    npc.pauseForEncounter(npc.x + 50)
+
+    const setVel = vi.spyOn(npc, 'setVelocity')
+    for (let i = 0; i < 5; i++) {
+      npc.update(100)
+    }
+    // Every setVelocity during the paused window is forced to 0,0.
+    for (const call of setVel.mock.calls) {
+      const [vx = 0, vy = 0] = call
+      expect(vx).toBe(0)
+      expect(vy).toBe(0)
+    }
+  })
+
+  it('resumeFromEncounter re-enables path-following', () => {
+    const { npc } = makeHuman({
+      type: 'camille',
+      activePhases: ['evening'],
+      speed: 100,
+      path: [
+        { x: 0, y: 0 },
+        { x: 400, y: 0 },
+      ],
+    })
+    npc.setPhase('evening')
+    npc.pauseForEncounter(npc.x + 50)
+    npc.resumeFromEncounter()
+    expect(npc.isEncounterPaused).toBe(false)
+
+    const setVel = vi.spyOn(npc, 'setVelocity')
+    npc.update(16)
+    // After resume, path-following assigns non-zero velocity toward waypoint.
+    const movingCall = setVel.mock.calls.find(
+      ([vx, vy]) => (vx ?? 0) !== 0 || (vy ?? 0) !== 0,
+    )
+    expect(movingCall).toBeDefined()
+  })
+
+  it('deactivate clears encounterPaused + stationary counter defensively', () => {
+    const { npc } = makeHuman({ type: 'camille', activePhases: ['evening'] })
+    npc.setPhase('evening')
+    npc.pauseForEncounter(npc.x + 50)
+    npc.incrementStationaryGreet()
+    npc.incrementStationaryGreet()
+    expect(npc.isEncounterPaused).toBe(true)
+    expect(npc.stationaryGreetCount).toBe(2)
+
+    // Phase out → startExiting → eventually deactivate. Walk the NPC to a
+    // park exit so the deactivate path runs for real.
+    npc.resumeFromEncounter() // exit requires unpaused state to move
+    npc.setPhase('day')
+    for (let i = 0; i < 2000 && npc.active; i++) {
+      simulatePhysics(npc, 200)
+    }
+    expect(npc.active).toBe(false)
+    expect(npc.isEncounterPaused).toBe(false)
+    expect(npc.stationaryGreetCount).toBe(0)
+  })
+})
+
+// ──────────────────────────────────────────────────────────────
+// Stationary greet counter (trap-greeting fix)
+// ──────────────────────────────────────────────────────────────
+
+describe('HumanNPC — stationary greet counter', () => {
+  it('starts at zero', () => {
+    const { npc } = makeHuman({ type: 'camille' })
+    expect(npc.stationaryGreetCount).toBe(0)
+  })
+
+  it('increments monotonically and resets to zero', () => {
+    const { npc } = makeHuman({ type: 'feeder' })
+    npc.incrementStationaryGreet()
+    expect(npc.stationaryGreetCount).toBe(1)
+    npc.incrementStationaryGreet()
+    expect(npc.stationaryGreetCount).toBe(2)
+    npc.resetStationaryGreet()
+    expect(npc.stationaryGreetCount).toBe(0)
+  })
+})
+
 describe('HumanNPC.identityName — persona wiring', () => {
   it('defaults named types to their canonical persona key', () => {
     const cases: Array<[HumanConfig['type'], string]> = [
