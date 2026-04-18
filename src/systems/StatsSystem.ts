@@ -4,8 +4,8 @@ export interface CatStats {
   energy: number;
 }
 
-/** Per-second base decay rates (subtracted each real-time second). */
-const DECAY = {
+/** Per-second base decay rates (subtracted each real-time second). Exported for tests and tooling. */
+export const STATS_DECAY = {
   hunger: 0.05,
   thirst: 0.1,
   energyRest: 0.05,
@@ -13,22 +13,29 @@ const DECAY = {
   energyRunning: 0.3,
 } as const;
 
-const HEAT_MULTIPLIER = 1.5;
-const SHADE_ENERGY_REGEN = 0.2; // passive regen in shade
-const SHELTER_ENERGY_REGEN = 0.5; // passive regen in shelter
+/** Multiplier on decay during heat when not in shade. */
+export const STATS_HEAT_MULTIPLIER = 1.5;
 
-/** Deliberate rest/sleep energy rates (per second). */
-const REST_RATE_OPEN = 0.2;
-const REST_RATE_SHADE = 0.5;
-const REST_RATE_SAFE = 1.0;
+/** Passive energy regen per second (idle, not deliberate rest). */
+export const STATS_SHADE_ENERGY_REGEN = 0.2;
+export const STATS_SHELTER_ENERGY_REGEN = 0.5;
 
-/** Hunger/thirst decay while sleeping is reduced (lower metabolic rate). */
-const REST_DECAY_MULTIPLIER = 0.1;
+/** Deliberate rest/sleep energy gain (per second). */
+export const STATS_REST_RATE_OPEN = 0.2;
+export const STATS_REST_RATE_SHADE = 0.5;
+export const STATS_REST_RATE_SAFE = 1.0;
 
-const SPEED_PENALTY_HUNGER_30 = 0.8;
-const SPEED_PENALTY_HUNGER_10 = 0.5;
-const SPEED_PENALTY_THIRST_20 = 0.8;
-const SPEED_PENALTY_ENERGY_20 = 0.7;
+/** Hunger/thirst decay multiplier while deliberately resting (lower metabolic rate). */
+export const STATS_REST_DECAY_MULTIPLIER = 0.1;
+
+/** Stat thresholds and multipliers for `speedMultiplier`. Exported for tests. */
+export const STATS_SPEED_PENALTY = {
+  hunger30: 0.8,
+  hunger10: 0.5,
+  thirst20: 0.8,
+  energy20: 0.7,
+  minMultiplier: 0.25,
+} as const;
 
 /** Grace period before collapse triggers.
  * Duration (ms) a stat must be at 0 before collapse triggers. Exported so
@@ -36,6 +43,11 @@ const SPEED_PENALTY_ENERGY_20 = 0.7;
  * coded "15s" / "16s" expectations in tests drifted silently when this value
  * was bumped to 30s. */
 export const COLLAPSE_THRESHOLD_MS = 30_000;
+
+/** Minimum stat floors applied by `resetCollapse()` after recovery. */
+export const STATS_RESET_MIN_ENERGY = 30;
+export const STATS_RESET_MIN_HUNGER = 15;
+export const STATS_RESET_MIN_THIRST = 15;
 
 export class StatsSystem {
   hunger = 100;
@@ -52,11 +64,11 @@ export class StatsSystem {
   /** Stat-based speed multiplier (cumulative, minimum 0.25). */
   get speedMultiplier(): number {
     let m = 1.0;
-    if (this.hunger < 10) m *= SPEED_PENALTY_HUNGER_10;
-    else if (this.hunger < 30) m *= SPEED_PENALTY_HUNGER_30;
-    if (this.thirst < 20) m *= SPEED_PENALTY_THIRST_20;
-    if (this.energy < 20) m *= SPEED_PENALTY_ENERGY_20;
-    return Math.max(0.25, m);
+    if (this.hunger < 10) m *= STATS_SPEED_PENALTY.hunger10;
+    else if (this.hunger < 30) m *= STATS_SPEED_PENALTY.hunger30;
+    if (this.thirst < 20) m *= STATS_SPEED_PENALTY.thirst20;
+    if (this.energy < 20) m *= STATS_SPEED_PENALTY.energy20;
+    return Math.max(STATS_SPEED_PENALTY.minMultiplier, m);
   }
 
   /** True when any stat is low enough to darken screen edges. */
@@ -90,28 +102,32 @@ export class StatsSystem {
   ): void {
     if (this._collapsed) return;
 
-    const heatMod = isHeatActive && !inShade ? HEAT_MULTIPLIER : 1.0;
+    const heatMod = isHeatActive && !inShade ? STATS_HEAT_MULTIPLIER : 1.0;
 
-    // Hunger/thirst always decay, but at half rate while resting
-    const decayMod = isResting ? REST_DECAY_MULTIPLIER : 1.0;
-    this.hunger = Math.max(0, this.hunger - DECAY.hunger * heatMod * decayMod * deltaSec);
-    this.thirst = Math.max(0, this.thirst - DECAY.thirst * heatMod * decayMod * deltaSec);
+    // Hunger/thirst always decay, but at reduced rate while resting
+    const decayMod = isResting ? STATS_REST_DECAY_MULTIPLIER : 1.0;
+    this.hunger = Math.max(0, this.hunger - STATS_DECAY.hunger * heatMod * decayMod * deltaSec);
+    this.thirst = Math.max(0, this.thirst - STATS_DECAY.thirst * heatMod * decayMod * deltaSec);
 
     if (isResting) {
-      const rate = inShelter ? REST_RATE_SAFE : inShade ? REST_RATE_SHADE : REST_RATE_OPEN;
+      const rate = inShelter
+        ? STATS_REST_RATE_SAFE
+        : inShade
+          ? STATS_REST_RATE_SHADE
+          : STATS_REST_RATE_OPEN;
       this.energy = Math.min(100, this.energy + rate * deltaSec);
     } else if (isRunning && this.canRun) {
-      this.energy = Math.max(0, this.energy - DECAY.energyRunning * heatMod * deltaSec);
+      this.energy = Math.max(0, this.energy - STATS_DECAY.energyRunning * heatMod * deltaSec);
     } else if (isMoving) {
-      this.energy = Math.max(0, this.energy - DECAY.energyMoving * heatMod * deltaSec);
+      this.energy = Math.max(0, this.energy - STATS_DECAY.energyMoving * heatMod * deltaSec);
     } else {
-      this.energy = Math.max(0, this.energy - DECAY.energyRest * heatMod * deltaSec);
+      this.energy = Math.max(0, this.energy - STATS_DECAY.energyRest * heatMod * deltaSec);
 
       // Passive shade/shelter regen (stationary but not deliberately resting)
       if (inShelter) {
-        this.energy = Math.min(100, this.energy + SHELTER_ENERGY_REGEN * deltaSec);
+        this.energy = Math.min(100, this.energy + STATS_SHELTER_ENERGY_REGEN * deltaSec);
       } else if (inShade) {
-        this.energy = Math.min(100, this.energy + SHADE_ENERGY_REGEN * deltaSec);
+        this.energy = Math.min(100, this.energy + STATS_SHADE_ENERGY_REGEN * deltaSec);
       }
     }
 
@@ -138,9 +154,9 @@ export class StatsSystem {
   resetCollapse(): void {
     this._collapsed = false;
     this.collapseTimer = 0;
-    this.energy = Math.max(30, this.energy);
-    this.hunger = Math.max(15, this.hunger);
-    this.thirst = Math.max(15, this.thirst);
+    this.energy = Math.max(STATS_RESET_MIN_ENERGY, this.energy);
+    this.hunger = Math.max(STATS_RESET_MIN_HUNGER, this.hunger);
+    this.thirst = Math.max(STATS_RESET_MIN_THIRST, this.thirst);
   }
 
   /** Serialise for save. */
