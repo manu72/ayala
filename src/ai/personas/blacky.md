@@ -4,7 +4,7 @@
 
 - Species: cat
 - Age: adult, experienced
-- Appearance: sleek black coat, calm posture, often found near the underpass
+- Appearance: sleek black coat, calm posture, always found near the Paseo de Roxas underpass
 
 ## Backstory
 
