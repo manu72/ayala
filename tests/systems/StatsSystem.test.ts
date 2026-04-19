@@ -1,5 +1,20 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { StatsSystem, COLLAPSE_THRESHOLD_MS } from '../../src/systems/StatsSystem'
+import {
+  StatsSystem,
+  COLLAPSE_THRESHOLD_MS,
+  STATS_DECAY,
+  STATS_HEAT_MULTIPLIER,
+  STATS_RESET_MIN_ENERGY,
+  STATS_RESET_MIN_HUNGER,
+  STATS_RESET_MIN_THIRST,
+  STATS_REST_DECAY_MULTIPLIER,
+  STATS_REST_RATE_OPEN,
+  STATS_REST_RATE_SAFE,
+  STATS_REST_RATE_SHADE,
+  STATS_SHADE_ENERGY_REGEN,
+  STATS_SHELTER_ENERGY_REGEN,
+  STATS_SPEED_PENALTY,
+} from '../../src/systems/StatsSystem'
 
 /**
  * Seconds just above the collapse threshold. Kept in test code (not in the
@@ -34,39 +49,45 @@ describe('StatsSystem', () => {
 
     it('applies hunger < 30 penalty', () => {
       stats.hunger = 25
-      expect(stats.speedMultiplier).toBe(0.8)
+      expect(stats.speedMultiplier).toBe(STATS_SPEED_PENALTY.hunger30)
     })
 
     it('applies hunger < 10 penalty (stronger)', () => {
       stats.hunger = 5
-      expect(stats.speedMultiplier).toBe(0.5)
+      expect(stats.speedMultiplier).toBe(STATS_SPEED_PENALTY.hunger10)
     })
 
     it('applies thirst < 20 penalty', () => {
       stats.thirst = 15
-      expect(stats.speedMultiplier).toBe(0.8)
+      expect(stats.speedMultiplier).toBe(STATS_SPEED_PENALTY.thirst20)
     })
 
     it('applies energy < 20 penalty', () => {
       stats.energy = 10
-      expect(stats.speedMultiplier).toBe(0.7)
+      expect(stats.speedMultiplier).toBe(STATS_SPEED_PENALTY.energy20)
     })
 
     it('cumulates multiple penalties', () => {
       stats.hunger = 5
       stats.thirst = 10
       stats.energy = 10
-      // 0.5 * 0.8 * 0.7 = 0.28
-      expect(stats.speedMultiplier).toBeCloseTo(0.28, 5)
+      const expected =
+        STATS_SPEED_PENALTY.hunger10 *
+        STATS_SPEED_PENALTY.thirst20 *
+        STATS_SPEED_PENALTY.energy20
+      expect(stats.speedMultiplier).toBeCloseTo(expected, 5)
     })
 
     it('floors at 0.25 when cumulative would go lower', () => {
-      // At all-zero: 0.5 * 0.8 * 0.7 = 0.28, still above floor
       stats.hunger = 0
       stats.thirst = 0
       stats.energy = 0
-      expect(stats.speedMultiplier).toBeCloseTo(0.28, 5)
-      expect(stats.speedMultiplier).toBeGreaterThanOrEqual(0.25)
+      const expected =
+        STATS_SPEED_PENALTY.hunger10 *
+        STATS_SPEED_PENALTY.thirst20 *
+        STATS_SPEED_PENALTY.energy20
+      expect(stats.speedMultiplier).toBeCloseTo(expected, 5)
+      expect(stats.speedMultiplier).toBeGreaterThanOrEqual(STATS_SPEED_PENALTY.minMultiplier)
     })
   })
 
@@ -110,29 +131,28 @@ describe('StatsSystem', () => {
 
   describe('update — basic decay', () => {
     it('decays hunger and thirst when idle', () => {
-      stats.update(10, false, false, false, false, false)
-      // hunger: 100 - 0.05 * 10 = 99.5
-      expect(stats.hunger).toBeCloseTo(99.5, 5)
-      // thirst: 100 - 0.1 * 10 = 99.0
-      expect(stats.thirst).toBeCloseTo(99.0, 5)
+      const deltaSec = 10
+      stats.update(deltaSec, false, false, false, false, false)
+      expect(stats.hunger).toBeCloseTo(100 - STATS_DECAY.hunger * deltaSec, 5)
+      expect(stats.thirst).toBeCloseTo(100 - STATS_DECAY.thirst * deltaSec, 5)
     })
 
     it('decays energy at rest rate when idle', () => {
-      stats.update(10, false, false, false, false, false)
-      // energy: 100 - 0.05 * 10 = 99.5
-      expect(stats.energy).toBeCloseTo(99.5, 5)
+      const deltaSec = 10
+      stats.update(deltaSec, false, false, false, false, false)
+      expect(stats.energy).toBeCloseTo(100 - STATS_DECAY.energyRest * deltaSec, 5)
     })
 
     it('decays energy faster when moving', () => {
-      stats.update(10, true, false, false, false, false)
-      // energy: 100 - 0.15 * 10 = 98.5
-      expect(stats.energy).toBeCloseTo(98.5, 5)
+      const deltaSec = 10
+      stats.update(deltaSec, true, false, false, false, false)
+      expect(stats.energy).toBeCloseTo(100 - STATS_DECAY.energyMoving * deltaSec, 5)
     })
 
     it('decays energy fastest when running', () => {
-      stats.update(10, true, true, false, false, false)
-      // energy: 100 - 0.3 * 10 = 97.0
-      expect(stats.energy).toBeCloseTo(97.0, 5)
+      const deltaSec = 10
+      stats.update(deltaSec, true, true, false, false, false)
+      expect(stats.energy).toBeCloseTo(100 - STATS_DECAY.energyRunning * deltaSec, 5)
     })
 
     it('does not update when collapsed', () => {
@@ -149,50 +169,63 @@ describe('StatsSystem', () => {
   })
 
   describe('update — heat modifier', () => {
-    it('increases decay by 1.5x during heat when not in shade', () => {
-      stats.update(10, false, false, true, false, false)
-      // hunger: 100 - 0.05 * 1.5 * 10 = 99.25
-      expect(stats.hunger).toBeCloseTo(99.25, 5)
-      // thirst: 100 - 0.1 * 1.5 * 10 = 98.5
-      expect(stats.thirst).toBeCloseTo(98.5, 5)
+    it('increases decay by heat multiplier during heat when not in shade', () => {
+      const deltaSec = 10
+      stats.update(deltaSec, false, false, true, false, false)
+      expect(stats.hunger).toBeCloseTo(
+        100 - STATS_DECAY.hunger * STATS_HEAT_MULTIPLIER * deltaSec,
+        5,
+      )
+      expect(stats.thirst).toBeCloseTo(
+        100 - STATS_DECAY.thirst * STATS_HEAT_MULTIPLIER * deltaSec,
+        5,
+      )
     })
 
     it('negates heat modifier when in shade', () => {
-      stats.update(10, false, false, true, true, false)
-      // shade cancels heat: heatMod = 1.0
-      expect(stats.hunger).toBeCloseTo(99.5, 5)
-      expect(stats.thirst).toBeCloseTo(99.0, 5)
+      const deltaSec = 10
+      stats.update(deltaSec, false, false, true, true, false)
+      expect(stats.hunger).toBeCloseTo(100 - STATS_DECAY.hunger * deltaSec, 5)
+      expect(stats.thirst).toBeCloseTo(100 - STATS_DECAY.thirst * deltaSec, 5)
     })
   })
 
   describe('update — resting', () => {
     it('regenerates energy at open rate when resting outside', () => {
-      stats.energy = 50
-      stats.update(10, false, false, false, false, false, true)
-      // energy: 50 + 0.5 * 10 = 55
-      expect(stats.energy).toBeCloseTo(55, 5)
+      const deltaSec = 10
+      const start = 50
+      stats.energy = start
+      stats.update(deltaSec, false, false, false, false, false, true)
+      expect(stats.energy).toBeCloseTo(start + STATS_REST_RATE_OPEN * deltaSec, 5)
     })
 
     it('regenerates energy at shade rate when resting in shade', () => {
-      stats.energy = 50
-      stats.update(10, false, false, false, true, false, true)
-      // energy: 50 + 1.0 * 10 = 60
-      expect(stats.energy).toBeCloseTo(60, 5)
+      const deltaSec = 10
+      const start = 50
+      stats.energy = start
+      stats.update(deltaSec, false, false, false, true, false, true)
+      expect(stats.energy).toBeCloseTo(start + STATS_REST_RATE_SHADE * deltaSec, 5)
     })
 
     it('regenerates energy at safe rate when resting in shelter', () => {
-      stats.energy = 50
-      stats.update(10, false, false, false, false, true, true)
-      // energy: 50 + 2.0 * 10 = 70
-      expect(stats.energy).toBeCloseTo(70, 5)
+      const deltaSec = 10
+      const start = 50
+      stats.energy = start
+      stats.update(deltaSec, false, false, false, false, true, true)
+      expect(stats.energy).toBeCloseTo(start + STATS_REST_RATE_SAFE * deltaSec, 5)
     })
 
-    it('reduces hunger/thirst decay to 10% while resting', () => {
-      stats.update(100, false, false, false, false, false, true)
-      // hunger: 100 - 0.05 * 0.1 * 100 = 99.5
-      expect(stats.hunger).toBeCloseTo(99.5, 5)
-      // thirst: 100 - 0.1 * 0.1 * 100 = 99.0
-      expect(stats.thirst).toBeCloseTo(99.0, 5)
+    it('reduces hunger/thirst decay while resting', () => {
+      const deltaSec = 100
+      stats.update(deltaSec, false, false, false, false, false, true)
+      expect(stats.hunger).toBeCloseTo(
+        100 - STATS_DECAY.hunger * STATS_REST_DECAY_MULTIPLIER * deltaSec,
+        5,
+      )
+      expect(stats.thirst).toBeCloseTo(
+        100 - STATS_DECAY.thirst * STATS_REST_DECAY_MULTIPLIER * deltaSec,
+        5,
+      )
     })
 
     it('caps energy at 100', () => {
@@ -204,17 +237,21 @@ describe('StatsSystem', () => {
 
   describe('update — passive shade/shelter regen (idle, not resting)', () => {
     it('regens energy passively in shelter when idle', () => {
-      stats.energy = 50
-      stats.update(10, false, false, false, false, true)
-      // Idle decay: 50 - 0.05*10 = 49.5, then shelter regen: 49.5 + 1.0*10 = 59.5
-      expect(stats.energy).toBeCloseTo(59.5, 5)
+      const deltaSec = 10
+      const start = 50
+      stats.energy = start
+      stats.update(deltaSec, false, false, false, false, true)
+      const afterDecay = start - STATS_DECAY.energyRest * deltaSec
+      expect(stats.energy).toBeCloseTo(afterDecay + STATS_SHELTER_ENERGY_REGEN * deltaSec, 5)
     })
 
     it('regens energy passively in shade when idle', () => {
-      stats.energy = 50
-      stats.update(10, false, false, false, true, false)
-      // Idle decay: 50 - 0.05*10 = 49.5, then shade regen: 49.5 + 0.5*10 = 54.5
-      expect(stats.energy).toBeCloseTo(54.5, 5)
+      const deltaSec = 10
+      const start = 50
+      stats.energy = start
+      stats.update(deltaSec, false, false, false, true, false)
+      const afterDecay = start - STATS_DECAY.energyRest * deltaSec
+      expect(stats.energy).toBeCloseTo(afterDecay + STATS_SHADE_ENERGY_REGEN * deltaSec, 5)
     })
   })
 
@@ -287,9 +324,9 @@ describe('StatsSystem', () => {
 
       stats.resetCollapse()
       expect(stats.collapsed).toBe(false)
-      expect(stats.energy).toBe(30)
-      expect(stats.hunger).toBe(15)
-      expect(stats.thirst).toBe(15)
+      expect(stats.energy).toBe(STATS_RESET_MIN_ENERGY)
+      expect(stats.hunger).toBe(STATS_RESET_MIN_HUNGER)
+      expect(stats.thirst).toBe(STATS_RESET_MIN_THIRST)
     })
 
     it('does not lower stats that are already above minimums', () => {

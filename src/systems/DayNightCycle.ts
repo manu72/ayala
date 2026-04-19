@@ -12,10 +12,10 @@ export interface DayNightPhaseConfig {
 
 /** Canonical phase table (durations, colours, transitions). Exported for tests and tooling. */
 export const DAY_NIGHT_PHASES: Record<TimeOfDay, DayNightPhaseConfig> = {
-  dawn: { color: 0xffcc66, alpha: 0.05, durationMs: 120_000, next: "day", startHour: 6 },
-  day: { color: 0xffffff, alpha: 0.08, durationMs: 120_000, next: "evening", startHour: 10 },
-  evening: { color: 0xff8c00, alpha: 0.15, durationMs: 180_000, next: "night", startHour: 17 },
-  night: { color: 0x000033, alpha: 0.45, durationMs: 120_000, next: "dawn", startHour: 21 },
+  dawn: { color: 0xffcc66, alpha: 0.05, durationMs: 180_000, next: "day", startHour: 6 },
+  day: { color: 0xffffff, alpha: 0.08, durationMs: 180_000, next: "evening", startHour: 10 },
+  evening: { color: 0xff8c00, alpha: 0.15, durationMs: 300_000, next: "night", startHour: 17 },
+  night: { color: 0x000033, alpha: 0.45, durationMs: 180_000, next: "dawn", startHour: 21 },
 };
 
 const TRANSITION_MS = 8_000;
