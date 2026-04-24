@@ -61,7 +61,7 @@ export class StatsSystem {
     return this._collapsed;
   }
 
-  /** Stat-based speed multiplier (cumulative, minimum 0.25). */
+  /** Stat-based speed multiplier (cumulative product of penalties, floored at `STATS_SPEED_PENALTY.minMultiplier`). */
   get speedMultiplier(): number {
     let m = 1.0;
     if (this.hunger < 10) m *= STATS_SPEED_PENALTY.hunger10;
