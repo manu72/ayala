@@ -68,13 +68,16 @@ describe('StatsSystem', () => {
     })
 
     it('cumulates multiple penalties', () => {
-      stats.hunger = 5
+      // hunger30 × thirst20 × energy20 = 0.18 > minMultiplier so this asserts
+      // multiplication, not only the floor (hunger10 × thirst20 × energy20 = 0.09 would floor).
+      stats.hunger = 25
       stats.thirst = 10
       stats.energy = 10
       const raw =
-        STATS_SPEED_PENALTY.hunger10 *
+        STATS_SPEED_PENALTY.hunger30 *
         STATS_SPEED_PENALTY.thirst20 *
         STATS_SPEED_PENALTY.energy20
+      expect(raw).toBeGreaterThan(STATS_SPEED_PENALTY.minMultiplier)
       const expected = Math.max(STATS_SPEED_PENALTY.minMultiplier, raw)
       expect(stats.speedMultiplier).toBeCloseTo(expected, 5)
     })
