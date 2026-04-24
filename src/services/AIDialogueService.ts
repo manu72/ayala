@@ -4,6 +4,7 @@
  */
 
 import { PERSONA_TIER } from "../ai/personas";
+import { isAiDialogueConsoleDebugEnabled } from "../config/aiDialogueDebug";
 import { CAT_DIALOGUE_SCRIPTS } from "../data/cat-dialogue";
 import type { DialogueRequest, DialogueResponse, DialogueService, SpeakerPose } from "./DialogueService";
 
@@ -84,7 +85,13 @@ export class AIDialogueService implements DialogueService {
     const messages = buildMessages(request);
     const temperature = HARSHER_TEMP_SPEAKERS.has(request.speaker) ? 0.6 : 0.8;
 
-    const raw = await this.callLLMWithFallback(systemPrompt, messages, temperature, callOpts);
+    const raw = await this.callLLMWithFallback(
+      systemPrompt,
+      messages,
+      temperature,
+      callOpts,
+      request.speaker,
+    );
     const parsed = parseAIJson(raw);
 
     return {
@@ -102,12 +109,24 @@ export class AIDialogueService implements DialogueService {
     messages: ChatMessage[],
     temperature: number,
     callOpts?: AIDialogueCallOptions,
+    speakerLabel?: string,
   ): Promise<string> {
     const payloadBase = {
       messages: [{ role: "system" as const, content: systemPrompt }, ...messages],
       temperature,
       max_tokens: 150,
     };
+
+    const debugAi = isAiDialogueConsoleDebugEnabled();
+    if (debugAi) {
+      const label = speakerLabel ?? "(unknown speaker)";
+      console.groupCollapsed(`[AIDialogueService] AI debug — input (${label})`);
+      console.log("systemPrompt:\n", systemPrompt);
+      console.log("chat messages (excludes system; appended as first message on wire):\n", messages);
+      console.log("full messages payload (system + chat):\n", payloadBase.messages);
+      console.log("temperature:", payloadBase.temperature, "max_tokens:", payloadBase.max_tokens);
+      console.groupEnd();
+    }
 
     // Primary → secondary failover covers two distinct failure modes:
     //  1. Primary resolved with a retriable HTTP status (5xx / 429 / 401) — see
@@ -130,6 +149,10 @@ export class AIDialogueService implements DialogueService {
 
     if (!res.ok) {
       const errText = await res.text();
+      if (debugAi) {
+        const label = speakerLabel ?? "(unknown speaker)";
+        console.warn(`[AIDialogueService] AI debug — HTTP ${res.status} (${label})`, errText.slice(0, 500));
+      }
       // A non-JSON (HTML) error body almost always means the request never
       // reached the Worker at all — e.g. `VITE_AI_PROXY_URL` points at a
       // static host (GitHub Pages) that served its 404 page instead of the
@@ -149,7 +172,14 @@ export class AIDialogueService implements DialogueService {
     const json = (await res.json()) as ProxyResponseShape;
     const content = json.choices?.[0]?.message?.content;
     if (typeof content !== "string" || content.trim() === "") {
+      if (debugAi) {
+        console.warn("[AIDialogueService] AI debug — output missing/empty", { json });
+      }
       throw new Error("AI response missing message content");
+    }
+    if (debugAi) {
+      const label = speakerLabel ?? "(unknown speaker)";
+      console.log(`[AIDialogueService] AI debug — raw output (${label}):\n`, content);
     }
     return content;
   }
