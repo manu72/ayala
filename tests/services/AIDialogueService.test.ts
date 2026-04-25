@@ -127,6 +127,20 @@ describe("buildSystemPrompt", () => {
     expect(p).toContain('"memoryNote"');
   });
 
+  it("does not emit returning-context instructions for an inferred human first conversation", () => {
+    const req = baseReq();
+    req.speaker = "Camille";
+    req.speakerType = "human";
+    req.gameState.trustWithSpeaker = 0;
+    req.conversationHistory = [];
+
+    const p = buildSystemPrompt("# Camille\nHuman.", req);
+
+    expect(p).toContain("RELATIONSHIP STAGE 1");
+    expect(p).toContain("FIRST CONVERSATION");
+    expect(p).not.toContain("This is not the first conversation");
+  });
+
   it("includes nearbyCat context when provided", () => {
     const req = baseReq();
     req.speaker = "Rose";

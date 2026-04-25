@@ -273,14 +273,18 @@ export function buildSystemPrompt(personaMarkdown: string, request: DialogueRequ
   const relationshipStage = request.relationshipStage ?? inferRelationshipStage(request);
   const relationshipContext = RELATIONSHIP_STAGE_CONTEXT[relationshipStage];
   const memoryContext = buildMemoryContext(request.npcMemories ?? []);
-  const firstConversationContext = request.isFirstConversation
+  const isFirstConversation = request.isFirstConversation ?? relationshipStage === 1;
+  const firstConversationContext = isFirstConversation
     ? [
       "## First Conversation",
       "FIRST CONVERSATION (ONE-TIME INSTRUCTION): This is the very first time you speak with Mamma Cat. Introduce yourself in your own way, be cautious or curious according to your personality, and do not reference shared history. This instruction will not appear again.",
     ].join("\n")
-    : [
+    : request.isFirstConversation === false ? [
       "## Returning Context",
       "This is not the first conversation. Continue naturally from established trust, recent scene facts, and listed memories only.",
+    ].join("\n") : [
+      "## Conversation Continuity",
+      "No explicit first-conversation flag was provided. Use the relationship stage, visible scene facts, and listed memories only.",
     ].join("\n");
   const recentEvents = gs.recentEvents.length > 0
     ? gs.recentEvents.map((event) => `- ${event}`).join("\n")
