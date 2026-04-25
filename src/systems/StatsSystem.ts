@@ -28,20 +28,20 @@ export const STATS_REST_RATE_SAFE = 1.0;
 /** Hunger/thirst decay multiplier while deliberately resting (lower metabolic rate). */
 export const STATS_REST_DECAY_MULTIPLIER = 0.1;
 
-/** Stat thresholds and multipliers for `speedMultiplier`. Exported for tests. */
+/** Stat multipliers for `speedMultiplier`.
+ * Thresholds are hardcoded in the getter speedMultiplier function.
+ * Exported for tests. */
+
 export const STATS_SPEED_PENALTY = {
-  hunger30: 0.8,
-  hunger10: 0.5,
-  thirst20: 0.8,
-  energy20: 0.7,
-  minMultiplier: 0.25,
+  hunger30: 0.6, // reduced from 0.8 to 0.6 19/4/26
+  hunger10: 0.3, // reduced from 0.5 to 0.3 19/4/26
+  thirst20: 0.6, // reduced from 0.8 to 0.6 19/4/26
+  energy20: 0.5, // reduced from 0.7 to 0.5 19/4/26
+  minMultiplier: 0.1, // minimum speed multiplier for exhausted mamma cat reduced from .25 to .1 19/4/26
 } as const;
 
-/** Grace period before collapse triggers.
- * Duration (ms) a stat must be at 0 before collapse triggers. Exported so
- * tests and tooling stay in lockstep with the runtime value; previously hard-
- * coded "15s" / "16s" expectations in tests drifted silently when this value
- * was bumped to 30s. */
+/** Grace period before collapse triggers. This is not the warning screen.
+ * Duration (ms) a stat must be at 0 before collapse triggers. */
 export const COLLAPSE_THRESHOLD_MS = 30_000;
 
 /** Minimum stat floors applied by `resetCollapse()` after recovery. */
@@ -61,7 +61,7 @@ export class StatsSystem {
     return this._collapsed;
   }
 
-  /** Stat-based speed multiplier (cumulative, minimum 0.25). */
+  /** Stat-based speed multiplier (cumulative product of penalties, floored at `STATS_SPEED_PENALTY.minMultiplier`). */
   get speedMultiplier(): number {
     let m = 1.0;
     if (this.hunger < 10) m *= STATS_SPEED_PENALTY.hunger10;
@@ -110,11 +110,7 @@ export class StatsSystem {
     this.thirst = Math.max(0, this.thirst - STATS_DECAY.thirst * heatMod * decayMod * deltaSec);
 
     if (isResting) {
-      const rate = inShelter
-        ? STATS_REST_RATE_SAFE
-        : inShade
-          ? STATS_REST_RATE_SHADE
-          : STATS_REST_RATE_OPEN;
+      const rate = inShelter ? STATS_REST_RATE_SAFE : inShade ? STATS_REST_RATE_SHADE : STATS_REST_RATE_OPEN;
       this.energy = Math.min(100, this.energy + rate * deltaSec);
     } else if (isRunning && this.canRun) {
       this.energy = Math.max(0, this.energy - STATS_DECAY.energyRunning * heatMod * deltaSec);

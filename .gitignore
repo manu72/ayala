@@ -9,3 +9,4 @@ CLAUDE.md
 proxy/.dev.vars
 .cursor/
 .wrangler/
+PROMPT_TEMPLATE_EXAMPLE.md

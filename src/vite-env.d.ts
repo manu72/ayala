@@ -5,6 +5,8 @@ interface ImportMetaEnv {
   readonly VITE_AI_PROXY_URL?: string;
   readonly VITE_AI_PRIMARY?: string;
   readonly VITE_AI_FALLBACK?: string;
+  /** When `"true"`, logs full LLM system prompt, messages, and raw responses (see `src/config/aiDialogueDebug.ts`). */
+  readonly VITE_AI_DEBUG_DIALOGUE?: string;
 }
 
 interface ImportMeta {
