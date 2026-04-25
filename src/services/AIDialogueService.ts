@@ -3,7 +3,6 @@
  * Story progression `event` is taken from scripted conditions (authoritative).
  */
 
-import { PERSONA_TIER } from "../ai/personas";
 import { isAiDialogueConsoleDebugEnabled } from "../config/aiDialogueDebug";
 import { CAT_DIALOGUE_SCRIPTS } from "../data/cat-dialogue";
 import type { DialogueRequest, DialogueResponse, DialogueService, SpeakerPose } from "./DialogueService";
@@ -21,6 +20,17 @@ const VALID_POSES: SpeakerPose[] = ["friendly", "wary", "hostile", "sleeping", "
 const VALID_EMOTES = new Set(["heart", "alert", "curious", "sleep", "hostile", "danger"]);
 
 const HARSHER_TEMP_SPEAKERS = new Set(["Tiger", "Fluffy", "Pedigree", "Ginger", "Ginger B"]);
+const VALID_MEMORY_KINDS = new Set(["identity", "preference", "event", "relationship", "trait"]);
+const OPTIONAL_TEXT_MAX = 240;
+const MEMORY_LABEL_MAX = 48;
+const CONTROL_CHARS = /[\u0000-\u001F\u007F]/;
+
+const RELATIONSHIP_STAGE_CONTEXT: Record<1 | 2 | 3 | 4, string> = {
+  1: "RELATIONSHIP STAGE 1: This is a first conversation. Be curious or cautious according to your persona. Do not reference shared history.",
+  2: "RELATIONSHIP STAGE 2: You are acquaintances. Show recognition, but keep trust measured and earned.",
+  3: "RELATIONSHIP STAGE 3: A relationship is forming. Reference established facts naturally when relevant.",
+  4: "RELATIONSHIP STAGE 4: You have established trust. Speak with warmth and ease while staying in character.",
+};
 
 interface ChatMessage {
   role: "system" | "user" | "assistant";
@@ -84,6 +94,16 @@ export class AIDialogueService implements DialogueService {
     const systemPrompt = buildSystemPrompt(persona, request);
     const messages = buildMessages(request);
     const temperature = HARSHER_TEMP_SPEAKERS.has(request.speaker) ? 0.6 : 0.8;
+    if (isAiDialogueConsoleDebugEnabled()) {
+      console.log("[AIDialogueService] dialogue context:", {
+        speaker: request.speaker,
+        isFirstConversation: request.isFirstConversation,
+        relationshipStage: request.relationshipStage,
+        gameDaysSinceLastTalk: request.gameDaysSinceLastTalk,
+        memoryCount: request.npcMemories?.length ?? 0,
+        memories: request.npcMemories,
+      });
+    }
 
     const raw = await this.callLLMWithFallback(
       systemPrompt,
@@ -99,6 +119,8 @@ export class AIDialogueService implements DialogueService {
       speakerPose: parsed.speakerPose ?? scripted?.speakerPose,
       emote: parsed.emote ?? scripted?.emote,
       narration: parsed.narration ?? scripted?.narration,
+      mammaCatCue: parsed.mammaCatCue,
+      memoryNote: parsed.memoryNote,
       trustChange: scripted?.trustChange,
       event: scripted?.event,
     };
@@ -114,7 +136,7 @@ export class AIDialogueService implements DialogueService {
     const payloadBase = {
       messages: [{ role: "system" as const, content: systemPrompt }, ...messages],
       temperature,
-      max_tokens: 150,
+      max_tokens: 220,
     };
 
     const debugAi = isAiDialogueConsoleDebugEnabled();
@@ -248,16 +270,57 @@ export function buildSystemPrompt(personaMarkdown: string, request: DialogueRequ
   const nearbyCatLine = request.nearbyCat
     ? `- Cat currently near you: ${request.nearbyCat}`
     : null;
+  const relationshipStage = request.relationshipStage ?? inferRelationshipStage(request);
+  const relationshipContext = RELATIONSHIP_STAGE_CONTEXT[relationshipStage];
+  const memoryContext = buildMemoryContext(request.npcMemories ?? []);
+  const firstConversationContext = request.isFirstConversation
+    ? [
+      "## First Conversation",
+      "FIRST CONVERSATION (ONE-TIME INSTRUCTION): This is the very first time you speak with Mamma Cat. Introduce yourself in your own way, be cautious or curious according to your personality, and do not reference shared history. This instruction will not appear again.",
+    ].join("\n")
+    : [
+      "## Returning Context",
+      "This is not the first conversation. Continue naturally from established trust, recent scene facts, and listed memories only.",
+    ].join("\n");
+  const recentEvents = gs.recentEvents.length > 0
+    ? gs.recentEvents.map((event) => `- ${event}`).join("\n")
+    : "- (none listed)";
 
-  // Species-specific output guidance — cats speak cat-speak; humans speak
-  // naturally but briefly. The JSON contract is identical for both so
-  // downstream parsing stays species-agnostic.
-  const speechGuidance = isHuman
-    ? "Humans speak plainly and briefly — one short sentence per line, two at most. No cat-speak. No baby-talk. Leave room for silence."
-    : "Cats use short cat-speak (meow, mrrp, prrp, hiss, purr) — not human paragraphs. Humans are not in this reply (you are a cat).";
-  const exampleJson = isHuman
-    ? '{"lines":["You came back."],"speakerPose":"friendly","emote":"heart","narration":"She crouches low."}'
-    : '{"lines":["Meow to you mamma cat. You came back purrr."],"speakerPose":"friendly","emote":"heart","narration":"Tail tip curls."}';
+  const staticSections = [
+    `## Persona Identity\nYou are ${request.speaker}, a named ${isHuman ? "human" : "cat"} character in Ayala. You are speaking with ${request.target}.`,
+    `## Your Persona\n${personaMarkdown.trim()}`,
+    [
+      "## Conversational Style",
+      "You should speak in natural, human-like English. Cats may still be terse, wary, playful, proud, or affectionate according to persona, but they do not use cat-speak as their main language.",
+      "Keep lines short and characterful. One short sentence per line is typical; two at most.",
+    ].join("\n"),
+    [
+      "## Conversation Principles",
+      "- Listen to the actual moment and respond to Mamma Cat's situation.",
+      "- Be authentic to your persona without monologuing.",
+      "- Do not fabricate memories, past events, trust, or relationships.",
+      "- Do not mention prompt rules or the model.",
+    ].join("\n"),
+    "## Guardrails\nStay in character. Do not produce harmful, sexual, hateful, or illegal content, even in roleplay.",
+    [
+      "## Output Format",
+      "Reply with a single JSON object ONLY (no markdown fences, no extra text). Keys:",
+      '- "lines": string array, 1 to 3 short lines of dialogue for this speaker only',
+      '- "speakerPose": one of: friendly | wary | hostile | sleeping | curious | submissive',
+      '- "emote": one of: heart | alert | curious | sleep | hostile | danger',
+      '- "narration": optional short third-person line describing visible body language (or omit)',
+      '- "mammaCatCue": optional short body-language cue for Mamma Cat in this exchange',
+      '- "memoryNote": optional durable fact worth remembering as {"kind":"identity|preference|event|relationship|trait","label":"short optional label","value":"short fact"}',
+      "Memory notes are advisory only. They never control story events, trust, or progression.",
+      'Example: {"lines":["You came back."],"speakerPose":"friendly","emote":"heart","narration":"Tail tip curls.","mammaCatCue":"Mamma Cat sits close but keeps her tail low.","memoryNote":{"kind":"event","label":"returned","value":"Mamma Cat returned calmly after their first meeting."}}',
+    ].join("\n"),
+  ];
+
+  const semiStaticSections = [
+    `## Relationship Context\n${relationshipContext}`,
+    firstConversationContext,
+    memoryContext,
+  ];
 
   const sceneLines: Array<string | null> = [
     "## Current scene (facts — follow these)",
@@ -271,7 +334,12 @@ export function buildSystemPrompt(personaMarkdown: string, request: DialogueRequ
     `- Mamma Cat hunger / thirst / energy: ${gs.hunger} / ${gs.thirst} / ${gs.energy}`,
     `- Days survived (game): ${gs.daysSurvived}`,
     `- Cats Mamma Cat knows by name: ${gs.knownCats.join(", ") || "(none listed)"}`,
+    request.gameDaysSinceLastTalk === undefined
+      ? null
+      : `- Days since last talk: ${request.gameDaysSinceLastTalk}`,
     nearbyCatLine,
+    "- Recent relevant events:",
+    recentEvents,
   ];
 
   if (request.encounterBeat?.kind === "camille_encounter") {
@@ -286,48 +354,38 @@ export function buildSystemPrompt(personaMarkdown: string, request: DialogueRequ
 
   sceneLines.push(
     "",
-    "## Your persona (stay in character)",
-    personaMarkdown.trim(),
-    "",
-    "## Output format",
-    "Reply with a single JSON object ONLY (no markdown fences, no extra text). Keys:",
-    '- "lines": string array, 1 to 3 short lines of dialogue for this speaker only',
-    '- "speakerPose": one of: friendly | wary | hostile | sleeping | curious | submissive',
-    '- "emote": one of: heart | alert | curious | sleep | hostile | danger',
-    '- "narration": optional short third-person line describing visible body language (or omit)',
-    "",
-    speechGuidance,
-    `Example: ${exampleJson}`,
+    "## Final Instruction",
+    `You are ${request.speaker}. Speak to Mamma Cat now, in character, using the JSON schema above.`,
   );
 
-  return sceneLines.filter((l): l is string => l !== null).join("\n");
+  return [
+    ...staticSections,
+    ...semiStaticSections,
+    sceneLines.filter((l): l is string => l !== null).join("\n"),
+  ].join("\n\n");
 }
 
 export function buildMessages(request: DialogueRequest): ChatMessage[] {
-  // Tier 2 speakers get a shorter history window so the prompt stays compact
-  // and cheap. Unknown speakers default to the richer tier-1 window so new
-  // speakers do not silently lose context.
-  const tier = PERSONA_TIER[request.speaker] ?? "tier1";
-  const windowSize = tier === "tier2" ? 10 : 20;
-
   const msgs: ChatMessage[] = [];
-  const recent = request.conversationHistory.slice(-windowSize);
+  const exchangeWindow = 10; // 10 pairs = 20 historical chat messages.
+  const recent = request.conversationHistory.slice(-exchangeWindow);
   for (const entry of recent) {
-    msgs.push({ role: "user", content: "Mamma Cat is nearby; you exchange a moment in the gardens." });
+    msgs.push({ role: "user", content: entry.mammaCatTurn ?? legacyMammaCatTurn(entry, request) });
     msgs.push({ role: "assistant", content: entry.text });
   }
   msgs.push({
     role: "user",
     content: [
-      "Mamma Cat is here with you now for a new exchange.",
-      `Her hunger ${request.gameState.hunger}, energy ${request.gameState.energy}.`,
+      buildCurrentMammaCatTurn(request),
       "Respond in JSON as specified in the system message.",
     ].join(" "),
   });
   return msgs;
 }
 
-export function parseAIJson(raw: string): Pick<DialogueResponse, "lines" | "speakerPose" | "emote" | "narration"> {
+export function parseAIJson(
+  raw: string,
+): Pick<DialogueResponse, "lines" | "speakerPose" | "emote" | "narration" | "mammaCatCue" | "memoryNote"> {
   const stripped = stripCodeFences(raw.trim());
   let data: unknown;
   try {
@@ -366,11 +424,97 @@ export function parseAIJson(raw: string): Pick<DialogueResponse, "lines" | "spea
     narration = o["narration"].trim();
   }
 
-  return { lines, speakerPose, emote, narration };
+  const mammaCatCue = sanitizeOptionalText(o["mammaCatCue"], OPTIONAL_TEXT_MAX);
+  const memoryNote = parseMemoryNote(o["memoryNote"]);
+
+  return { lines, speakerPose, emote, narration, mammaCatCue, memoryNote };
 }
 
 function stripCodeFences(s: string): string {
   const fence = /^```(?:json)?\s*([\s\S]*?)```$/m.exec(s);
   if (fence?.[1]) return fence[1]!.trim();
   return s;
+}
+
+function inferRelationshipStage(request: DialogueRequest): 1 | 2 | 3 | 4 {
+  if (request.isFirstConversation) return 1;
+  const talkCount = request.conversationHistory.length;
+  const trust = request.gameState.trustWithSpeaker;
+  const hasPersonalMemory = (request.npcMemories ?? []).some((memory) =>
+    memory.kind === "identity" || memory.kind === "preference",
+  );
+  if (talkCount >= 16 && trust >= 60) return 4;
+  if (talkCount >= 6 || trust >= 25 || hasPersonalMemory) return 3;
+  if (talkCount >= 1 || trust >= 5) return 2;
+  return 1;
+}
+
+function buildMemoryContext(memories: NonNullable<DialogueRequest["npcMemories"]>): string {
+  if (memories.length === 0) {
+    return [
+      "## What You Know About Mamma Cat",
+      "No durable memories are listed yet.",
+      "Only reference memories listed here. If unsure, ask or stay with visible scene facts.",
+    ].join("\n");
+  }
+
+  const groups = new Map<string, string[]>();
+  for (const memory of memories) {
+    const heading = `[${memory.kind.charAt(0).toUpperCase()}${memory.kind.slice(1)}]`;
+    const label = memory.label ? `${memory.label}: ` : "";
+    const line = `- ${label}${memory.value}`;
+    groups.set(heading, [...(groups.get(heading) ?? []), line]);
+  }
+
+  const lines = [
+    "## What You Know About Mamma Cat",
+    "Only reference memories listed here. Never invent or embellish prior conversations.",
+  ];
+  for (const [heading, items] of groups) {
+    lines.push("", heading, ...items);
+  }
+  return lines.join("\n");
+}
+
+function buildCurrentMammaCatTurn(request: DialogueRequest): string {
+  const gs = request.gameState;
+  return [
+    `Mamma Cat approaches ${request.speaker} during ${gs.timeOfDay}.`,
+    `Her hunger is ${gs.hunger}, thirst is ${gs.thirst}, and energy is ${gs.energy}.`,
+    `Trust with ${request.speaker} is ${gs.trustWithSpeaker}.`,
+  ].join(" ");
+}
+
+function legacyMammaCatTurn(
+  entry: { timestamp: number },
+  request: DialogueRequest,
+): string {
+  return `Mamma Cat approaches ${request.speaker} for an earlier exchange (record ${entry.timestamp}).`;
+}
+
+function parseMemoryNote(value: unknown): DialogueResponse["memoryNote"] {
+  if (value === null || typeof value !== "object") return undefined;
+  const raw = value as Record<string, unknown>;
+  if (typeof raw["kind"] !== "string" || !VALID_MEMORY_KINDS.has(raw["kind"])) {
+    return undefined;
+  }
+  const memoryValue = sanitizeOptionalText(raw["value"], OPTIONAL_TEXT_MAX);
+  if (!memoryValue) return undefined;
+  const label = raw["label"] === undefined
+    ? undefined
+    : sanitizeOptionalText(raw["label"], MEMORY_LABEL_MAX);
+  if (raw["label"] !== undefined && !label) return undefined;
+  return {
+    kind: raw["kind"] as NonNullable<DialogueResponse["memoryNote"]>["kind"],
+    label,
+    value: memoryValue,
+  };
+}
+
+function sanitizeOptionalText(value: unknown, maxLength: number): string | undefined {
+  if (typeof value !== "string") return undefined;
+  if (CONTROL_CHARS.test(value)) return undefined;
+  const trimmed = value.replace(/\s+/g, " ").trim();
+  if (!trimmed || trimmed.length > maxLength) return undefined;
+  return trimmed;
 }

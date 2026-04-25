@@ -31,8 +31,8 @@ const baseReq = (): DialogueRequest => ({
 
 describe("parseAIJson", () => {
   it("parses minimal valid JSON", () => {
-    const p = parseAIJson(`{"lines":["Mrrp."],"speakerPose":"friendly","emote":"heart"}`);
-    expect(p.lines).toEqual(["Mrrp."]);
+    const p = parseAIJson(`{"lines":["Hello there."],"speakerPose":"friendly","emote":"heart"}`);
+    expect(p.lines).toEqual(["Hello there."]);
     expect(p.speakerPose).toBe("friendly");
     expect(p.emote).toBe("heart");
   });
@@ -61,26 +61,70 @@ describe("parseAIJson", () => {
     const p = parseAIJson('{"lines":["x"],"speakerPose":"dancing"}');
     expect(p.speakerPose).toBeUndefined();
   });
+
+  it("accepts safe optional mammaCatCue and memoryNote fields", () => {
+    const p = parseAIJson(JSON.stringify({
+      lines: ["You came back."],
+      mammaCatCue: "Mamma Cat sits close but keeps her tail low.",
+      memoryNote: {
+        kind: "event",
+        label: "returned",
+        value: "Mamma Cat returned calmly after their first meeting.",
+      },
+    }));
+    expect(p.mammaCatCue).toBe("Mamma Cat sits close but keeps her tail low.");
+    expect(p.memoryNote).toEqual({
+      kind: "event",
+      label: "returned",
+      value: "Mamma Cat returned calmly after their first meeting.",
+    });
+  });
+
+  it("drops malformed optional fields without rejecting the dialogue", () => {
+    const p = parseAIJson(JSON.stringify({
+      lines: ["Still here."],
+      mammaCatCue: "",
+      memoryNote: {
+        kind: "event",
+        label: "x".repeat(80),
+        value: "Unsafe\u0000memory",
+      },
+    }));
+    expect(p.lines).toEqual(["Still here."]);
+    expect(p.mammaCatCue).toBeUndefined();
+    expect(p.memoryNote).toBeUndefined();
+  });
 });
 
 describe("buildSystemPrompt", () => {
-  it("includes persona and scene facts for cats", () => {
-    const p = buildSystemPrompt("# Blacky\nCat.", baseReq());
+  it("includes sectioned persona, scene facts, and human-like guidance for cats", () => {
+    const req = baseReq();
+    req.relationshipStage = 2;
+    req.gameDaysSinceLastTalk = 3;
+    req.gameState.recentEvents = ["Shared shade near the fountain."];
+    const p = buildSystemPrompt("# Blacky\nCat.", req);
     expect(p).toContain("Blacky");
     expect(p).toContain("Chapter: 2");
     expect(p).toContain("Tiger");
     expect(p).toContain("Speaker species: cat");
-    expect(p).toContain("cat-speak");
+    expect(p).toContain("## Your Persona");
+    expect(p).toContain("## Relationship Context");
+    expect(p).toContain("human-like English");
+    expect(p).not.toContain("Cats use short cat-speak");
+    expect(p).toContain("Days since last talk: 3");
+    expect(p).toContain("Shared shade near the fountain.");
   });
 
-  it("gives humans plain-speech guidance and a human example", () => {
+  it("uses unified plain-speech guidance and example for humans", () => {
     const req = baseReq();
     req.speaker = "Camille";
     req.speakerType = "human";
     const p = buildSystemPrompt("# Camille\nHuman.", req);
     expect(p).toContain("Speaker species: human");
-    expect(p).toContain("Humans speak plainly");
+    expect(p).toContain("speak in natural, human-like English");
     expect(p).not.toContain('"Meow to you mamma cat');
+    expect(p).toContain('"mammaCatCue"');
+    expect(p).toContain('"memoryNote"');
   });
 
   it("includes nearbyCat context when provided", () => {
@@ -105,6 +149,40 @@ describe("buildSystemPrompt", () => {
     expect(p).toContain("Encounter 3 of 5");
     expect(p).toContain("Slow blink trust exchange.");
   });
+
+  it("includes first-conversation and memory context without inventing history", () => {
+    const req = baseReq();
+    req.isFirstConversation = true;
+    req.relationshipStage = 1;
+    req.npcMemories = [
+      {
+        npc: "Blacky",
+        kind: "event",
+        label: "first_meeting",
+        value: "Met Mamma Cat on day 1 at dusk.",
+        source: "scripted",
+        createdAt: 1,
+        gameDay: 1,
+      },
+      {
+        npc: "Blacky",
+        kind: "preference",
+        label: "distance",
+        value: "Mamma Cat responds better when Blacky gives her space.",
+        source: "ai",
+        createdAt: 2,
+        gameDay: 2,
+      },
+    ];
+
+    const p = buildSystemPrompt("# Blacky\nCat.", req);
+    expect(p).toContain("FIRST CONVERSATION");
+    expect(p).toContain("do not reference shared history");
+    expect(p).toContain("[Event]");
+    expect(p).toContain("Met Mamma Cat on day 1 at dusk.");
+    expect(p).toContain("[Preference]");
+    expect(p).toContain("Only reference memories listed here");
+  });
 });
 
 describe("buildMessages", () => {
@@ -116,38 +194,41 @@ describe("buildMessages", () => {
     expect(m[m.length - 1]!.role).toBe("user");
   });
 
-  it("uses a 20-turn window for tier-1 speakers (Blacky)", () => {
+  it("caps history at 20 chat messages and renders persisted Mamma Cat turns", () => {
     const req = baseReq();
     req.speaker = "Blacky";
-    req.conversationHistory = Array.from({ length: 25 }, (_, i) => ({
+    req.conversationHistory = Array.from({ length: 12 }, (_, i) => ({
       timestamp: i,
       speaker: "Blacky",
+      mammaCatTurn: `Mamma turn ${i}`,
       text: `line ${i}`,
     }));
     const m = buildMessages(req);
-    // Each history entry contributes 2 messages (user + assistant); plus the
-    // final user turn. 20 turns * 2 + 1 = 41.
-    expect(m.length).toBe(41);
-    // The last assistant echo should be the most recent of the 20 kept.
+    // 10 exchange pairs * 2 messages, plus the final current-scene user turn.
+    expect(m.length).toBe(21);
+    const historyMessages = m.slice(0, -1);
+    expect(historyMessages[0]).toEqual({ role: "user", content: "Mamma turn 2" });
+    expect(historyMessages[1]).toEqual({ role: "assistant", content: "line 2" });
     const assistants = m.filter((x) => x.role === "assistant");
-    expect(assistants[assistants.length - 1]!.content).toBe("line 24");
-    expect(assistants[0]!.content).toBe("line 5");
+    expect(assistants[assistants.length - 1]!.content).toBe("line 11");
   });
 
-  it("uses a 10-turn window for tier-2 speakers (Kish)", () => {
+  it("uses deterministic Mamma Cat fallback turns for legacy history", () => {
     const req = baseReq();
     req.speaker = "Kish";
     req.speakerType = "human";
-    req.conversationHistory = Array.from({ length: 25 }, (_, i) => ({
-      timestamp: i,
+    req.conversationHistory = [{
+      timestamp: 1,
       speaker: "Kish",
-      text: `line ${i}`,
-    }));
+      text: "Earlier line.",
+    }];
     const m = buildMessages(req);
-    // 10 * 2 + 1 = 21.
-    expect(m.length).toBe(21);
-    const assistants = m.filter((x) => x.role === "assistant");
-    expect(assistants[0]!.content).toBe("line 15");
+    expect(m[0]).toMatchObject({
+      role: "user",
+      content: expect.stringContaining("Mamma Cat approaches"),
+    });
+    expect(m[1]).toEqual({ role: "assistant", content: "Earlier line." });
+    expect(m[m.length - 1]!.content).toContain("Respond in JSON");
   });
 });
 
@@ -166,7 +247,7 @@ describe("AIDialogueService.getDialogue", () => {
     const fetchImpl = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
-          choices: [{ message: { content: '{"lines":["Mrrp test"],"speakerPose":"curious","emote":"curious"}' } }],
+          choices: [{ message: { content: '{"lines":["Careful now."],"speakerPose":"curious","emote":"curious","mammaCatCue":"Mamma Cat steps closer.","memoryNote":{"kind":"event","label":"first_step","value":"Mamma Cat stepped closer calmly."},"event":"model_must_not_win","trustChange":99}' } }],
         }),
         { status: 200 },
       ),
@@ -180,8 +261,15 @@ describe("AIDialogueService.getDialogue", () => {
     req.conversationHistory = [];
     req.gameState.trustWithSpeaker = 0;
     const out = await svc.getDialogue(req);
-    expect(out.lines).toEqual(["Mrrp test"]);
+    expect(out.lines).toEqual(["Careful now."]);
     expect(out.event).toBe("blacky_first");
+    expect(out.trustChange).toBe(10);
+    expect(out.mammaCatCue).toBe("Mamma Cat steps closer.");
+    expect(out.memoryNote).toEqual({
+      kind: "event",
+      label: "first_step",
+      value: "Mamma Cat stepped closer calmly.",
+    });
   });
 
   it("retries on 504 with secondary provider", async () => {

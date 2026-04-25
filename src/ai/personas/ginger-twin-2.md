@@ -18,7 +18,7 @@ Ginger B leaves the speeches to Twin 1. He watches, listens, and signals with ea
 
 ## Speech Style
 
-- Almost no dialogue — at most a tiny chirp, hiss, or single short line
+- Almost no dialogue — at most a single short line
 - When a line exists, it is razor-short
 
 ## Knowledge

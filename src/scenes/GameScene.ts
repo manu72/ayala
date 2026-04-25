@@ -39,7 +39,15 @@ import {
 import { AIDialogueService } from "../services/AIDialogueService";
 import { FallbackDialogueService } from "../services/FallbackDialogueService";
 import type { DialogueHooks } from "../systems/DialogueSystem";
-import { storeConversation, getRecentConversations } from "../services/ConversationStore";
+import {
+  storeConversation,
+  getRecentConversations,
+  getConversationCount,
+  getNpcMemories,
+  getLastConversationContext,
+  addNpcMemory,
+  type NpcMemory,
+} from "../services/ConversationStore";
 import { AI_PERSONAS } from "../ai/personas";
 import { CAT_DIALOGUE_SCRIPTS, getRandomColonyLine } from "../data/cat-dialogue";
 import {
@@ -2051,6 +2059,7 @@ export class GameScene extends Phaser.Scene {
       const conversationHistory: ConversationEntry[] = history.map((r) => ({
         timestamp: r.timestamp,
         speaker: r.speaker,
+        mammaCatTurn: r.mammaCatTurn,
         text: r.lines.join(" "),
       }));
 
@@ -2946,6 +2955,7 @@ export class GameScene extends Phaser.Scene {
       const conversationHistory: ConversationEntry[] = history.map((r) => ({
         timestamp: r.timestamp,
         speaker: r.speaker,
+        mammaCatTurn: r.mammaCatTurn,
         text: r.lines.join(" "),
       }));
 
@@ -3354,12 +3364,20 @@ export class GameScene extends Phaser.Scene {
       const name = cat.npcName;
       const trustBefore = this.trust.getCatTrust(name);
 
-      const history = await getRecentConversations(name, 20);
+      const history = await getRecentConversations(name, 10);
       const conversationHistory: ConversationEntry[] = history.map((r) => ({
         timestamp: r.timestamp,
         speaker: r.speaker,
+        mammaCatTurn: r.mammaCatTurn,
         text: r.lines.join(" "),
       }));
+      const conversationCount = await getConversationCount(name);
+      const npcMemories = await getNpcMemories(name, 20);
+      const lastConversation = await getLastConversationContext(name);
+      const gameDaysSinceLastTalk = lastConversation
+        ? Math.max(0, this.dayNight.dayCount - lastConversation.gameDay)
+        : undefined;
+      const isFirstConversation = this.isFirstConversationWithCat(conversationCount, trustBefore);
 
       const request = {
         speaker: name,
@@ -3375,9 +3393,13 @@ export class GameScene extends Phaser.Scene {
           energy: this.stats.energy,
           daysSurvived: this.dayNight.dayCount,
           knownCats: Array.from(this.knownCats),
-          recentEvents: [] as string[],
+          recentEvents: this.buildRecentDialogueEvents(lastConversation, gameDaysSinceLastTalk),
         },
         conversationHistory,
+        isFirstConversation,
+        relationshipStage: this.deriveRelationshipStage(isFirstConversation, conversationCount, trustBefore, npcMemories),
+        npcMemories,
+        gameDaysSinceLastTalk,
       };
 
       const response = await this.dialogueService.getDialogue(request);
@@ -3510,11 +3532,13 @@ export class GameScene extends Phaser.Scene {
     }
 
     // Persist after trust awards so trustAfter matches gameplay state.
+    const mammaCatTurn = this.buildMammaCatTurnForMemory(catName, trustBefore, response.mammaCatCue);
     void storeConversation({
       speaker: catName,
       timestamp: this.dayNight.totalGameTimeMs,
       realTimestamp: Date.now(),
       gameDay: this.dayNight.dayCount,
+      mammaCatTurn,
       lines: response.lines,
       trustBefore,
       trustAfter: this.trust.getCatTrust(catName),
@@ -3528,10 +3552,75 @@ export class GameScene extends Phaser.Scene {
         energy: this.stats.energy,
       },
     });
+    if (response.memoryNote) {
+      void addNpcMemory(catName, {
+        kind: response.memoryNote.kind,
+        label: response.memoryNote.label,
+        value: response.memoryNote.value,
+        source: "ai",
+        gameDay: this.dayNight.dayCount,
+      });
+    }
+    if (event) {
+      void addNpcMemory(catName, {
+        kind: "event",
+        label: isFirst ? "first_meeting" : event,
+        value: isFirst
+          ? `Met Mamma Cat on day ${this.dayNight.dayCount} at ${this.dayNight.currentPhase}.`
+          : `Shared a ${event.replace(/_/g, " ")} exchange on day ${this.dayNight.dayCount}.`,
+        source: "scripted",
+        gameDay: this.dayNight.dayCount,
+      });
+    }
 
     if (isFirst) {
       this.autoSave();
     }
+  }
+
+  private isFirstConversationWithCat(
+    conversationCount: number,
+    trustBefore: number,
+  ): boolean {
+    return conversationCount === 0 && trustBefore < 5;
+  }
+
+  private deriveRelationshipStage(
+    isFirstConversation: boolean,
+    conversationCount: number,
+    trustBefore: number,
+    memories: NpcMemory[],
+  ): 1 | 2 | 3 | 4 {
+    const hasPersonalMemory = memories.some((memory) =>
+      memory.kind === "identity" || memory.kind === "preference",
+    );
+    if (isFirstConversation) return 1;
+    if (conversationCount >= 16 && trustBefore >= 60) return 4;
+    if (conversationCount >= 6 || trustBefore >= 25 || hasPersonalMemory) return 3;
+    return 2;
+  }
+
+  private buildRecentDialogueEvents(
+    lastConversation: { gameDay: number } | null,
+    gameDaysSinceLastTalk: number | undefined,
+  ): string[] {
+    if (!lastConversation || gameDaysSinceLastTalk === undefined) return [];
+    if (gameDaysSinceLastTalk === 0) return ["Mamma Cat already spoke with this NPC today."];
+    if (gameDaysSinceLastTalk === 1) return ["Mamma Cat last spoke with this NPC yesterday."];
+    return [`Mamma Cat last spoke with this NPC ${gameDaysSinceLastTalk} game days ago.`];
+  }
+
+  private buildMammaCatTurnForMemory(
+    catName: string,
+    trustBefore: number,
+    mammaCatCue?: string,
+  ): string {
+    const base = [
+      `Mamma Cat approaches ${catName} during ${this.dayNight.currentPhase}.`,
+      `Her hunger is ${this.stats.hunger}, thirst is ${this.stats.thirst}, and energy is ${this.stats.energy}.`,
+      `Trust with ${catName} before this exchange is ${trustBefore}.`,
+    ].join(" ");
+    return mammaCatCue ? `${base} ${mammaCatCue}` : base;
   }
 
   // ──────────── Snatchers (Task 4) ────────────
