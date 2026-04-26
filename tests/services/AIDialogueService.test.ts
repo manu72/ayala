@@ -164,6 +164,25 @@ describe("buildSystemPrompt", () => {
     expect(p).toContain("Slow blink trust exchange.");
   });
 
+  it("includes rapid same-NPC recency as deliberate continuity context", () => {
+    const req = baseReq();
+    req.speaker = "Jayco Jr";
+    req.isFirstConversation = false;
+    req.conversationRecency = {
+      cadence: "immediate_followup",
+      lastTalkElapsedSeconds: 12,
+      sameNpcTalksInRecentWindow: 3,
+      recentWindowSeconds: 60,
+    };
+
+    const p = buildSystemPrompt("# Jayco Jr\nPlayful.", req);
+
+    expect(p).toContain("## Conversation Timing");
+    expect(p).toContain("You spoke with Mamma Cat about 12 seconds ago.");
+    expect(p).toContain("Mamma Cat has engaged this same NPC 3 times in the last 60 seconds.");
+    expect(p).toContain("Treat rapid repeated engagement as deliberate continuity, not as a mistake or a new scene.");
+  });
+
   it("includes first-conversation and memory context without inventing history", () => {
     const req = baseReq();
     req.isFirstConversation = true;
@@ -245,6 +264,23 @@ describe("buildMessages", () => {
     });
     expect(m[1]).toEqual({ role: "assistant", content: "Earlier line." });
     expect(m[m.length - 1]!.content).toContain("Respond in JSON");
+  });
+
+  it("marks the current Mamma Cat turn as a rapid deliberate follow-up", () => {
+    const req = baseReq();
+    req.speaker = "Jayco Jr";
+    req.isFirstConversation = false;
+    req.conversationRecency = {
+      cadence: "immediate_followup",
+      lastTalkElapsedSeconds: 12,
+      sameNpcTalksInRecentWindow: 2,
+      recentWindowSeconds: 60,
+    };
+
+    const m = buildMessages(req);
+
+    expect(m[m.length - 1]!.content).toContain("This is a deliberate follow-up");
+    expect(m[m.length - 1]!.content).toContain("about 12 seconds after their previous exchange");
   });
 });
 

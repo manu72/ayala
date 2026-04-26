@@ -103,6 +103,7 @@ export class AIDialogueService implements DialogueService {
         isFirstConversation: request.isFirstConversation,
         relationshipStage: request.relationshipStage,
         gameDaysSinceLastTalk: request.gameDaysSinceLastTalk,
+        conversationRecency: request.conversationRecency,
         memoryCount: request.npcMemories?.length ?? 0,
         memories: request.npcMemories,
       });
@@ -292,6 +293,7 @@ export function buildSystemPrompt(personaMarkdown: string, request: DialogueRequ
   const recentEvents = gs.recentEvents.length > 0
     ? gs.recentEvents.map((event) => `- ${event}`).join("\n")
     : "- (none listed)";
+  const conversationTimingContext = buildConversationTimingContext(request.conversationRecency);
 
   const staticSections = [
     `## Persona Identity\nYou are ${request.speaker}, a named ${isHuman ? "human" : "cat"} character in Ayala. You are speaking with ${request.target}.`,
@@ -348,6 +350,10 @@ export function buildSystemPrompt(personaMarkdown: string, request: DialogueRequ
     "- Recent relevant events:",
     recentEvents,
   ];
+
+  if (conversationTimingContext) {
+    sceneLines.push("", conversationTimingContext);
+  }
 
   if (request.encounterBeat?.kind === "camille_encounter") {
     sceneLines.push(
@@ -479,13 +485,42 @@ function buildMemoryContext(memories: NonNullable<DialogueRequest["npcMemories"]
   return lines.join("\n");
 }
 
+function buildConversationTimingContext(
+  recency: DialogueRequest["conversationRecency"],
+): string | null {
+  if (!recency) return null;
+
+  return [
+    "## Conversation Timing",
+    `- You spoke with Mamma Cat about ${formatElapsedSeconds(recency.lastTalkElapsedSeconds)} ago.`,
+    `- Mamma Cat has engaged this same NPC ${recency.sameNpcTalksInRecentWindow} times in the last ${recency.recentWindowSeconds} seconds.`,
+    `- Cadence: ${recency.cadence.replace(/_/g, " ")}.`,
+    "- Treat rapid repeated engagement as deliberate continuity, not as a mistake or a new scene.",
+    "- Continue the existing thread, avoid repeating the last beat, and make the response meaningful rather than merely repetitive.",
+  ].join("\n");
+}
+
 function buildCurrentMammaCatTurn(request: DialogueRequest): string {
   const gs = request.gameState;
   return [
     `Mamma Cat approaches ${request.speaker} during ${gs.timeOfDay}.`,
     `Her hunger is ${gs.hunger}, thirst is ${gs.thirst}, and energy is ${gs.energy}.`,
     `Trust with ${request.speaker} is ${gs.trustWithSpeaker}.`,
-  ].join(" ");
+    buildCurrentTurnRecency(request.conversationRecency),
+  ].filter(Boolean).join(" ");
+}
+
+function buildCurrentTurnRecency(recency: DialogueRequest["conversationRecency"]): string {
+  if (!recency) return "";
+  return `This is a deliberate follow-up about ${formatElapsedSeconds(recency.lastTalkElapsedSeconds)} after their previous exchange.`;
+}
+
+function formatElapsedSeconds(seconds: number): string {
+  if (seconds < 60) return `${seconds} ${seconds === 1 ? "second" : "seconds"}`;
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  if (remainingSeconds === 0) return `${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
+  return `${minutes} ${minutes === 1 ? "minute" : "minutes"} ${remainingSeconds} ${remainingSeconds === 1 ? "second" : "seconds"}`;
 }
 
 function legacyMammaCatTurn(

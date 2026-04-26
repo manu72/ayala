@@ -62,6 +62,7 @@ import { resolveSnatcherSpawnAction } from "../systems/SnatcherSystem";
 import { AudioSystem } from "../systems/AudioSystem";
 import { hasLineOfSightTiles } from "../utils/lineOfSight";
 import { shouldUseHumanAiBubble } from "../utils/humanAiBubbleEligibility";
+import { buildDialogueRecencyContext } from "../utils/dialogueRecency";
 
 const INTERACTION_DISTANCE = GP.INTERACTION_DIST;
 const DIALOGUE_BREAK_DISTANCE = GP.DIALOGUE_BREAK_DIST;
@@ -3404,6 +3405,12 @@ export class GameScene extends Phaser.Scene {
       const gameDaysSinceLastTalk = lastConversation
         ? Math.max(0, this.dayNight.dayCount - lastConversation.gameDay)
         : undefined;
+      const conversationRecency = buildDialogueRecencyContext({
+        history,
+        nowRealTimestamp: Date.now(),
+        nowGameTimestamp: this.dayNight.totalGameTimeMs,
+        currentGameDay: this.dayNight.dayCount,
+      });
       const isFirstConversation = this.isFirstConversationWithCat(conversationCount);
 
       const request = {
@@ -3432,6 +3439,7 @@ export class GameScene extends Phaser.Scene {
         }),
         npcMemories,
         gameDaysSinceLastTalk,
+        conversationRecency,
       };
 
       const response = await this.dialogueService.getDialogue(request);

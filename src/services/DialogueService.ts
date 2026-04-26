@@ -9,6 +9,7 @@
  */
 
 import type { NpcMemory } from "./ConversationStore";
+import type { DialogueRecencyContext } from "../utils/dialogueRecency";
 
 // ── Public Interfaces ───────────────────────────────────────────────
 
@@ -37,6 +38,8 @@ export interface DialogueRequest {
   npcMemories?: NpcMemory[];
   /** Number of in-game days since this NPC last spoke to Mamma Cat. */
   gameDaysSinceLastTalk?: number;
+  /** Same-speaker timing context for deliberate repeated engagement. */
+  conversationRecency?: DialogueRecencyContext;
   /**
    * Optional: name of a nearby cat the speaker is engaging (e.g. a feeder
    * greeting a named cat). Used to flavour ambient bubble lines with the
