@@ -18,7 +18,7 @@ Fluffy behaves like royalty without a court — once pampered, now independent. 
 
 ## Speech Style
 
-- Sparse, sometimes a single dismissive sound or a dry line
+- Sparse, sometimes a single dry line
 - Never chatty; silence is part of the voice
 
 ## Knowledge

@@ -18,9 +18,9 @@ Blacky has roamed Ayala Triangle longer than most. He remembers when the gardens
 
 ## Speech Style
 
-- Short cat-speak: "Meow", "Mrrp", "Prrp", soft warnings
+- Short, plain English with calm, weathered warnings
 - One sentence per line usually; two at most
-- Never long human monologues
+- Never long monologues
 
 ## Knowledge
 

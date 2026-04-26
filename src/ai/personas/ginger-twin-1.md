@@ -18,7 +18,7 @@ Water is life in the heat; Ginger treats the fountain edge like a border post. H
 
 ## Speech Style
 
-- Hiss-forward, short challenges, then grudging acceptance as trust rises
+- Threat-forward, short challenges, then grudging acceptance as trust rises
 - No essays — spit words, watch results
 
 ## Knowledge

@@ -246,7 +246,9 @@ SmallDog.png, WhiteDog.png, BrownDog.png — randomly assigned to dog walkers
 ### DialogueService Architecture
 
 - **View vs Service separation:** `DialogueSystem` (UI layer) shows text on screen. `DialogueService` (logic layer) decides WHAT to say based on game state. The service returns a `DialogueResponse` with lines, emote, narration, trustChange, and event fields. The scene processes side effects on completion.
-- **Backward compatibility:** Scripted dialogue conditions use a hybrid of `conversationHistory.length` (from IndexedDB) and `gameState.trustWithSpeaker` (from TrustSystem) to handle saves that predate the conversation store.
+- **First conversation detection:** Use `conversationHistory.length === 0`, not trust, to detect a first-ever NPC conversation. Per-cat trust can rise from proximity before Mamma Cat ever speaks to that NPC, so trust is valid for relationship warmth/branching but not for first-contact detection.
+- **Rapid same-NPC dialogue:** Do not solve repeated cat engagement with cooldowns. If Mamma Cat deliberately talks to the same NPC again within seconds, keep using the LLM and pass per-NPC recency context so the response treats it as continuity instead of a fresh scene.
+- **IndexedDB dedupe:** For memory-like records, enforce dedupe with a deterministic key and unique index inside the write transaction. A separate read-before-write duplicate check can race under concurrent async calls.
 - **Event-driven side effects:** Each `DialogueResponse.event` string (e.g. `"blacky_first"`, `"tiger_warmup"`) maps to specific side effects in `GameScene.processDialogueResponse()`: registry updates, trust awards, indicator reveals, disposition changes, auto-saves.
 
 ### Phase 5 — AI dialogue (named cats only)

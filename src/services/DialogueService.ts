@@ -8,6 +8,9 @@
  * remains responsible for rendering; this service decides WHAT to say.
  */
 
+import type { NpcMemory } from "./ConversationStore";
+import type { DialogueRecencyContext } from "../utils/dialogueRecency";
+
 // ── Public Interfaces ───────────────────────────────────────────────
 
 export interface DialogueRequest {
@@ -27,6 +30,16 @@ export interface DialogueRequest {
     recentEvents: string[];
   };
   conversationHistory: ConversationEntry[];
+  /** Prompt-only context derived from existing first-meet logic. */
+  isFirstConversation?: boolean;
+  /** Relationship warmth stage for prompt tone. */
+  relationshipStage?: 1 | 2 | 3 | 4;
+  /** Per-NPC memories, already validated by ConversationStore. */
+  npcMemories?: NpcMemory[];
+  /** Number of in-game days since this NPC last spoke to Mamma Cat. */
+  gameDaysSinceLastTalk?: number;
+  /** Same-speaker timing context for deliberate repeated engagement. */
+  conversationRecency?: DialogueRecencyContext;
   /**
    * Optional: name of a nearby cat the speaker is engaging (e.g. a feeder
    * greeting a named cat). Used to flavour ambient bubble lines with the
@@ -48,6 +61,8 @@ export interface DialogueRequest {
 export interface ConversationEntry {
   timestamp: number;
   speaker: string;
+  /** The Mamma Cat side of this previous exchange, if captured. */
+  mammaCatTurn?: string;
   text: string;
 }
 
@@ -58,6 +73,14 @@ export interface DialogueResponse {
   speakerPose?: SpeakerPose;
   emote?: string;
   narration?: string;
+  /** Optional body-language cue describing Mamma Cat's side of this exchange. */
+  mammaCatCue?: string;
+  /** Advisory-only memory suggestion. Never drives story state. */
+  memoryNote?: {
+    kind: NpcMemory["kind"];
+    label?: string;
+    value: string;
+  };
   trustChange?: number;
   event?: string;
 }

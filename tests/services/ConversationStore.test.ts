@@ -10,6 +10,10 @@ import {
   getRecentConversations,
   getConversationCount,
   clearAllConversations,
+  addNpcMemory,
+  getNpcMemories,
+  pruneNpcMemories,
+  getLastConversationContext,
   type ConversationRecord,
 } from '../../src/services/ConversationStore'
 
@@ -24,6 +28,49 @@ function buildRecord(overrides: Partial<ConversationRecord> = {}): ConversationR
     chapter: 1,
     ...overrides,
   }
+}
+
+async function createLegacyV2MemoryStore(records: Array<Record<string, unknown>>): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const request = indexedDB.deleteDatabase('ayala_conversations')
+    request.onsuccess = () => resolve()
+    request.onerror = () => reject(request.error)
+  })
+
+  const db = await new Promise<IDBDatabase>((resolve, reject) => {
+    const request = indexedDB.open('ayala_conversations', 2)
+    request.onupgradeneeded = () => {
+      const db = request.result
+      if (!db.objectStoreNames.contains('conversations')) {
+        const conversations = db.createObjectStore('conversations', {
+          keyPath: 'id',
+          autoIncrement: true,
+        })
+        conversations.createIndex('speaker', 'speaker', { unique: false })
+        conversations.createIndex('timestamp', 'timestamp', { unique: false })
+      }
+      if (!db.objectStoreNames.contains('memories')) {
+        const memories = db.createObjectStore('memories', {
+          keyPath: 'id',
+          autoIncrement: true,
+        })
+        memories.createIndex('npc', 'npc', { unique: false })
+      }
+    }
+    request.onsuccess = () => resolve(request.result)
+    request.onerror = () => reject(request.error)
+  })
+
+  const tx = db.transaction('memories', 'readwrite')
+  const store = tx.objectStore('memories')
+  for (const record of records) {
+    store.add(record)
+  }
+  await new Promise<void>((resolve, reject) => {
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+  })
+  db.close()
 }
 
 describe('ConversationStore — IndexedDB happy path', () => {
@@ -44,13 +91,18 @@ describe('ConversationStore — IndexedDB happy path', () => {
   })
 
   it('storeConversation persists a record retrievable via getRecentConversations', async () => {
-    const rec = buildRecord({ speaker: 'mamma', lines: ['First meeting'] })
+    const rec = buildRecord({
+      speaker: 'mamma',
+      lines: ['First meeting'],
+      mammaCatTurn: 'Mamma Cat pads close at dusk.',
+    })
     await storeConversation(rec)
     const recent = await getRecentConversations('mamma')
     expect(recent).toHaveLength(1)
     expect(recent[0]).toMatchObject({
       speaker: 'mamma',
       lines: ['First meeting'],
+      mammaCatTurn: 'Mamma Cat pads close at dusk.',
       trustAfter: 10,
       chapter: 1,
     })
@@ -129,10 +181,18 @@ describe('ConversationStore — IndexedDB happy path', () => {
   it('clearAllConversations empties the store across all speakers', async () => {
     await storeConversation(buildRecord({ speaker: 'mamma' }))
     await storeConversation(buildRecord({ speaker: 'camille' }))
+    await addNpcMemory('mamma', {
+      kind: 'event',
+      label: 'first_meeting',
+      value: 'Met Mamma Cat on day 1 at day.',
+      source: 'scripted',
+      gameDay: 1,
+    })
     await clearAllConversations()
     expect(await getConversationCount('mamma')).toBe(0)
     expect(await getConversationCount('camille')).toBe(0)
     expect(await getRecentConversations('mamma')).toEqual([])
+    expect(await getNpcMemories('mamma')).toEqual([])
   })
 
   it('filters by speaker when multiple speakers share the store', async () => {
@@ -141,6 +201,153 @@ describe('ConversationStore — IndexedDB happy path', () => {
     await storeConversation(buildRecord({ speaker: 'mamma', lines: ['M2'] }))
     const mammaOnly = await getRecentConversations('mamma')
     expect(mammaOnly.map((r) => r.lines[0])).toEqual(['M1', 'M2'])
+  })
+
+  it('stores validated per-NPC memories, deduplicates normalized values, and prunes by speaker', async () => {
+    await addNpcMemory('Blacky', {
+      kind: 'event',
+      label: 'first_meeting',
+      value: 'Met Mamma Cat on day 1 at dusk.',
+      source: 'scripted',
+      gameDay: 1,
+    })
+    await addNpcMemory('Blacky', {
+      kind: 'event',
+      label: 'first_meeting',
+      value: '  Met Mamma Cat on day 1 at dusk.  ',
+      source: 'ai',
+      gameDay: 1,
+    })
+    await addNpcMemory('Tiger', {
+      kind: 'preference',
+      label: 'space',
+      value: 'Mamma Cat keeps distance when Tiger warns her.',
+      source: 'ai',
+      gameDay: 2,
+    })
+
+    const blackyMemories = await getNpcMemories('Blacky')
+    expect(blackyMemories).toHaveLength(1)
+    expect(blackyMemories[0]).toMatchObject({
+      npc: 'Blacky',
+      kind: 'event',
+      label: 'first_meeting',
+      value: 'Met Mamma Cat on day 1 at dusk.',
+      source: 'scripted',
+    })
+    expect(typeof blackyMemories[0]!.dedupeKey).toBe('string')
+    expect(await getNpcMemories('Tiger')).toHaveLength(1)
+
+    for (let i = 0; i < 25; i++) {
+      await addNpcMemory('Blacky', {
+        kind: 'event',
+        label: `return_${i}`,
+        value: `Return visit ${i}`,
+        source: 'scripted',
+        gameDay: i + 2,
+      })
+    }
+    await pruneNpcMemories('Blacky', 20)
+    const pruned = await getNpcMemories('Blacky', 100)
+    expect(pruned).toHaveLength(20)
+    expect(pruned.map((m) => m.value)).not.toContain('Met Mamma Cat on day 1 at dusk.')
+    expect(pruned[pruned.length - 1]!.value).toBe('Return visit 24')
+  })
+
+  it('deduplicates concurrent memory writes with the unique dedupe key', async () => {
+    await Promise.all(Array.from({ length: 8 }, () =>
+      addNpcMemory('Blacky', {
+        kind: 'event',
+        label: 'first_meeting',
+        value: '  Met Mamma Cat on day 1 at dusk.  ',
+        source: 'ai',
+        gameDay: 1,
+      }),
+    ))
+
+    const blackyMemories = await getNpcMemories('Blacky')
+    expect(blackyMemories).toHaveLength(1)
+    expect(blackyMemories[0]).toMatchObject({
+      npc: 'Blacky',
+      kind: 'event',
+      label: 'first_meeting',
+      value: 'Met Mamma Cat on day 1 at dusk.',
+    })
+  })
+
+  it('backfills dedupe keys when upgrading legacy memory rows', async () => {
+    await createLegacyV2MemoryStore([
+      {
+        npc: 'Blacky',
+        kind: 'event',
+        label: 'first_meeting',
+        value: 'Met Mamma Cat on day 1 at dusk.',
+        source: 'scripted',
+        createdAt: 1,
+        gameDay: 1,
+      },
+    ])
+
+    await addNpcMemory('Blacky', {
+      kind: 'event',
+      label: 'first_meeting',
+      value: '  Met Mamma Cat on day 1 at dusk.  ',
+      source: 'ai',
+      gameDay: 1,
+    })
+
+    const blackyMemories = await getNpcMemories('Blacky')
+    expect(blackyMemories).toHaveLength(1)
+    expect(typeof blackyMemories[0]!.dedupeKey).toBe('string')
+  })
+
+  it('drops invalid memory writes without throwing', async () => {
+    await addNpcMemory('Blacky', {
+      kind: 'secret' as never,
+      label: 'bad',
+      value: 'Should not be stored',
+      source: 'ai',
+      gameDay: 1,
+    })
+    await addNpcMemory('Blacky', {
+      kind: 'trait',
+      label: 'blank',
+      value: '   ',
+      source: 'ai',
+      gameDay: 1,
+    })
+    await addNpcMemory('Blacky', {
+      kind: 'trait',
+      label: 'control',
+      value: 'Unsafe\u0000memory',
+      source: 'ai',
+      gameDay: 1,
+    })
+
+    expect(await getNpcMemories('Blacky')).toEqual([])
+  })
+
+  it('gets last conversation context by latest inserted record rather than game-clock timestamp', async () => {
+    await storeConversation(buildRecord({
+      speaker: 'Blacky',
+      timestamp: 10_000,
+      realTimestamp: 100,
+      gameDay: 8,
+      lines: ['Old run'],
+    }))
+    await storeConversation(buildRecord({
+      speaker: 'Blacky',
+      timestamp: 20,
+      realTimestamp: 200,
+      gameDay: 1,
+      lines: ['New run'],
+    }))
+
+    await expect(getLastConversationContext('Blacky')).resolves.toMatchObject({
+      speaker: 'Blacky',
+      gameDay: 1,
+      lines: ['New run'],
+    })
   })
 })
 
@@ -172,6 +379,10 @@ describe('ConversationStore — silent fallback when IndexedDB is unavailable', 
 
   it('getRecentConversations resolves to [] when IDB.open throws', async () => {
     await expect(getRecentConversations('mamma')).resolves.toEqual([])
+  })
+
+  it('getNpcMemories resolves to [] when IDB.open throws', async () => {
+    await expect(getNpcMemories('mamma')).resolves.toEqual([])
   })
 
   it('clearAllConversations resolves without throwing when IDB.open throws', async () => {

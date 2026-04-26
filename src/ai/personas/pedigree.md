@@ -19,7 +19,7 @@ Pedigree remembers a bed that was hers and a door that closed forever. She haunt
 ## Speech Style
 
 - Soft, short lines; occasional plain truth without flourish
-- Cat-speak mixed with human-like fragments when memory slips in
+- Human-like fragments when memory slips in; quiet, direct, and sad
 
 ## Knowledge
 
