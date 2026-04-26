@@ -3392,15 +3392,17 @@ export class GameScene extends Phaser.Scene {
       const name = cat.npcName;
       const trustBefore = this.trust.getCatTrust(name);
 
-      const history = await getRecentConversations(name, 10);
+      const [history, conversationCount, npcMemories] = await Promise.all([
+        getRecentConversations(name, 10),
+        getConversationCount(name),
+        getNpcMemories(name, 20),
+      ]);
       const conversationHistory: ConversationEntry[] = history.map((r) => ({
         timestamp: r.timestamp,
         speaker: r.speaker,
         mammaCatTurn: r.mammaCatTurn,
         text: r.lines.join(" "),
       }));
-      const conversationCount = await getConversationCount(name);
-      const npcMemories = await getNpcMemories(name, 20);
       const lastConversation = history.length > 0 ? history[history.length - 1]! : null;
       const gameDaysSinceLastTalk = lastConversation
         ? Math.max(0, this.dayNight.dayCount - lastConversation.gameDay)
