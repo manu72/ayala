@@ -84,10 +84,7 @@ export class AIDialogueService implements DialogueService {
     this.defaultTimeoutMs = opts.defaultTimeoutMs ?? 8000;
   }
 
-  async getDialogue(
-    request: DialogueRequest,
-    callOpts?: AIDialogueCallOptions,
-  ): Promise<DialogueResponse> {
+  async getDialogue(request: DialogueRequest, callOpts?: AIDialogueCallOptions): Promise<DialogueResponse> {
     const persona = this.opts.personas[request.speaker];
     if (!persona) {
       throw new Error(`No AI persona loaded for speaker: ${request.speaker}`);
@@ -109,13 +106,7 @@ export class AIDialogueService implements DialogueService {
       });
     }
 
-    const raw = await this.callLLMWithFallback(
-      systemPrompt,
-      messages,
-      temperature,
-      callOpts,
-      request.speaker,
-    );
+    const raw = await this.callLLMWithFallback(systemPrompt, messages, temperature, callOpts, request.speaker);
     const parsed = parseAIJson(raw);
 
     return {
@@ -221,9 +212,7 @@ export class AIDialogueService implements DialogueService {
     // Honour caller abort (e.g. player moves away mid-bubble) by bridging
     // the external signal onto our internal controller.
     const externalSignal = callOpts?.signal;
-    const externalAbort = externalSignal
-      ? () => controller.abort()
-      : null;
+    const externalAbort = externalSignal ? () => controller.abort() : null;
     externalSignal?.addEventListener("abort", externalAbort!);
     try {
       return await this.fetchImpl(this.opts.proxyUrl, {
@@ -251,14 +240,7 @@ function shouldRetryWithFallback(status: number): boolean {
   // (see proxy/src/worker.ts#forwardChat: `status: upstream.status`). Without
   // 401 here, a bad DEEPSEEK_API_KEY skips the documented provider-retry and
   // collapses straight to FallbackDialogueService — see README "Provider retry".
-  return (
-    status === 401 ||
-    status === 429 ||
-    status === 500 ||
-    status === 502 ||
-    status === 503 ||
-    status === 504
-  );
+  return status === 401 || status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
 }
 
 export function matchScriptedResponse(request: DialogueRequest): DialogueResponse | null {
@@ -271,32 +253,31 @@ export function matchScriptedResponse(request: DialogueRequest): DialogueRespons
 export function buildSystemPrompt(personaMarkdown: string, request: DialogueRequest): string {
   const gs = request.gameState;
   const isHuman = request.speakerType === "human";
-  const nearbyCatLine = request.nearbyCat
-    ? `- Cat currently near you: ${request.nearbyCat}`
-    : null;
+  const nearbyCatLine = request.nearbyCat ? `- Cat currently near you: ${request.nearbyCat}` : null;
   const relationshipStage = request.relationshipStage ?? inferRelationshipStage(request);
   const relationshipContext = RELATIONSHIP_STAGE_CONTEXT[relationshipStage];
   const memoryContext = buildMemoryContext(request.npcMemories ?? []);
   const isFirstConversation = request.isFirstConversation ?? relationshipStage === 1;
   const firstConversationContext = isFirstConversation
     ? [
-      "## First Conversation",
-      "FIRST CONVERSATION (ONE-TIME INSTRUCTION): This is the very first time you speak with Mamma Cat. Introduce yourself in your own way, be cautious or curious according to your personality, and do not reference shared history. This instruction will not appear again.",
-    ].join("\n")
-    : request.isFirstConversation === false ? [
-      "## Returning Context",
-      "This is not the first conversation. Continue naturally from established trust, recent scene facts, and listed memories only.",
-    ].join("\n") : [
-      "## Conversation Continuity",
-      "No explicit first-conversation flag was provided. Use the relationship stage, visible scene facts, and listed memories only.",
-    ].join("\n");
-  const recentEvents = gs.recentEvents.length > 0
-    ? gs.recentEvents.map((event) => `- ${event}`).join("\n")
-    : "- (none listed)";
+        "## First Conversation",
+        "FIRST CONVERSATION (ONE-TIME INSTRUCTION): This is the very first time you speak with Mamma Cat. Introduce yourself in your own way, be cautious or curious according to your personality, and do not reference shared history. This instruction will not appear again.",
+      ].join("\n")
+    : request.isFirstConversation === false
+      ? [
+          "## Returning Context",
+          "This is not the first conversation. Continue naturally from established trust, recent scene facts, and listed memories only.",
+        ].join("\n")
+      : [
+          "## Conversation Continuity",
+          "No explicit first-conversation flag was provided. Use the relationship stage, visible scene facts, and listed memories only.",
+        ].join("\n");
+  const recentEvents =
+    gs.recentEvents.length > 0 ? gs.recentEvents.map((event) => `- ${event}`).join("\n") : "- (none listed)";
   const conversationTimingContext = buildConversationTimingContext(request.conversationRecency);
 
   const staticSections = [
-    `## Persona Identity\nYou are ${request.speaker}, a named ${isHuman ? "human" : "cat"} character in Ayala. You are speaking with ${request.target}.`,
+    `## Persona Identity\nYou are ${request.speaker}, a named ${isHuman ? "human" : "cat"} character in Ayala Triangle Gardens. You are speaking with ${request.target}.`,
     `## Your Persona\n${personaMarkdown.trim()}`,
     [
       "## Conversational Style",
@@ -343,9 +324,7 @@ export function buildSystemPrompt(personaMarkdown: string, request: DialogueRequ
     `- Mamma Cat hunger / thirst / energy: ${gs.hunger} / ${gs.thirst} / ${gs.energy}`,
     `- Days survived (game): ${gs.daysSurvived}`,
     `- Cats Mamma Cat knows by name: ${gs.knownCats.join(", ") || "(none listed)"}`,
-    request.gameDaysSinceLastTalk === undefined
-      ? null
-      : `- Days since last talk: ${request.gameDaysSinceLastTalk}`,
+    request.gameDaysSinceLastTalk === undefined ? null : `- Days since last talk: ${request.gameDaysSinceLastTalk}`,
     nearbyCatLine,
     "- Recent relevant events:",
     recentEvents,
@@ -371,11 +350,9 @@ export function buildSystemPrompt(personaMarkdown: string, request: DialogueRequ
     `You are ${request.speaker}. Speak to Mamma Cat now, in character, using the JSON schema above.`,
   );
 
-  return [
-    ...staticSections,
-    ...semiStaticSections,
-    sceneLines.filter((l): l is string => l !== null).join("\n"),
-  ].join("\n\n");
+  return [...staticSections, ...semiStaticSections, sceneLines.filter((l): l is string => l !== null).join("\n")].join(
+    "\n\n",
+  );
 }
 
 export function buildMessages(request: DialogueRequest): ChatMessage[] {
@@ -388,10 +365,7 @@ export function buildMessages(request: DialogueRequest): ChatMessage[] {
   }
   msgs.push({
     role: "user",
-    content: [
-      buildCurrentMammaCatTurn(request),
-      "Respond in JSON as specified in the system message.",
-    ].join(" "),
+    content: [buildCurrentMammaCatTurn(request), "Respond in JSON as specified in the system message."].join(" "),
   });
   return msgs;
 }
@@ -485,9 +459,7 @@ function buildMemoryContext(memories: NonNullable<DialogueRequest["npcMemories"]
   return lines.join("\n");
 }
 
-function buildConversationTimingContext(
-  recency: DialogueRequest["conversationRecency"],
-): string | null {
+function buildConversationTimingContext(recency: DialogueRequest["conversationRecency"]): string | null {
   if (!recency) return null;
 
   return [
@@ -507,7 +479,9 @@ function buildCurrentMammaCatTurn(request: DialogueRequest): string {
     `Her hunger is ${gs.hunger}, thirst is ${gs.thirst}, and energy is ${gs.energy}.`,
     `Trust with ${request.speaker} is ${gs.trustWithSpeaker}.`,
     buildCurrentTurnRecency(request.conversationRecency),
-  ].filter(Boolean).join(" ");
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 function buildCurrentTurnRecency(recency: DialogueRequest["conversationRecency"]): string {
@@ -523,10 +497,7 @@ function formatElapsedSeconds(seconds: number): string {
   return `${minutes} ${minutes === 1 ? "minute" : "minutes"} ${remainingSeconds} ${remainingSeconds === 1 ? "second" : "seconds"}`;
 }
 
-function legacyMammaCatTurn(
-  entry: { timestamp: number },
-  request: DialogueRequest,
-): string {
+function legacyMammaCatTurn(entry: { timestamp: number }, request: DialogueRequest): string {
   return `Mamma Cat approaches ${request.speaker} for an earlier exchange (record ${entry.timestamp}).`;
 }
 
@@ -538,9 +509,7 @@ function parseMemoryNote(value: unknown): DialogueResponse["memoryNote"] {
   }
   const memoryValue = normalizeNpcMemoryText(raw["value"], NPC_MEMORY_VALUE_MAX);
   if (!memoryValue) return undefined;
-  const label = raw["label"] === undefined
-    ? undefined
-    : normalizeNpcMemoryText(raw["label"], NPC_MEMORY_LABEL_MAX);
+  const label = raw["label"] === undefined ? undefined : normalizeNpcMemoryText(raw["label"], NPC_MEMORY_LABEL_MAX);
   if (raw["label"] !== undefined && !label) return undefined;
   return {
     kind: raw["kind"] as NonNullable<DialogueResponse["memoryNote"]>["kind"],

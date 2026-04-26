@@ -98,6 +98,18 @@ const DEFAULT_ZOOM = 2.5;
 const PEEK_ZOOM = 0.8;
 const ZOOM_DURATION = 500;
 
+interface CatDialoguePersistenceSnapshot {
+  timestamp: number;
+  realTimestamp: number;
+  gameDay: number;
+  chapter: number;
+  timeOfDay: string;
+  hunger: number;
+  thirst: number;
+  energy: number;
+  trustBefore: number;
+}
+
 interface NPCEntry {
   cat: NPCCat;
   indicator: ThreatIndicator;
@@ -3391,6 +3403,17 @@ export class GameScene extends Phaser.Scene {
     try {
       const name = cat.npcName;
       const trustBefore = this.trust.getCatTrust(name);
+      const persistenceSnapshot: CatDialoguePersistenceSnapshot = {
+        timestamp: this.dayNight.totalGameTimeMs,
+        realTimestamp: Date.now(),
+        gameDay: this.dayNight.dayCount,
+        chapter: this.chapters.chapter,
+        timeOfDay: this.dayNight.currentPhase,
+        hunger: this.stats.hunger,
+        thirst: this.stats.thirst,
+        energy: this.stats.energy,
+        trustBefore,
+      };
 
       const [history, conversationCount, npcMemories] = await Promise.all([
         getRecentConversations(name, 10),
@@ -3420,14 +3443,14 @@ export class GameScene extends Phaser.Scene {
         speakerType: "cat" as const,
         target: "Mamma Cat",
         gameState: {
-          chapter: this.chapters.chapter,
-          timeOfDay: this.dayNight.currentPhase,
+          chapter: persistenceSnapshot.chapter,
+          timeOfDay: persistenceSnapshot.timeOfDay,
           trustGlobal: this.trust.global,
-          trustWithSpeaker: trustBefore,
-          hunger: this.stats.hunger,
-          thirst: this.stats.thirst,
-          energy: this.stats.energy,
-          daysSurvived: this.dayNight.dayCount,
+          trustWithSpeaker: persistenceSnapshot.trustBefore,
+          hunger: persistenceSnapshot.hunger,
+          thirst: persistenceSnapshot.thirst,
+          energy: persistenceSnapshot.energy,
+          daysSurvived: persistenceSnapshot.gameDay,
           knownCats: Array.from(this.knownCats),
           recentEvents: this.buildRecentDialogueEvents(lastConversation, gameDaysSinceLastTalk),
         },
@@ -3489,7 +3512,7 @@ export class GameScene extends Phaser.Scene {
         this.engagedDialogueNPC = null;
         this.lastDialoguePartner = cat;
         this.lastDialoguePartnerAt = this.time.now;
-        this.processDialogueResponse(cat, name, trustBefore, response);
+        this.processDialogueResponse(cat, name, persistenceSnapshot, response);
       });
     } catch (err) {
       console.error("[GameScene] requestCatDialogue failed:", err);
@@ -3518,7 +3541,12 @@ export class GameScene extends Phaser.Scene {
    * trust awards, registry updates, indicator reveals, disposition
    * changes, conversation storage, and auto-saves.
    */
-  private processDialogueResponse(cat: NPCCat, catName: string, trustBefore: number, response: DialogueResponse): void {
+  private processDialogueResponse(
+    cat: NPCCat,
+    catName: string,
+    snapshot: CatDialoguePersistenceSnapshot,
+    response: DialogueResponse,
+  ): void {
     if (response.emote) {
       this.emotes.show(this, cat, response.emote as EmoteType);
     }
@@ -3574,24 +3602,24 @@ export class GameScene extends Phaser.Scene {
     }
 
     // Persist after trust awards so trustAfter matches gameplay state.
-    const mammaCatTurn = this.buildMammaCatTurnForMemory(catName, trustBefore, response.mammaCatCue);
+    const mammaCatTurn = this.buildMammaCatTurnForMemory(catName, snapshot, response.mammaCatCue);
     void storeConversation({
       speaker: catName,
-      timestamp: this.dayNight.totalGameTimeMs,
-      realTimestamp: Date.now(),
-      gameDay: this.dayNight.dayCount,
+      timestamp: snapshot.timestamp,
+      realTimestamp: snapshot.realTimestamp,
+      gameDay: snapshot.gameDay,
       mammaCatTurn,
       lines: response.lines,
-      trustBefore,
+      trustBefore: snapshot.trustBefore,
       trustAfter: this.trust.getCatTrust(catName),
-      chapter: this.chapters.chapter,
+      chapter: snapshot.chapter,
       gameStateSnapshot: {
         trustWithSpeaker: this.trust.getCatTrust(catName),
         trustGlobal: this.trust.global,
-        timeOfDay: this.dayNight.currentPhase,
-        hunger: this.stats.hunger,
-        thirst: this.stats.thirst,
-        energy: this.stats.energy,
+        timeOfDay: snapshot.timeOfDay,
+        hunger: snapshot.hunger,
+        thirst: snapshot.thirst,
+        energy: snapshot.energy,
       },
     });
     if (response.memoryNote) {
@@ -3600,7 +3628,7 @@ export class GameScene extends Phaser.Scene {
         label: response.memoryNote.label,
         value: response.memoryNote.value,
         source: "ai",
-        gameDay: this.dayNight.dayCount,
+        gameDay: snapshot.gameDay,
       });
     }
     if (event) {
@@ -3608,10 +3636,10 @@ export class GameScene extends Phaser.Scene {
         kind: "event",
         label: isFirst ? "first_meeting" : event,
         value: isFirst
-          ? `Met Mamma Cat on day ${this.dayNight.dayCount} at ${this.dayNight.currentPhase}.`
-          : `Shared a ${event.replace(/_/g, " ")} exchange on day ${this.dayNight.dayCount}.`,
+          ? `Met Mamma Cat on day ${snapshot.gameDay} at ${snapshot.timeOfDay}.`
+          : `Shared a ${event.replace(/_/g, " ")} exchange on day ${snapshot.gameDay}.`,
         source: "scripted",
-        gameDay: this.dayNight.dayCount,
+        gameDay: snapshot.gameDay,
       });
     }
 
@@ -3638,13 +3666,13 @@ export class GameScene extends Phaser.Scene {
 
   private buildMammaCatTurnForMemory(
     catName: string,
-    trustBefore: number,
+    snapshot: CatDialoguePersistenceSnapshot,
     mammaCatCue?: string,
   ): string {
     const base = [
-      `Mamma Cat approaches ${catName} during ${this.dayNight.currentPhase}.`,
-      `Her hunger is ${this.stats.hunger}, thirst is ${this.stats.thirst}, and energy is ${this.stats.energy}.`,
-      `Trust with ${catName} before this exchange is ${trustBefore}.`,
+      `Mamma Cat approaches ${catName} during ${snapshot.timeOfDay}.`,
+      `Her hunger is ${snapshot.hunger}, thirst is ${snapshot.thirst}, and energy is ${snapshot.energy}.`,
+      `Trust with ${catName} before this exchange is ${snapshot.trustBefore}.`,
     ].join(" ");
     return mammaCatCue ? `${base} ${mammaCatCue}` : base;
   }
