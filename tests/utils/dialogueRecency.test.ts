@@ -53,4 +53,22 @@ describe('buildDialogueRecencyContext', () => {
       recentWindowSeconds: 60,
     })
   })
+
+  it('treats next-day conversations as later follow-ups even when wall-clock time is short', () => {
+    const context = buildDialogueRecencyContext({
+      history: [
+        record({ realTimestamp: 55_000, timestamp: 20_000, gameDay: 1 }),
+      ],
+      nowRealTimestamp: 60_000,
+      nowGameTimestamp: 30_000,
+      currentGameDay: 2,
+    })
+
+    expect(context).toEqual({
+      cadence: 'later_followup',
+      lastTalkElapsedSeconds: 5,
+      sameNpcTalksInRecentWindow: 0,
+      recentWindowSeconds: 60,
+    })
+  })
 })

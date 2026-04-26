@@ -37,19 +37,22 @@ export function buildDialogueRecencyContext({
   const last = usingRealTime ? lastConversation.realTimestamp! : lastConversation.timestamp;
   const lastTalkElapsedSeconds = Math.max(0, Math.floor((now - last) / 1000));
   const recentWindowSeconds = RECENT_DIALOGUE_WINDOW_SECONDS;
-  const sameNpcTalksInRecentWindow = history.filter((conversation) => {
+  const isSameGameDay = lastConversation.gameDay === currentGameDay;
+  const sameNpcTalksInRecentWindow = isSameGameDay ? history.filter((conversation) => {
     const then = usingRealTime ? conversation.realTimestamp : conversation.timestamp;
-    return typeof then === "number" && now - then <= recentWindowSeconds * 1000;
-  }).length;
+    return conversation.gameDay === currentGameDay &&
+      typeof then === "number" &&
+      now - then <= recentWindowSeconds * 1000;
+  }).length : 0;
 
   const cadence: DialogueCadence =
-    lastTalkElapsedSeconds <= IMMEDIATE_FOLLOWUP_SECONDS
-      ? "immediate_followup"
-      : lastTalkElapsedSeconds <= recentWindowSeconds
-        ? "recent_followup"
-        : lastConversation.gameDay === currentGameDay
-          ? "same_day_followup"
-          : "later_followup";
+    !isSameGameDay
+      ? "later_followup"
+      : lastTalkElapsedSeconds <= IMMEDIATE_FOLLOWUP_SECONDS
+        ? "immediate_followup"
+        : lastTalkElapsedSeconds <= recentWindowSeconds
+          ? "recent_followup"
+          : "same_day_followup";
 
   return {
     cadence,
