@@ -6,16 +6,20 @@
  * Phase 5: conversation history feeds the AI dialogue service as context.
  */
 
+import {
+  NPC_MEMORY_LABEL_MAX,
+  NPC_MEMORY_VALUE_MAX,
+  isNpcMemoryKind,
+  normalizeNpcMemoryText,
+  type NpcMemoryKind,
+} from "./NpcMemoryValidation";
+
 const DB_NAME = "ayala_conversations";
 const DB_VERSION = 2;
 const CONVERSATIONS_STORE = "conversations";
 const MEMORIES_STORE = "memories";
 
-const VALID_MEMORY_KINDS = ["identity", "preference", "event", "relationship", "trait"] as const;
 const VALID_MEMORY_SOURCES = ["ai", "scripted"] as const;
-const MEMORY_LABEL_MAX = 48;
-const MEMORY_VALUE_MAX = 240;
-const CONTROL_CHARS = /[\u0000-\u001F\u007F]/;
 
 export interface ConversationRecord {
   id?: number;
@@ -43,8 +47,8 @@ export interface ConversationRecord {
   };
 }
 
-export type NpcMemoryKind = typeof VALID_MEMORY_KINDS[number];
 export type NpcMemorySource = typeof VALID_MEMORY_SOURCES[number];
+export type { NpcMemoryKind };
 
 export interface NpcMemory {
   id?: number;
@@ -294,18 +298,18 @@ function sortByInsertion<T extends { id?: number; timestamp?: number }>(items: T
 }
 
 function normalizeMemory(npc: string, memory: NewNpcMemory): NpcMemory | null {
-  const normalizedNpc = normalizeText(npc, MEMORY_LABEL_MAX);
+  const normalizedNpc = normalizeNpcMemoryText(npc, NPC_MEMORY_LABEL_MAX);
   if (!normalizedNpc) return null;
   if (!isValidKind(memory.kind) || !isValidSource(memory.source)) return null;
 
   let label: string | undefined;
   if (memory.label !== undefined) {
-    const normalizedLabel = normalizeText(memory.label, MEMORY_LABEL_MAX);
+    const normalizedLabel = normalizeNpcMemoryText(memory.label, NPC_MEMORY_LABEL_MAX);
     if (!normalizedLabel) return null;
     label = normalizedLabel;
   }
 
-  const value = normalizeText(memory.value, MEMORY_VALUE_MAX);
+  const value = normalizeNpcMemoryText(memory.value, NPC_MEMORY_VALUE_MAX);
   if (!value) return null;
 
   return {
@@ -319,20 +323,12 @@ function normalizeMemory(npc: string, memory: NewNpcMemory): NpcMemory | null {
   };
 }
 
-function normalizeText(value: string, maxLength: number): string | null {
-  if (typeof value !== "string") return null;
-  if (CONTROL_CHARS.test(value)) return null;
-  const trimmed = value.replace(/\s+/g, " ").trim();
-  if (!trimmed || trimmed.length > maxLength) return null;
-  return trimmed;
-}
-
 function normalizeComparable(value: string): string {
   return value.replace(/\s+/g, " ").trim().toLowerCase();
 }
 
 function isValidKind(kind: string): kind is NpcMemoryKind {
-  return VALID_MEMORY_KINDS.includes(kind as NpcMemoryKind);
+  return isNpcMemoryKind(kind);
 }
 
 function isValidSource(source: string): source is NpcMemorySource {

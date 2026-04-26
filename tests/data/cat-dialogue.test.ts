@@ -52,7 +52,7 @@ describe('cat-dialogue — isFirstMeeting (via script conditions)', () => {
     expect(match!.response.event).toBe('blacky_return')
   })
 
-  it('Blacky: returns return dialogue when trust >= 5 (even with no history)', () => {
+  it('Blacky: still returns first dialogue when trust >= 5 but no history exists', () => {
     const req = makeRequest({
       speaker: 'Blacky',
       gameState: {
@@ -62,7 +62,7 @@ describe('cat-dialogue — isFirstMeeting (via script conditions)', () => {
     })
     const scripts = CAT_DIALOGUE_SCRIPTS['Blacky']!
     const match = scripts.find(s => s.condition(req))
-    expect(match!.response.event).toBe('blacky_return')
+    expect(match!.response.event).toBe('blacky_first')
   })
 })
 
@@ -77,7 +77,7 @@ describe('cat-dialogue — talkCount (via Tiger scripts)', () => {
     expect(match!.response.event).toBe('tiger_warmup')
   })
 
-  it('Tiger: trust-based fallback — trust >= 5 but < 15 acts as 1 talk', () => {
+  it('Tiger: no-history interaction remains first contact even if proximity trust exists', () => {
     const req = makeRequest({
       speaker: 'Tiger',
       gameState: {
@@ -87,7 +87,7 @@ describe('cat-dialogue — talkCount (via Tiger scripts)', () => {
     })
     const scripts = CAT_DIALOGUE_SCRIPTS['Tiger']!
     const match = scripts.find(s => s.condition(req))
-    expect(match!.response.event).toBe('tiger_warmup')
+    expect(match!.response.event).toBe('tiger_first')
   })
 
   it('Tiger: third+ talk (talkCount > 1) returns general', () => {

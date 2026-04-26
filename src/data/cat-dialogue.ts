@@ -5,8 +5,9 @@
  * condition wins. Order matters: place specific/early conditions before
  * broad fallbacks.
  *
- * Conditions use a hybrid of conversationHistory length and trust to handle
- * both fresh games and saves that predate the conversation store.
+ * First-meeting conditions use conversation history only. Trust can rise
+ * through proximity before any dialogue, so it is not a reliable "has spoken"
+ * signal. Later relationship branches may still use trust.
  */
 
 import type { DialogueScript, DialogueRequest } from "../services/DialogueService";
@@ -15,16 +16,12 @@ import type { DialogueScript, DialogueRequest } from "../services/DialogueServic
 
 /** True when this is the speaker's first-ever conversation. */
 function isFirstMeeting(req: DialogueRequest): boolean {
-  return req.conversationHistory.length === 0 && req.gameState.trustWithSpeaker < 5;
+  return req.conversationHistory.length === 0;
 }
 
-/** Approximate talk count, using history length with trust-based fallback. */
+/** Conversation count for return-dialogue branching. */
 function talkCount(req: DialogueRequest): number {
-  if (req.conversationHistory.length > 0) return req.conversationHistory.length;
-  // Fallback for saves that predate IndexedDB: estimate from trust
-  if (req.gameState.trustWithSpeaker >= 15) return 2;
-  if (req.gameState.trustWithSpeaker >= 5) return 1;
-  return 0;
+  return req.conversationHistory.length;
 }
 
 // ── Blacky ──────────────────────────────────────────────────────────

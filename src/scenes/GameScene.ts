@@ -3377,7 +3377,7 @@ export class GameScene extends Phaser.Scene {
       const gameDaysSinceLastTalk = lastConversation
         ? Math.max(0, this.dayNight.dayCount - lastConversation.gameDay)
         : undefined;
-      const isFirstConversation = this.isFirstConversationWithCat(conversationCount, trustBefore);
+      const isFirstConversation = this.isFirstConversationWithCat(conversationCount);
 
       const request = {
         speaker: name,
@@ -3580,9 +3580,8 @@ export class GameScene extends Phaser.Scene {
 
   private isFirstConversationWithCat(
     conversationCount: number,
-    trustBefore: number,
   ): boolean {
-    return conversationCount === 0 && trustBefore < 5;
+    return conversationCount === 0;
   }
 
   private deriveRelationshipStage(

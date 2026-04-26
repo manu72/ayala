@@ -6,6 +6,12 @@
 import { isAiDialogueConsoleDebugEnabled } from "../config/aiDialogueDebug";
 import { CAT_DIALOGUE_SCRIPTS } from "../data/cat-dialogue";
 import type { DialogueRequest, DialogueResponse, DialogueService, SpeakerPose } from "./DialogueService";
+import {
+  NPC_MEMORY_LABEL_MAX,
+  NPC_MEMORY_VALUE_MAX,
+  isNpcMemoryKind,
+  normalizeNpcMemoryText,
+} from "./NpcMemoryValidation";
 
 export class AIParseError extends Error {
   constructor(message: string) {
@@ -20,10 +26,6 @@ const VALID_POSES: SpeakerPose[] = ["friendly", "wary", "hostile", "sleeping", "
 const VALID_EMOTES = new Set(["heart", "alert", "curious", "sleep", "hostile", "danger"]);
 
 const HARSHER_TEMP_SPEAKERS = new Set(["Tiger", "Fluffy", "Pedigree", "Ginger", "Ginger B"]);
-const VALID_MEMORY_KINDS = new Set(["identity", "preference", "event", "relationship", "trait"]);
-const OPTIONAL_TEXT_MAX = 240;
-const MEMORY_LABEL_MAX = 48;
-const CONTROL_CHARS = /[\u0000-\u001F\u007F]/;
 
 const RELATIONSHIP_STAGE_CONTEXT: Record<1 | 2 | 3 | 4, string> = {
   1: "RELATIONSHIP STAGE 1: This is a first conversation. Be curious or cautious according to your persona. Do not reference shared history.",
@@ -428,7 +430,7 @@ export function parseAIJson(
     narration = o["narration"].trim();
   }
 
-  const mammaCatCue = sanitizeOptionalText(o["mammaCatCue"], OPTIONAL_TEXT_MAX);
+  const mammaCatCue = normalizeNpcMemoryText(o["mammaCatCue"], NPC_MEMORY_VALUE_MAX);
   const memoryNote = parseMemoryNote(o["memoryNote"]);
 
   return { lines, speakerPose, emote, narration, mammaCatCue, memoryNote };
@@ -499,26 +501,18 @@ function legacyMammaCatTurn(
 function parseMemoryNote(value: unknown): DialogueResponse["memoryNote"] {
   if (value === null || typeof value !== "object") return undefined;
   const raw = value as Record<string, unknown>;
-  if (typeof raw["kind"] !== "string" || !VALID_MEMORY_KINDS.has(raw["kind"])) {
+  if (!isNpcMemoryKind(raw["kind"])) {
     return undefined;
   }
-  const memoryValue = sanitizeOptionalText(raw["value"], OPTIONAL_TEXT_MAX);
+  const memoryValue = normalizeNpcMemoryText(raw["value"], NPC_MEMORY_VALUE_MAX);
   if (!memoryValue) return undefined;
   const label = raw["label"] === undefined
     ? undefined
-    : sanitizeOptionalText(raw["label"], MEMORY_LABEL_MAX);
+    : normalizeNpcMemoryText(raw["label"], NPC_MEMORY_LABEL_MAX);
   if (raw["label"] !== undefined && !label) return undefined;
   return {
     kind: raw["kind"] as NonNullable<DialogueResponse["memoryNote"]>["kind"],
     label,
     value: memoryValue,
   };
-}
-
-function sanitizeOptionalText(value: unknown, maxLength: number): string | undefined {
-  if (typeof value !== "string") return undefined;
-  if (CONTROL_CHARS.test(value)) return undefined;
-  const trimmed = value.replace(/\s+/g, " ").trim();
-  if (!trimmed || trimmed.length > maxLength) return undefined;
-  return trimmed;
 }
