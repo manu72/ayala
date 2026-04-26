@@ -61,6 +61,7 @@ import {
 import { resolveSnatcherSpawnAction } from "../systems/SnatcherSystem";
 import { AudioSystem } from "../systems/AudioSystem";
 import { hasLineOfSightTiles } from "../utils/lineOfSight";
+import { shouldUseHumanAiBubble } from "../utils/humanAiBubbleEligibility";
 
 const INTERACTION_DISTANCE = GP.INTERACTION_DIST;
 const DIALOGUE_BREAK_DISTANCE = GP.DIALOGUE_BREAK_DIST;
@@ -2898,14 +2899,13 @@ export class GameScene extends Phaser.Scene {
    * Show a single greeting bubble above `human` using the best available
    * source in priority order: caller-forced line > AI persona > scripted pool.
    *
-   * AI path: eligible when the human has an `identityName` registered in
-   * `AI_PERSONAS`, its per-human cooldown has elapsed, no other AI bubble is
-   * in flight, and no caller-forced line was passed. On success, stores the
-   * exchange in `ConversationStore` keyed by the identity name so future
-   * bubbles (and engaged dialogue if we ever wire humans to Space) pick up
-   * prior beats. On timeout/failure, quietly falls back to the scripted pool.
+   * AI path: eligible only for close Mamma Cat proximity greetings when the
+   * human has an `identityName` registered in `AI_PERSONAS`, its per-human
+   * cooldown has elapsed, no other AI bubble is in flight, and no caller-forced
+   * line was passed. Greetings aimed at other NPC cats stay scripted so they
+   * do not create Mamma Cat conversation history from offscreen encounters.
    *
-   * Timing: AI path uses a 1.5s budget (vs 8s for engaged cat dialogue) so
+   * Timing: AI path uses a 3.5s budget (vs 8s for engaged cat dialogue) so
    * ambient bubbles never stall the scene. Caller's emote + greeting animation
    * fire synchronously in `updateHumans` regardless of which path is chosen.
    */
@@ -2919,11 +2919,17 @@ export class GameScene extends Phaser.Scene {
     const hasPersona = identity !== null && identity in AI_PERSONAS;
     const now = this.time.now;
     const cooldownUntil = this.humanAiBubbleCooldownUntil.get(human) ?? 0;
-    const aiEligible =
-      hasPersona &&
-      !this.humanAiBubbleInFlight &&
-      now >= cooldownUntil &&
-      this.dialogueService instanceof FallbackDialogueService;
+    const distanceToMammaCat = Phaser.Math.Distance.Between(human.x, human.y, this.player.x, this.player.y);
+    const aiEligible = shouldUseHumanAiBubble({
+      hasPersona,
+      aiServiceAvailable: this.dialogueService instanceof FallbackDialogueService,
+      aiInFlight: this.humanAiBubbleInFlight,
+      now,
+      cooldownUntil,
+      isMammaCatGreeting: opts?.nearNpcCat === undefined,
+      distanceToMammaCat,
+      maxMammaCatDistance: GP.CAT_PERSON_PLAYER_GREET_DIST,
+    });
 
     if (aiEligible && identity !== null) {
       // Per-human cooldown is set up front (regardless of success) so a burst
@@ -2941,7 +2947,8 @@ export class GameScene extends Phaser.Scene {
   /**
    * Ask the AI service for a single ambient line and render it. Falls back to
    * a scripted line on timeout, network failure, parse failure, or if the
-   * human becomes ineligible (off-screen, exited) mid-flight.
+   * human becomes ineligible (off-screen, exited, or no longer near Mamma Cat)
+   * mid-flight.
    */
   private async requestHumanBubbleLine(
     human: HumanNPC,
@@ -2953,7 +2960,7 @@ export class GameScene extends Phaser.Scene {
     this.humanAiBubbleAbort = abort;
 
     const renderFallback = (): void => {
-      if (!human.active || !human.visible) return;
+      if (!human.active || !human.visible || !this.isHumanCloseToMammaCat(human)) return;
       this.renderGreetingBubble(human, this.pickScriptedGreeting(human, nearNpcCat));
     };
 
@@ -2999,7 +3006,7 @@ export class GameScene extends Phaser.Scene {
         { timeoutMs: GameScene.HUMAN_AI_BUBBLE_TIMEOUT_MS, signal: abort.signal },
       );
 
-      if (abort.signal.aborted || !human.active || !human.visible) {
+      if (abort.signal.aborted || !human.active || !human.visible || !this.isHumanCloseToMammaCat(human)) {
         return;
       }
       const line = response.lines[0]?.trim();
@@ -3057,6 +3064,11 @@ export class GameScene extends Phaser.Scene {
     }
     const lines = this.catPersonGreetings[human.humanType] ?? this.catPersonGreetings.feeder!;
     return lines[Math.floor(Math.random() * lines.length)]!;
+  }
+
+  private isHumanCloseToMammaCat(human: HumanNPC): boolean {
+    return Phaser.Math.Distance.Between(human.x, human.y, this.player.x, this.player.y) <=
+      GP.CAT_PERSON_PLAYER_GREET_DIST;
   }
 
   /**
