@@ -2056,7 +2056,7 @@ export class GameScene extends Phaser.Scene {
     if (!("Camille" in AI_PERSONAS)) return null;
 
     try {
-      const history = await getRecentConversations("Camille", 20);
+      const history = await getRecentConversations("Camille", 10);
       const conversationHistory: ConversationEntry[] = history.map((r) => ({
         timestamp: r.timestamp,
         speaker: r.speaker,
