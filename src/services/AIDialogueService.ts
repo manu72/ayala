@@ -6,6 +6,7 @@
 import { isAiDialogueConsoleDebugEnabled } from "../config/aiDialogueDebug";
 import { CAT_DIALOGUE_SCRIPTS } from "../data/cat-dialogue";
 import type { DialogueRequest, DialogueResponse, DialogueService, SpeakerPose } from "./DialogueService";
+import { calculateRelationshipStage, type RelationshipStage } from "./DialogueRelationship";
 import {
   NPC_MEMORY_LABEL_MAX,
   NPC_MEMORY_VALUE_MAX,
@@ -27,18 +28,12 @@ const VALID_EMOTES = new Set(["heart", "alert", "curious", "sleep", "hostile", "
 
 const HARSHER_TEMP_SPEAKERS = new Set(["Tiger", "Fluffy", "Pedigree", "Ginger", "Ginger B"]);
 
-const RELATIONSHIP_STAGE_CONTEXT: Record<1 | 2 | 3 | 4, string> = {
+const RELATIONSHIP_STAGE_CONTEXT: Record<RelationshipStage, string> = {
   1: "RELATIONSHIP STAGE 1: This is a first conversation. Be curious or cautious according to your persona. Do not reference shared history.",
   2: "RELATIONSHIP STAGE 2: You are acquaintances. Show recognition, but keep trust measured and earned.",
   3: "RELATIONSHIP STAGE 3: A relationship is forming. Reference established facts naturally when relevant.",
   4: "RELATIONSHIP STAGE 4: You have established trust. Speak with warmth and ease while staying in character.",
 };
-const RELATIONSHIP_STAGE_4_MIN_TALKS = 16;
-const RELATIONSHIP_STAGE_4_MIN_TRUST = 60;
-const RELATIONSHIP_STAGE_3_MIN_TALKS = 6;
-const RELATIONSHIP_STAGE_3_MIN_TRUST = 25;
-const RELATIONSHIP_STAGE_2_MIN_TALKS = 1;
-const RELATIONSHIP_STAGE_2_MIN_TRUST = 5;
 
 interface ChatMessage {
   role: "system" | "user" | "assistant";
@@ -448,17 +443,13 @@ function stripCodeFences(s: string): string {
   return s;
 }
 
-function inferRelationshipStage(request: DialogueRequest): 1 | 2 | 3 | 4 {
-  if (request.isFirstConversation) return 1;
-  const talkCount = request.conversationHistory.length;
-  const trust = request.gameState.trustWithSpeaker;
-  const hasPersonalMemory = (request.npcMemories ?? []).some((memory) =>
-    memory.kind === "identity" || memory.kind === "preference",
-  );
-  if (talkCount >= RELATIONSHIP_STAGE_4_MIN_TALKS && trust >= RELATIONSHIP_STAGE_4_MIN_TRUST) return 4;
-  if (talkCount >= RELATIONSHIP_STAGE_3_MIN_TALKS || trust >= RELATIONSHIP_STAGE_3_MIN_TRUST || hasPersonalMemory) return 3;
-  if (talkCount >= RELATIONSHIP_STAGE_2_MIN_TALKS || trust >= RELATIONSHIP_STAGE_2_MIN_TRUST) return 2;
-  return 1;
+function inferRelationshipStage(request: DialogueRequest): RelationshipStage {
+  return calculateRelationshipStage({
+    isFirstConversation: request.isFirstConversation,
+    conversationCount: request.conversationHistory.length,
+    trustWithSpeaker: request.gameState.trustWithSpeaker,
+    memories: request.npcMemories,
+  });
 }
 
 function buildMemoryContext(memories: NonNullable<DialogueRequest["npcMemories"]>): string {

@@ -36,6 +36,7 @@ import {
   type DialogueResponse,
   type ConversationEntry,
 } from "../services/DialogueService";
+import { calculateRelationshipStage } from "../services/DialogueRelationship";
 import { AIDialogueService } from "../services/AIDialogueService";
 import { FallbackDialogueService } from "../services/FallbackDialogueService";
 import type { DialogueHooks } from "../systems/DialogueSystem";
@@ -46,7 +47,6 @@ import {
   getNpcMemories,
   getLastConversationContext,
   addNpcMemory,
-  type NpcMemory,
 } from "../services/ConversationStore";
 import { AI_PERSONAS } from "../ai/personas";
 import { CAT_DIALOGUE_SCRIPTS, getRandomColonyLine } from "../data/cat-dialogue";
@@ -2062,6 +2062,8 @@ export class GameScene extends Phaser.Scene {
         mammaCatTurn: r.mammaCatTurn,
         text: r.lines.join(" "),
       }));
+      const conversationCount = await getConversationCount("Camille");
+      const isFirstConversation = conversationCount === 0;
 
       const request: DialogueRequest = {
         speaker: "Camille",
@@ -2080,6 +2082,12 @@ export class GameScene extends Phaser.Scene {
           recentEvents: [],
         },
         conversationHistory,
+        isFirstConversation,
+        relationshipStage: calculateRelationshipStage({
+          isFirstConversation,
+          conversationCount,
+          trustWithSpeaker: this.trust.global,
+        }),
         encounterBeat: { kind: "camille_encounter", n, objective },
       };
 
@@ -2958,6 +2966,8 @@ export class GameScene extends Phaser.Scene {
         mammaCatTurn: r.mammaCatTurn,
         text: r.lines.join(" "),
       }));
+      const conversationCount = await getConversationCount(speaker);
+      const isFirstConversation = conversationCount === 0;
 
       const request: DialogueRequest = {
         speaker,
@@ -2976,6 +2986,12 @@ export class GameScene extends Phaser.Scene {
           recentEvents: [],
         },
         conversationHistory,
+        isFirstConversation,
+        relationshipStage: calculateRelationshipStage({
+          isFirstConversation,
+          conversationCount,
+          trustWithSpeaker: this.trust.global,
+        }),
         nearbyCat: nearNpcCat?.npcName,
       };
 
@@ -3397,7 +3413,12 @@ export class GameScene extends Phaser.Scene {
         },
         conversationHistory,
         isFirstConversation,
-        relationshipStage: this.deriveRelationshipStage(isFirstConversation, conversationCount, trustBefore, npcMemories),
+        relationshipStage: calculateRelationshipStage({
+          isFirstConversation,
+          conversationCount,
+          trustWithSpeaker: trustBefore,
+          memories: npcMemories,
+        }),
         npcMemories,
         gameDaysSinceLastTalk,
       };
@@ -3582,21 +3603,6 @@ export class GameScene extends Phaser.Scene {
     conversationCount: number,
   ): boolean {
     return conversationCount === 0;
-  }
-
-  private deriveRelationshipStage(
-    isFirstConversation: boolean,
-    conversationCount: number,
-    trustBefore: number,
-    memories: NpcMemory[],
-  ): 1 | 2 | 3 | 4 {
-    const hasPersonalMemory = memories.some((memory) =>
-      memory.kind === "identity" || memory.kind === "preference",
-    );
-    if (isFirstConversation) return 1;
-    if (conversationCount >= 16 && trustBefore >= 60) return 4;
-    if (conversationCount >= 6 || trustBefore >= 25 || hasPersonalMemory) return 3;
-    return 2;
   }
 
   private buildRecentDialogueEvents(
