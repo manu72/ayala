@@ -45,7 +45,6 @@ import {
   getRecentConversations,
   getConversationCount,
   getNpcMemories,
-  getLastConversationContext,
   addNpcMemory,
 } from "../services/ConversationStore";
 import { AI_PERSONAS } from "../ai/personas";
@@ -3389,7 +3388,7 @@ export class GameScene extends Phaser.Scene {
       }));
       const conversationCount = await getConversationCount(name);
       const npcMemories = await getNpcMemories(name, 20);
-      const lastConversation = await getLastConversationContext(name);
+      const lastConversation = history.length > 0 ? history[history.length - 1]! : null;
       const gameDaysSinceLastTalk = lastConversation
         ? Math.max(0, this.dayNight.dayCount - lastConversation.gameDay)
         : undefined;

@@ -30,6 +30,49 @@ function buildRecord(overrides: Partial<ConversationRecord> = {}): ConversationR
   }
 }
 
+async function createLegacyV2MemoryStore(records: Array<Record<string, unknown>>): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const request = indexedDB.deleteDatabase('ayala_conversations')
+    request.onsuccess = () => resolve()
+    request.onerror = () => reject(request.error)
+  })
+
+  const db = await new Promise<IDBDatabase>((resolve, reject) => {
+    const request = indexedDB.open('ayala_conversations', 2)
+    request.onupgradeneeded = () => {
+      const db = request.result
+      if (!db.objectStoreNames.contains('conversations')) {
+        const conversations = db.createObjectStore('conversations', {
+          keyPath: 'id',
+          autoIncrement: true,
+        })
+        conversations.createIndex('speaker', 'speaker', { unique: false })
+        conversations.createIndex('timestamp', 'timestamp', { unique: false })
+      }
+      if (!db.objectStoreNames.contains('memories')) {
+        const memories = db.createObjectStore('memories', {
+          keyPath: 'id',
+          autoIncrement: true,
+        })
+        memories.createIndex('npc', 'npc', { unique: false })
+      }
+    }
+    request.onsuccess = () => resolve(request.result)
+    request.onerror = () => reject(request.error)
+  })
+
+  const tx = db.transaction('memories', 'readwrite')
+  const store = tx.objectStore('memories')
+  for (const record of records) {
+    store.add(record)
+  }
+  await new Promise<void>((resolve, reject) => {
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+  })
+  db.close()
+}
+
 describe('ConversationStore — IndexedDB happy path', () => {
   // Capture the process-global IDB installed by fake-indexeddb/auto so that
   // swapping it for a fresh factory per-test does not leak into later
@@ -192,6 +235,7 @@ describe('ConversationStore — IndexedDB happy path', () => {
       value: 'Met Mamma Cat on day 1 at dusk.',
       source: 'scripted',
     })
+    expect(typeof blackyMemories[0]!.dedupeKey).toBe('string')
     expect(await getNpcMemories('Tiger')).toHaveLength(1)
 
     for (let i = 0; i < 25; i++) {
@@ -208,6 +252,53 @@ describe('ConversationStore — IndexedDB happy path', () => {
     expect(pruned).toHaveLength(20)
     expect(pruned.map((m) => m.value)).not.toContain('Met Mamma Cat on day 1 at dusk.')
     expect(pruned[pruned.length - 1]!.value).toBe('Return visit 24')
+  })
+
+  it('deduplicates concurrent memory writes with the unique dedupe key', async () => {
+    await Promise.all(Array.from({ length: 8 }, () =>
+      addNpcMemory('Blacky', {
+        kind: 'event',
+        label: 'first_meeting',
+        value: '  Met Mamma Cat on day 1 at dusk.  ',
+        source: 'ai',
+        gameDay: 1,
+      }),
+    ))
+
+    const blackyMemories = await getNpcMemories('Blacky')
+    expect(blackyMemories).toHaveLength(1)
+    expect(blackyMemories[0]).toMatchObject({
+      npc: 'Blacky',
+      kind: 'event',
+      label: 'first_meeting',
+      value: 'Met Mamma Cat on day 1 at dusk.',
+    })
+  })
+
+  it('backfills dedupe keys when upgrading legacy memory rows', async () => {
+    await createLegacyV2MemoryStore([
+      {
+        npc: 'Blacky',
+        kind: 'event',
+        label: 'first_meeting',
+        value: 'Met Mamma Cat on day 1 at dusk.',
+        source: 'scripted',
+        createdAt: 1,
+        gameDay: 1,
+      },
+    ])
+
+    await addNpcMemory('Blacky', {
+      kind: 'event',
+      label: 'first_meeting',
+      value: '  Met Mamma Cat on day 1 at dusk.  ',
+      source: 'ai',
+      gameDay: 1,
+    })
+
+    const blackyMemories = await getNpcMemories('Blacky')
+    expect(blackyMemories).toHaveLength(1)
+    expect(typeof blackyMemories[0]!.dedupeKey).toBe('string')
   })
 
   it('drops invalid memory writes without throwing', async () => {

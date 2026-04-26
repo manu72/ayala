@@ -247,6 +247,7 @@ SmallDog.png, WhiteDog.png, BrownDog.png — randomly assigned to dog walkers
 
 - **View vs Service separation:** `DialogueSystem` (UI layer) shows text on screen. `DialogueService` (logic layer) decides WHAT to say based on game state. The service returns a `DialogueResponse` with lines, emote, narration, trustChange, and event fields. The scene processes side effects on completion.
 - **First conversation detection:** Use `conversationHistory.length === 0`, not trust, to detect a first-ever NPC conversation. Per-cat trust can rise from proximity before Mamma Cat ever speaks to that NPC, so trust is valid for relationship warmth/branching but not for first-contact detection.
+- **IndexedDB dedupe:** For memory-like records, enforce dedupe with a deterministic key and unique index inside the write transaction. A separate read-before-write duplicate check can race under concurrent async calls.
 - **Event-driven side effects:** Each `DialogueResponse.event` string (e.g. `"blacky_first"`, `"tiger_warmup"`) maps to specific side effects in `GameScene.processDialogueResponse()`: registry updates, trust awards, indicator reveals, disposition changes, auto-saves.
 
 ### Phase 5 — AI dialogue (named cats only)

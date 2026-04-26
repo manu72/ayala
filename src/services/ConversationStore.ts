@@ -15,9 +15,10 @@ import {
 } from "./NpcMemoryValidation";
 
 const DB_NAME = "ayala_conversations";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const CONVERSATIONS_STORE = "conversations";
 const MEMORIES_STORE = "memories";
+const MEMORY_DEDUPE_INDEX = "byDedupe";
 
 const VALID_MEMORY_SOURCES = ["ai", "scripted"] as const;
 
@@ -56,12 +57,13 @@ export interface NpcMemory {
   kind: NpcMemoryKind;
   label?: string;
   value: string;
+  dedupeKey: string;
   source: NpcMemorySource;
   createdAt: number;
   gameDay: number;
 }
 
-export type NewNpcMemory = Omit<NpcMemory, "id" | "npc" | "createdAt"> & {
+export type NewNpcMemory = Omit<NpcMemory, "id" | "npc" | "createdAt" | "dedupeKey"> & {
   createdAt?: number;
 };
 
@@ -85,11 +87,36 @@ function openDB(): Promise<IDBDatabase> {
           autoIncrement: true,
         });
         store.createIndex("npc", "npc", { unique: false });
+        store.createIndex(MEMORY_DEDUPE_INDEX, "dedupeKey", { unique: true });
+      } else {
+        const store = request.transaction!.objectStore(MEMORIES_STORE);
+        if (!store.indexNames.contains("npc")) {
+          store.createIndex("npc", "npc", { unique: false });
+        }
+        if (!store.indexNames.contains(MEMORY_DEDUPE_INDEX)) {
+          store.createIndex(MEMORY_DEDUPE_INDEX, "dedupeKey", { unique: true });
+          backfillMemoryDedupeKeys(store);
+        }
       }
     };
 
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
+  });
+}
+
+function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+function transactionComplete(tx: IDBTransaction): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
   });
 }
 
@@ -224,23 +251,27 @@ export async function addNpcMemory(
     const normalized = normalizeMemory(npc, memory);
     if (!normalized) return;
 
-    const existing = await getNpcMemories(normalized.npc, 1000);
-    const duplicate = existing.some((item) =>
-      item.kind === normalized.kind &&
-      (item.label ?? "") === (normalized.label ?? "") &&
-      normalizeComparable(item.value) === normalizeComparable(normalized.value),
-    );
-    if (duplicate) return;
-
     const db = await openDB();
-    const tx = db.transaction(MEMORIES_STORE, "readwrite");
-    tx.objectStore(MEMORIES_STORE).add(normalized);
-    await new Promise<void>((resolve, reject) => {
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-    db.close();
-    await pruneNpcMemories(normalized.npc, 20);
+    let inserted = false;
+    try {
+      const tx = db.transaction(MEMORIES_STORE, "readwrite");
+      const store = tx.objectStore(MEMORIES_STORE);
+      const existingRequest = store.index(MEMORY_DEDUPE_INDEX).get(normalized.dedupeKey);
+      const existing = await requestToPromise<NpcMemory | undefined>(
+        existingRequest as IDBRequest<NpcMemory | undefined>,
+      );
+
+      if (!existing) {
+        await requestToPromise(store.add(normalized));
+        inserted = true;
+      }
+
+      await transactionComplete(tx);
+    } finally {
+      db.close();
+    }
+
+    if (inserted) await pruneNpcMemories(normalized.npc, 20);
   } catch {
     // Non-critical
   }
@@ -297,6 +328,31 @@ function sortByInsertion<T extends { id?: number; timestamp?: number }>(items: T
   });
 }
 
+function backfillMemoryDedupeKeys(store: IDBObjectStore): void {
+  const seen = new Set<string>();
+  const request = store.openCursor();
+
+  request.onsuccess = () => {
+    const cursor = request.result;
+    if (!cursor) return;
+
+    const memory = cursor.value as Partial<NpcMemory>;
+    if (typeof memory.dedupeKey === "string" && memory.dedupeKey) {
+      seen.add(memory.dedupeKey);
+      cursor.continue();
+      return;
+    }
+
+    const canonicalKey = buildStoredMemoryDedupeKey(memory);
+    const dedupeKey = canonicalKey && !seen.has(canonicalKey)
+      ? canonicalKey
+      : `legacy:${String(cursor.primaryKey)}`;
+    seen.add(dedupeKey);
+    cursor.update({ ...memory, dedupeKey });
+    cursor.continue();
+  };
+}
+
 function normalizeMemory(npc: string, memory: NewNpcMemory): NpcMemory | null {
   const normalizedNpc = normalizeNpcMemoryText(npc, NPC_MEMORY_LABEL_MAX);
   if (!normalizedNpc) return null;
@@ -317,10 +373,33 @@ function normalizeMemory(npc: string, memory: NewNpcMemory): NpcMemory | null {
     kind: memory.kind,
     label,
     value,
+    dedupeKey: buildMemoryDedupeKey(normalizedNpc, memory.kind, label, value),
     source: memory.source,
     createdAt: memory.createdAt ?? Date.now(),
     gameDay: memory.gameDay,
   };
+}
+
+function buildStoredMemoryDedupeKey(memory: Partial<NpcMemory>): string | null {
+  const npc = normalizeNpcMemoryText(memory.npc, NPC_MEMORY_LABEL_MAX);
+  const value = normalizeNpcMemoryText(memory.value, NPC_MEMORY_VALUE_MAX);
+  if (!npc || !value || typeof memory.kind !== "string" || !isValidKind(memory.kind)) {
+    return null;
+  }
+  const label = memory.label === undefined
+    ? undefined
+    : normalizeNpcMemoryText(memory.label, NPC_MEMORY_LABEL_MAX);
+  if (memory.label !== undefined && !label) return null;
+  return buildMemoryDedupeKey(npc, memory.kind, label, value);
+}
+
+function buildMemoryDedupeKey(
+  npc: string,
+  kind: NpcMemoryKind,
+  label: string | undefined,
+  value: string,
+): string {
+  return JSON.stringify([npc, kind, label ?? "", normalizeComparable(value)]);
 }
 
 function normalizeComparable(value: string): string {
