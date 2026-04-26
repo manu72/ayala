@@ -198,13 +198,6 @@ export async function getRecentConversations(
   }
 }
 
-export async function getLastConversationContext(
-  speaker: string,
-): Promise<ConversationRecord | null> {
-  const recent = await getRecentConversations(speaker, 1);
-  return recent[0] ?? null;
-}
-
 export async function getConversationCount(speaker: string): Promise<number> {
   try {
     const db = await openDB();

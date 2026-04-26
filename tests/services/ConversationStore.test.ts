@@ -13,7 +13,6 @@ import {
   addNpcMemory,
   getNpcMemories,
   pruneNpcMemories,
-  getLastConversationContext,
   type ConversationRecord,
 } from '../../src/services/ConversationStore'
 
@@ -327,28 +326,6 @@ describe('ConversationStore — IndexedDB happy path', () => {
     expect(await getNpcMemories('Blacky')).toEqual([])
   })
 
-  it('gets last conversation context by latest inserted record rather than game-clock timestamp', async () => {
-    await storeConversation(buildRecord({
-      speaker: 'Blacky',
-      timestamp: 10_000,
-      realTimestamp: 100,
-      gameDay: 8,
-      lines: ['Old run'],
-    }))
-    await storeConversation(buildRecord({
-      speaker: 'Blacky',
-      timestamp: 20,
-      realTimestamp: 200,
-      gameDay: 1,
-      lines: ['New run'],
-    }))
-
-    await expect(getLastConversationContext('Blacky')).resolves.toMatchObject({
-      speaker: 'Blacky',
-      gameDay: 1,
-      lines: ['New run'],
-    })
-  })
 })
 
 describe('ConversationStore — silent fallback when IndexedDB is unavailable', () => {
