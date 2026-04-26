@@ -67,9 +67,7 @@ export class StartScene extends Phaser.Scene {
     newBtn.on("pointerover", () => newBtn.setColor("#cccccc"));
     newBtn.on("pointerout", () => newBtn.setColor("#ffffff"));
     newBtn.on("pointerdown", () => {
-      SaveSystem.clear();
-      clearAllConversations();
-      this.scene.start("GameScene", { loadSave: false });
+      void this.startFreshGame();
     });
 
     nextY += 40;
@@ -87,9 +85,7 @@ export class StartScene extends Phaser.Scene {
       ngPlusBtn.on("pointerover", () => ngPlusBtn.setColor("#cceeFF"));
       ngPlusBtn.on("pointerout", () => ngPlusBtn.setColor("#aaddff"));
       ngPlusBtn.on("pointerdown", () => {
-        SaveSystem.clear();
-        clearAllConversations();
-        this.scene.start("GameScene", { loadSave: false, newGamePlus: true });
+        void this.startFreshGame({ newGamePlus: true });
       });
 
       nextY += 30;
@@ -100,14 +96,12 @@ export class StartScene extends Phaser.Scene {
         if (hasSave) {
           this.scene.start("GameScene", { loadSave: true });
         } else {
-          this.scene.start("GameScene", { loadSave: false });
+          void this.startFreshGame();
         }
       });
 
       this.input.keyboard.on("keydown-N", () => {
-        SaveSystem.clear();
-        clearAllConversations();
-        this.scene.start("GameScene", { loadSave: false });
+        void this.startFreshGame();
       });
     }
 
@@ -126,5 +120,11 @@ export class StartScene extends Phaser.Scene {
         color: "#555555",
       })
       .setOrigin(1, 1);
+  }
+
+  private async startFreshGame(options: { newGamePlus?: boolean } = {}): Promise<void> {
+    SaveSystem.clear();
+    await clearAllConversations();
+    this.scene.start("GameScene", { loadSave: false, ...options });
   }
 }
