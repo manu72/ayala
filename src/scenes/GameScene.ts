@@ -2256,6 +2256,7 @@ export class GameScene extends Phaser.Scene {
     SaveSystem.clear();
 
     const breakdown: ScoreBreakdown = this.scoring.getBreakdown();
+    this.audio.stop();
     this.scene.launch("GameOverScene", {
       reason,
       score: this.scoring.total,
