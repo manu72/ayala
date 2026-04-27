@@ -12,6 +12,7 @@ import type { SourceType } from "../systems/FoodSource";
 import { ThreatIndicator } from "../systems/ThreatIndicator";
 import { SaveSystem } from "../systems/SaveSystem";
 import { TrustSystem } from "../systems/TrustSystem";
+import { ScoringSystem, type ScoreBreakdown } from "../systems/ScoringSystem";
 import { EmoteSystem, type EmoteType } from "../systems/EmoteSystem";
 import { ChapterSystem } from "../systems/ChapterSystem";
 import { TerritorySystem } from "../systems/TerritorySystem";
@@ -63,6 +64,7 @@ import { AudioSystem } from "../systems/AudioSystem";
 import { hasLineOfSightTiles } from "../utils/lineOfSight";
 import { shouldUseHumanAiBubble } from "../utils/humanAiBubbleEligibility";
 import { buildDialogueRecencyContext } from "../utils/dialogueRecency";
+import { computeReachableCells, getCellKey } from "../utils/mapExploration";
 
 const INTERACTION_DISTANCE = GP.INTERACTION_DIST;
 const DIALOGUE_BREAK_DISTANCE = GP.DIALOGUE_BREAK_DIST;
@@ -97,6 +99,9 @@ const POSITIVE_EMOTES: ReadonlySet<EmoteType> = new Set(["heart"]);
 const DEFAULT_ZOOM = 2.5;
 const PEEK_ZOOM = 0.8;
 const ZOOM_DURATION = 500;
+const MAX_LIVES = 3;
+const HUMAN_ENGAGEMENT_COOLDOWN_MS = 5_000;
+const DUMPED_COMFORT_WINDOW_MS = 5_000;
 
 interface CatDialoguePersistenceSnapshot {
   timestamp: number;
@@ -120,6 +125,8 @@ export class GameScene extends Phaser.Scene {
   dayNight!: DayNightCycle;
   stats!: StatsSystem;
   trust!: TrustSystem;
+  scoring!: ScoringSystem;
+  lives = MAX_LIVES;
 
   /** Expose for HUDScene to read rest progress. */
   restHoldTimer = 0;
@@ -241,6 +248,8 @@ export class GameScene extends Phaser.Scene {
   private colonyCount = INITIAL_COLONY_TOTAL;
   private dumpingArmed = 0;
   private dumpingInProgress = false;
+  private dumpedCatEventIds = new WeakMap<NPCCat, number>();
+  private dumpedComfortWindowUntil: Record<number, number> = {};
   private pendingCamilleEncounter = 0;
 
   /**
@@ -268,6 +277,14 @@ export class GameScene extends Phaser.Scene {
    */
   private playerStationaryAnchorX = 0;
   private playerStationaryAnchorY = 0;
+  private previousPlayerX = 0;
+  private previousPlayerY = 0;
+  private reachableCells = new Set<number>();
+  private snatchedThisNight = false;
+  private trustEventUnsubscribe: (() => void) | null = null;
+  private pendingGameOverReason: "collapse" | "snatched" | null = null;
+  private gameOverTriggered = false;
+  private lastHumanEngagementAt = -Infinity;
 
   /** One scripted "Kish, slow down" beat per Camille evening spawn. */
   private kishCamilleSlowDownShown = false;
@@ -304,6 +321,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   shutdown(): void {
+    this.trustEventUnsubscribe?.();
+    this.trustEventUnsubscribe = null;
     this.clearIntroCinematicResources();
     if (this.cinematicActive) {
       this.cinematicActive = false;
@@ -322,6 +341,8 @@ export class GameScene extends Phaser.Scene {
     this.wasCollapsed = false;
     this.collapseRecovering = false;
     this.collapseRecoveryTimer = 0;
+    this.pendingGameOverReason = null;
+    this.gameOverTriggered = false;
     this.dialogue.dismiss();
     this.aiThinkingTimer?.remove(false);
     this.aiThinkingTimer = null;
@@ -442,6 +463,13 @@ export class GameScene extends Phaser.Scene {
     this.stats = new StatsSystem();
     this.dayNight = new DayNightCycle(this);
     this.trust = new TrustSystem();
+    this.scoring = new ScoringSystem();
+    this.lives = MAX_LIVES;
+    this.pendingGameOverReason = null;
+    this.gameOverTriggered = false;
+    this.snatchedThisNight = data?.snatcherCapture === true;
+    this.dumpedComfortWindowUntil = {};
+    this.lastHumanEngagementAt = -Infinity;
     this.emotes = new EmoteSystem();
     this.chapters = new ChapterSystem();
     this.audio = new AudioSystem();
@@ -507,6 +535,7 @@ export class GameScene extends Phaser.Scene {
       StoryKeys.ENCOUNTER_5_COMPLETE,
       StoryKeys.DUMPING_EVENTS_SEEN,
       StoryKeys.GAME_COMPLETED,
+      StoryKeys.GAME_OVER,
       StoryKeys.NEW_GAME_PLUS,
       StoryKeys.INTRO_SEEN,
       StoryKeys.FIRST_SNATCHER_SEEN,
@@ -534,6 +563,8 @@ export class GameScene extends Phaser.Scene {
         savedSourceStates = save.sourceStates;
         if (save.trust) this.trust.fromJSON(save.trust);
         if (save.territory) this.territory.fromJSON(save.territory);
+        this.lives = save.lives;
+        this.scoring.fromJSON(save.runScore);
         for (const [key, val] of Object.entries(save.variables)) {
           this.registry.set(key, val);
         }
@@ -564,6 +595,8 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.player = new MammaCat(this, spawnX, spawnY);
+    this.previousPlayerX = spawnX;
+    this.previousPlayerY = spawnY;
 
     if (this.territory.isClaimed) {
       this.player.setHasTerritory(true);
@@ -575,6 +608,7 @@ export class GameScene extends Phaser.Scene {
     if (this.objectsLayer) {
       this.physics.add.collider(this.player, this.objectsLayer);
     }
+    this.initialiseTerritoryExploration(spawnX, spawnY);
 
     const savedKnown = this.registry.get("KNOWN_CATS") as string[] | undefined;
     this.knownCats = new Set(savedKnown ?? []);
@@ -654,6 +688,8 @@ export class GameScene extends Phaser.Scene {
 
     this.dayNight.on("newDay", () => {
       this.trust.survivedDay();
+      this.scoring.recordNightSurvived({ clean: !this.snatchedThisNight });
+      this.snatchedThisNight = false;
     });
 
     // New Game+ setup: full trust, all cats known, territory claimed
@@ -692,6 +728,12 @@ export class GameScene extends Phaser.Scene {
       // Max out global trust
       for (let i = 0; i < 20; i++) this.trust.survivedDay();
     }
+
+    this.trustEventUnsubscribe = this.trust.onEvent((event) => {
+      this.scoring.recordTrustEvent(event);
+      this.updateCloseFriendsScore();
+    });
+    this.updateCloseFriendsScore();
 
     if (!this.scene.isActive("HUDScene")) {
       this.scene.launch("HUDScene");
@@ -1008,7 +1050,14 @@ export class GameScene extends Phaser.Scene {
       }
       this.collapseRecoveryTimer += delta;
       if (this.collapseRecoveryTimer >= COLLAPSE_RECOVERY_MS) {
-        this.recoverFromCollapse();
+        if (this.pendingGameOverReason === "collapse") {
+          this.stats.resetCollapse();
+          this.collapseRecovering = false;
+          this.collapseRecoveryTimer = 0;
+          this.triggerGameOver("collapse");
+        } else {
+          this.recoverFromCollapse();
+        }
       }
       return;
     }
@@ -1067,6 +1116,7 @@ export class GameScene extends Phaser.Scene {
         time,
       );
       if (usedSource) {
+        this.scoring.discoverFoodSource(this.foodSourceKey(usedSource));
         // Play the directional drinking / eating animation as feedback.
         // Shared by every FoodSource type (water_bowl, fountain,
         // feeding_station, restaurant_scraps, bugs); startConsuming() is a
@@ -1159,6 +1209,7 @@ export class GameScene extends Phaser.Scene {
       this.player.setVelocity(0);
     } else {
       this.player.update(this.stats.canRun, delta);
+      this.recordPlayerMovementAndTerritory();
       this.stats.update(
         deltaSec,
         this.player.isMoving,
@@ -1740,6 +1791,7 @@ export class GameScene extends Phaser.Scene {
 
     const beat = this.camilleEncounterBeats[n];
     const onComplete = (): void => {
+      this.recordHumanEngagement();
       switch (n) {
         case 2:
           hud?.showNarration("She watches you eat. She doesn't reach for you. She understands.");
@@ -1920,6 +1972,7 @@ export class GameScene extends Phaser.Scene {
     this.beat5DecisionActive = false;
     this.cancelBeat5Decision();
     this.player.startGreeting();
+    this.recordHumanEngagement();
     if (this.camilleNPC) {
       this.emotes.show(this, this.camilleNPC, "heart");
       this.emotes.show(this, this.player, "heart");
@@ -2175,11 +2228,91 @@ export class GameScene extends Phaser.Scene {
       this.foodSources.getSourceStates(),
       this.trust.toJSON(),
       this.territory.toJSON(),
+      this.lives,
+      this.scoring.toJSON(),
     );
     if (ok) {
       const hud = this.scene.get("HUDScene") as HUDScene | undefined;
       hud?.showSaveNotice?.();
     }
+  }
+
+  private loseLife(): boolean {
+    this.lives = Math.max(0, this.lives - 1);
+    return this.lives <= 0;
+  }
+
+  private triggerGameOver(reason: "collapse" | "snatched"): void {
+    if (this.gameOverTriggered) return;
+    this.gameOverTriggered = true;
+    this.pendingGameOverReason = reason;
+    this.isPaused = true;
+    this.dialogue.dismiss();
+    this.physics.pause();
+    this.time.removeAllEvents();
+    this.scene.stop("JournalScene");
+    this.scene.stop("HUDScene");
+    SaveSystem.clear();
+
+    const breakdown: ScoreBreakdown = this.scoring.getBreakdown();
+    this.scene.launch("GameOverScene", {
+      reason,
+      score: this.scoring.total,
+      breakdown,
+    });
+    this.scene.pause();
+  }
+
+  private initialiseTerritoryExploration(spawnX: number, spawnY: number): void {
+    const width = this.map.width;
+    const height = this.map.height;
+    const startX = Math.floor(spawnX / TILE_SIZE);
+    const startY = Math.floor(spawnY / TILE_SIZE);
+
+    this.reachableCells = computeReachableCells({
+      width,
+      height,
+      startX,
+      startY,
+      isBlocked: (x, y) => this.isExplorationCellBlocked(x, y),
+    });
+    this.scoring.setTotalExplorableCells(this.reachableCells.size);
+    this.visitCurrentCell();
+  }
+
+  private isExplorationCellBlocked(tileX: number, tileY: number): boolean {
+    const groundTile = this.groundLayer?.getTileAt(tileX, tileY);
+    const objectTile = this.objectsLayer?.getTileAt(tileX, tileY);
+    return Boolean(groundTile?.collides || objectTile?.collides);
+  }
+
+  private recordPlayerMovementAndTerritory(): void {
+    const distance = Phaser.Math.Distance.Between(
+      this.previousPlayerX,
+      this.previousPlayerY,
+      this.player.x,
+      this.player.y,
+    );
+    if (this.player.isMoving && !this.playerInputFrozen) {
+      this.scoring.addDistance(distance);
+    }
+    this.previousPlayerX = this.player.x;
+    this.previousPlayerY = this.player.y;
+    this.visitCurrentCell();
+  }
+
+  private visitCurrentCell(): void {
+    if (this.reachableCells.size === 0) return;
+    const tileX = Math.floor(this.player.x / TILE_SIZE);
+    const tileY = Math.floor(this.player.y / TILE_SIZE);
+    const key = getCellKey(tileX, tileY, this.map.width);
+    if (this.reachableCells.has(key)) {
+      this.scoring.visitCell(key);
+    }
+  }
+
+  private foodSourceKey(source: { type: SourceType; x: number; y: number }): string {
+    return `${source.type}:${Math.round(source.x)}:${Math.round(source.y)}`;
   }
 
   /**
@@ -2197,7 +2330,12 @@ export class GameScene extends Phaser.Scene {
     const hud = this.scene.get("HUDScene") as HUDScene | undefined;
     hud?.showNarration?.("You can't... go any further.");
 
-    this.trust.collapsedInColony();
+    const finalLife = this.loseLife();
+    if (!finalLife) {
+      this.trust.collapsedInColony();
+    } else {
+      this.pendingGameOverReason = "collapse";
+    }
 
     // Defensive pre-increment normalisation — matches the peer counters
     // (CATS_SNATCHED, PLAYER_SNATCHED_COUNT). Treating negative, fractional,
@@ -2267,6 +2405,9 @@ export class GameScene extends Phaser.Scene {
         GP.NARRATION_WITNESS_DIST;
 
     this.player.setPosition(safeX, safeY);
+    this.previousPlayerX = safeX;
+    this.previousPlayerY = safeY;
+    this.visitCurrentCell();
     this.stats.resetCollapse();
     this.collapseRecovering = false;
     this.collapseRecoveryTimer = 0;
@@ -2348,6 +2489,7 @@ export class GameScene extends Phaser.Scene {
       metDays[name] = this.dayNight.dayCount;
       this.registry.set("JOURNAL_MET_DAYS", metDays);
     }
+    this.updateCloseFriendsScore();
   }
 
   // ──────────── NPC ────────────
@@ -3310,6 +3452,7 @@ export class GameScene extends Phaser.Scene {
       // greet in empty space is silent.
       if (this.isHumanInGreetRange()) {
         this.audio.playMeow();
+        this.recordHumanEngagement();
       }
       return;
     }
@@ -3339,6 +3482,22 @@ export class GameScene extends Phaser.Scene {
       if (dist <= range) return true;
     }
     return false;
+  }
+
+  private recordHumanEngagement(): void {
+    const now = this.time.now;
+    if (now - this.lastHumanEngagementAt < HUMAN_ENGAGEMENT_COOLDOWN_MS) return;
+    this.lastHumanEngagementAt = now;
+    this.scoring.recordHumanEngagement();
+  }
+
+  private updateCloseFriendsScore(): void {
+    let closeFriends = 0;
+    for (const name of this.knownCats) {
+      if (name.startsWith("Colony Cat")) continue;
+      if (this.trust.getCatTrust(name) >= 50) closeFriends += 1;
+    }
+    this.scoring.setCloseFriendsMade(closeFriends);
   }
 
   /**
@@ -3379,6 +3538,7 @@ export class GameScene extends Phaser.Scene {
     const name = cat.npcName;
 
     if (name.startsWith("Colony Cat")) {
+      this.tryCreditDumpedPetComfort(cat);
       this.dialogue.show([getRandomColonyLine()]);
       return;
     }
@@ -3386,6 +3546,15 @@ export class GameScene extends Phaser.Scene {
     void this.requestCatDialogue(cat).catch(() => {
       /* Errors are logged and cleaned up inside requestCatDialogue */
     });
+  }
+
+  private tryCreditDumpedPetComfort(cat: NPCCat): void {
+    const eventId = this.dumpedCatEventIds.get(cat);
+    if (!eventId) return;
+    const deadline = this.dumpedComfortWindowUntil[eventId] ?? 0;
+    if (this.time.now > deadline) return;
+    this.scoring.recordDumpedPetComforted(eventId);
+    delete this.dumpedComfortWindowUntil[eventId];
   }
 
   /**
@@ -3967,6 +4136,10 @@ export class GameScene extends Phaser.Scene {
   }
 
   private handleSnatcherCapture(): void {
+    const finalLife = this.loseLife();
+    this.scoring.recordSnatch();
+    this.snatchedThisNight = true;
+
     // Increment the lifetime capture counter and persist it *before* the
     // scene restart. `snatcherCapture` reloads via `SaveSystem.load()` which
     // overwrites in-memory registry state from localStorage, so a mere
@@ -3975,11 +4148,21 @@ export class GameScene extends Phaser.Scene {
     const prev = this.registry.get(StoryKeys.PLAYER_SNATCHED_COUNT);
     const prevCount = typeof prev === "number" && Number.isFinite(prev) && prev >= 0 ? Math.floor(prev) : 0;
     this.registry.set(StoryKeys.PLAYER_SNATCHED_COUNT, prevCount + 1);
-    this.autoSave();
+    if (!finalLife) {
+      this.autoSave();
+    } else {
+      SaveSystem.clear();
+      this.registry.set(StoryKeys.GAME_OVER, true);
+    }
 
     this.cameras.main.fade(100, 0, 0, 0, false, (_cam: Phaser.Cameras.Scene2D.Camera, progress: number) => {
       if (progress >= 1) {
         this.dialogue.show(["Hands. Darkness. You can't move. You can't breathe.", "..."], () => {
+          if (finalLife) {
+            this.cameras.main.resetFX();
+            this.triggerGameOver("snatched");
+            return;
+          }
           const hasSave = SaveSystem.load() !== null;
           if (hasSave) {
             this.cameras.main.resetFX();
@@ -4056,7 +4239,10 @@ export class GameScene extends Phaser.Scene {
         car.setTexture("car_open");
         this.time.delayedCall(500, () => {
           const dumpedCat = this.addBackgroundCat(roadX - 20, roadY - 4);
-          if (dumpedCat) dumpedCat.setAlpha(0.9);
+          if (dumpedCat) {
+            dumpedCat.setAlpha(0.9);
+            this.dumpedCatEventIds.set(dumpedCat, eventNum);
+          }
 
           this.time.delayedCall(500, () => {
             car.setTexture("car_closed");
@@ -4100,22 +4286,25 @@ export class GameScene extends Phaser.Scene {
     const hud = this.scene.get("HUDScene") as HUDScene | undefined;
     this.colonyCount++;
     this.registry.set(StoryKeys.COLONY_COUNT, this.colonyCount);
+    const armComfortWindow = () => {
+      this.dumpedComfortWindowUntil[eventNum] = this.time.now + DUMPED_COMFORT_WINDOW_MS;
+    };
 
     switch (eventNum) {
       case 1:
         this.dialogue.show(["A car. A door. A cat.", "You remember."], () => {
           hud?.showNarration("A new cat has appeared in the gardens.");
-        });
+        }, { onHide: armComfortWindow });
         break;
       case 2:
         this.dialogue.show([
           "This one wasn't thrown away. This one was... left.",
           "With love, and grief, and no choice.",
           "You sit beside her. You don't speak. There's nothing to say.",
-        ]);
+        ], undefined, { onHide: armComfortWindow });
         break;
       case 3:
-        this.dialogue.show(["Another one. How many of us started this way?"]);
+        this.dialogue.show(["Another one. How many of us started this way?"], undefined, { onHide: armComfortWindow });
         break;
     }
   }

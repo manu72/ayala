@@ -8,6 +8,16 @@ export interface TrustData {
   cats: Record<string, number>;
 }
 
+export type TrustEvent =
+  | { type: "cat:first-conversation"; catName: string; globalDelta: number; catDelta: number }
+  | { type: "cat:return-conversation"; catName: string; globalDelta: number; catDelta: number }
+  | { type: "cat:proximity-tick"; catName: string; globalDelta: number; catDelta: number }
+  | { type: "cat:seen-eating"; globalDelta: number }
+  | { type: "survival:day"; globalDelta: number }
+  | { type: "cat:collapse-witness"; catName: string; globalDelta: number; catDelta: number };
+
+export type TrustEventListener = (event: TrustEvent) => void;
+
 const MAX_TRUST = 100;
 
 /** Proximity-based trust cooldown: award at most once per this interval (ms). */
@@ -19,6 +29,7 @@ export class TrustSystem {
 
   /** Per-cat cooldown timestamps for proximity trust. */
   private proximityCooldowns: Record<string, number> = {};
+  private listeners = new Set<TrustEventListener>();
 
   get global(): number {
     return this._global;
@@ -28,16 +39,28 @@ export class TrustSystem {
     return this._cats[name] ?? 0;
   }
 
+  /** Subscribe to trust-award events. Returns an unsubscribe function. */
+  onEvent(listener: TrustEventListener): () => void {
+    this.listeners.add(listener);
+    return () => this.offEvent(listener);
+  }
+
+  offEvent(listener: TrustEventListener): void {
+    this.listeners.delete(listener);
+  }
+
   /** Award trust for first conversation with a named cat. */
   firstConversation(catName: string): void {
     this.addGlobal(5);
     this.addCat(catName, 10);
+    this.emitEvent({ type: "cat:first-conversation", catName, globalDelta: 5, catDelta: 10 });
   }
 
   /** Award trust for a return conversation. */
   returnConversation(catName: string): void {
     this.addGlobal(2);
     this.addCat(catName, 5);
+    this.emitEvent({ type: "cat:return-conversation", catName, globalDelta: 2, catDelta: 5 });
   }
 
   /** Award proximity trust (30s near a cat). Throttled by cooldown. */
@@ -47,16 +70,19 @@ export class TrustSystem {
     this.proximityCooldowns[catName] = now;
     this.addGlobal(1);
     this.addCat(catName, 2);
+    this.emitEvent({ type: "cat:proximity-tick", catName, globalDelta: 1, catDelta: 2 });
   }
 
   /** Award trust for being seen eating. */
   seenEating(): void {
     this.addGlobal(1);
+    this.emitEvent({ type: "cat:seen-eating", globalDelta: 1 });
   }
 
   /** Award trust for surviving a full day cycle. */
   survivedDay(): void {
     this.addGlobal(3);
+    this.emitEvent({ type: "survival:day", globalDelta: 3 });
   }
 
   /**
@@ -77,6 +103,7 @@ export class TrustSystem {
   supportedDuringCollapse(catName: string): void {
     this.addGlobal(1);
     this.addCat(catName, 3);
+    this.emitEvent({ type: "cat:collapse-witness", catName, globalDelta: 1, catDelta: 3 });
   }
 
   private addGlobal(amount: number): void {
@@ -100,6 +127,10 @@ export class TrustSystem {
         this._cats[name] = clamp(typeof val === "number" ? val : 0);
       }
     }
+  }
+
+  private emitEvent(event: TrustEvent): void {
+    for (const listener of this.listeners) listener(event);
   }
 }
 

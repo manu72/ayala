@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { isValidSave, SaveSystem } from '../../src/systems/SaveSystem'
+import { DEFAULT_RUN_SCORE_STATE } from '../../src/systems/ScoringSystem'
 
 function validSaveData(overrides: Record<string, unknown> = {}) {
   return {
@@ -61,8 +62,20 @@ describe('isValidSave', () => {
     expect(isValidSave(data)).toBe(false)
   })
 
+  it('accepts v2 saves with lives and run score state', () => {
+    expect(
+      isValidSave(
+        validSaveData({
+          version: 2,
+          lives: 2,
+          runScore: DEFAULT_RUN_SCORE_STATE,
+        }),
+      ),
+    ).toBe(true)
+  })
+
   it('rejects future version', () => {
-    expect(isValidSave(validSaveData({ version: 2 }))).toBe(false)
+    expect(isValidSave(validSaveData({ version: 3 }))).toBe(false)
   })
 
   it('rejects invalid timeOfDay', () => {
@@ -228,6 +241,46 @@ describe('SaveSystem.save / load / hasSave / clear', () => {
     expect(loaded!.variables.MET_BLACKY).toBe(true)
     expect(loaded!.trust).toEqual(trust)
     expect(loaded!.territory).toEqual(territory)
+  })
+
+  it('round-trips lives and run score state', () => {
+    const runScore = {
+      ...DEFAULT_RUN_SCORE_STATE,
+      catEngagements: 2,
+      visitedCells: [3, 9],
+      foodSourcesDiscovered: ['fountain:10:20'],
+    }
+
+    expect(
+      SaveSystem.save(
+        100,
+        200,
+        { hunger: 70, thirst: 65, energy: 80 },
+        'evening',
+        500_000,
+        stubRegistry({}),
+        undefined,
+        { global: 0, cats: {} },
+        { claimed: false, claimedOnDay: 0 },
+        2,
+        runScore,
+      ),
+    ).toBe(true)
+
+    const loaded = SaveSystem.load()
+    expect(loaded?.version).toBe(2)
+    expect(loaded?.lives).toBe(2)
+    expect(loaded?.runScore).toEqual(runScore)
+  })
+
+  it('migrates v1 saves with default lives and empty run score', () => {
+    store['ayala_save'] = JSON.stringify(validSaveData({ version: 1 }))
+
+    const loaded = SaveSystem.load()
+
+    expect(loaded?.version).toBe(2)
+    expect(loaded?.lives).toBe(3)
+    expect(loaded?.runScore).toEqual(DEFAULT_RUN_SCORE_STATE)
   })
 
   it('hasSave is false before save and true after', () => {

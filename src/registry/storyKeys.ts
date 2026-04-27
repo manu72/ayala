@@ -11,6 +11,7 @@ export const StoryKeys = {
   ENCOUNTER_5_COMPLETE: "ENCOUNTER_5_COMPLETE",
   NEW_GAME_PLUS: "NEW_GAME_PLUS",
   GAME_COMPLETED: "GAME_COMPLETED",
+  GAME_OVER: "GAME_OVER",
   COLLAPSE_COUNT: "COLLAPSE_COUNT",
   // Lifetime counter for background colony cats lost to snatchers. Incremented
   // by `handleColonyCatSnatch` in GameScene; surfaced in the journal footer.
