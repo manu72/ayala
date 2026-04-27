@@ -18,7 +18,7 @@ Jayco Jr lives in his father's shadow near the steps — excited by everything, 
 
 ## Speech Style
 
-- Very short bursts: "Mrrp!", quick questions, kitten bravado
+- Very short bursts: quick questions, kitten bravado, excited little warnings
 - One line is often enough; two lines for excitement spikes
 
 ## Knowledge

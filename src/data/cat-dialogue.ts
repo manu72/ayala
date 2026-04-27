@@ -5,8 +5,9 @@
  * condition wins. Order matters: place specific/early conditions before
  * broad fallbacks.
  *
- * Conditions use a hybrid of conversationHistory length and trust to handle
- * both fresh games and saves that predate the conversation store.
+ * First-meeting conditions use conversation history only. Trust can rise
+ * through proximity before any dialogue, so it is not a reliable "has spoken"
+ * signal. Later relationship branches may still use trust.
  */
 
 import type { DialogueScript, DialogueRequest } from "../services/DialogueService";
@@ -15,16 +16,12 @@ import type { DialogueScript, DialogueRequest } from "../services/DialogueServic
 
 /** True when this is the speaker's first-ever conversation. */
 function isFirstMeeting(req: DialogueRequest): boolean {
-  return req.conversationHistory.length === 0 && req.gameState.trustWithSpeaker < 5;
+  return req.conversationHistory.length === 0;
 }
 
-/** Approximate talk count, using history length with trust-based fallback. */
+/** Conversation count for return-dialogue branching. */
 function talkCount(req: DialogueRequest): number {
-  if (req.conversationHistory.length > 0) return req.conversationHistory.length;
-  // Fallback for saves that predate IndexedDB: estimate from trust
-  if (req.gameState.trustWithSpeaker >= 15) return 2;
-  if (req.gameState.trustWithSpeaker >= 5) return 1;
-  return 0;
+  return req.conversationHistory.length;
 }
 
 // ── Blacky ──────────────────────────────────────────────────────────
@@ -34,7 +31,7 @@ const blackyScripts: DialogueScript[] = [
     condition: isFirstMeeting,
     response: {
       lines: [
-        "Mrrp. New here, are you?",
+        "New here, are you?",
         "This is Ayala Triangle. The gardens are home to all of us.",
         "Find shade. Find food. Stay away from the roads.",
         "And at night... stay hidden. Not all humans are kind.",
@@ -64,7 +61,7 @@ const tigerScripts: DialogueScript[] = [
   {
     condition: isFirstMeeting,
     response: {
-      lines: ["*The cat's ears flatten slightly. Its tail flicks once.*", '"Ssss. This is my spot."'],
+      lines: ["*The cat's ears flatten slightly. Its tail flicks once.*", '"This is my spot."'],
       speakerPose: "hostile",
       emote: "hostile",
       trustChange: 10,
@@ -87,7 +84,7 @@ const tigerScripts: DialogueScript[] = [
   {
     condition: () => true,
     response: {
-      lines: ['"Mrrp. You can rest here. Under this tree. I\'ll keep watch."'],
+      lines: ['"You can rest here. Under this tree. I\'ll keep watch."'],
       speakerPose: "friendly",
       emote: "heart",
       trustChange: 5,
@@ -104,7 +101,7 @@ const jaycoScripts: DialogueScript[] = [
     response: {
       lines: [
         "*This cat approaches with tail up. Curious.*",
-        '"Prrrp! New face! I\'m Jayco. I know every corner of these steps."',
+        '"New face! I\'m Jayco. I know every corner of these steps."',
         '"The humans below, the coffee place, they leave good scraps. But watch for the guard."',
       ],
       speakerPose: "friendly",
@@ -133,7 +130,7 @@ const jaycoJrScripts: DialogueScript[] = [
     response: {
       lines: [
         "*A tiny cat bounces toward you, tail straight up.*",
-        "\"Mrrp! Mrrp! You're new! Dad says I shouldn't talk to strangers but you smell okay!\"",
+        "\"You're new! Dad says I shouldn't talk to strangers but you smell okay!\"",
       ],
       speakerPose: "friendly",
       emote: "heart",
@@ -230,7 +227,7 @@ const gingerScripts: DialogueScript[] = [
   {
     condition: isFirstMeeting,
     response: {
-      lines: ["*Two orange cats glare at you from beside the fountain. One hisses.*", '"SSSS! This water is OURS."'],
+      lines: ["*Two orange cats glare at you from beside the fountain. One hisses.*", '"This water is ours."'],
       speakerPose: "hostile",
       emote: "hostile",
       trustChange: 10,

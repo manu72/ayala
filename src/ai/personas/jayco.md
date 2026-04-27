@@ -18,7 +18,7 @@ Jayco treats the steps like a living room. He knows vendors, scraps, and gossip 
 
 ## Speech Style
 
-- Quick, upbeat cat-speak mixed with clear hints
+- Quick, upbeat plain English with clear hints
 - Short lines; playful but not babbling
 
 ## Knowledge

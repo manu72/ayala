@@ -36,10 +36,17 @@ import {
   type DialogueResponse,
   type ConversationEntry,
 } from "../services/DialogueService";
+import { calculateRelationshipStage } from "../services/DialogueRelationship";
 import { AIDialogueService } from "../services/AIDialogueService";
 import { FallbackDialogueService } from "../services/FallbackDialogueService";
 import type { DialogueHooks } from "../systems/DialogueSystem";
-import { storeConversation, getRecentConversations } from "../services/ConversationStore";
+import {
+  storeConversation,
+  getRecentConversations,
+  getConversationCount,
+  getNpcMemories,
+  addNpcMemory,
+} from "../services/ConversationStore";
 import { AI_PERSONAS } from "../ai/personas";
 import { CAT_DIALOGUE_SCRIPTS, getRandomColonyLine } from "../data/cat-dialogue";
 import {
@@ -54,6 +61,8 @@ import {
 import { resolveSnatcherSpawnAction } from "../systems/SnatcherSystem";
 import { AudioSystem } from "../systems/AudioSystem";
 import { hasLineOfSightTiles } from "../utils/lineOfSight";
+import { shouldUseHumanAiBubble } from "../utils/humanAiBubbleEligibility";
+import { buildDialogueRecencyContext } from "../utils/dialogueRecency";
 
 const INTERACTION_DISTANCE = GP.INTERACTION_DIST;
 const DIALOGUE_BREAK_DISTANCE = GP.DIALOGUE_BREAK_DIST;
@@ -88,6 +97,18 @@ const POSITIVE_EMOTES: ReadonlySet<EmoteType> = new Set(["heart"]);
 const DEFAULT_ZOOM = 2.5;
 const PEEK_ZOOM = 0.8;
 const ZOOM_DURATION = 500;
+
+interface CatDialoguePersistenceSnapshot {
+  timestamp: number;
+  realTimestamp: number;
+  gameDay: number;
+  chapter: number;
+  timeOfDay: string;
+  hunger: number;
+  thirst: number;
+  energy: number;
+  trustBefore: number;
+}
 
 interface NPCEntry {
   cat: NPCCat;
@@ -2047,12 +2068,15 @@ export class GameScene extends Phaser.Scene {
     if (!("Camille" in AI_PERSONAS)) return null;
 
     try {
-      const history = await getRecentConversations("Camille", 20);
+      const history = await getRecentConversations("Camille", 10);
       const conversationHistory: ConversationEntry[] = history.map((r) => ({
         timestamp: r.timestamp,
         speaker: r.speaker,
+        mammaCatTurn: r.mammaCatTurn,
         text: r.lines.join(" "),
       }));
+      const conversationCount = await getConversationCount("Camille");
+      const isFirstConversation = conversationCount === 0;
 
       const request: DialogueRequest = {
         speaker: "Camille",
@@ -2071,6 +2095,12 @@ export class GameScene extends Phaser.Scene {
           recentEvents: [],
         },
         conversationHistory,
+        isFirstConversation,
+        relationshipStage: calculateRelationshipStage({
+          isFirstConversation,
+          conversationCount,
+          trustWithSpeaker: this.trust.global,
+        }),
         encounterBeat: { kind: "camille_encounter", n, objective },
       };
 
@@ -2882,14 +2912,13 @@ export class GameScene extends Phaser.Scene {
    * Show a single greeting bubble above `human` using the best available
    * source in priority order: caller-forced line > AI persona > scripted pool.
    *
-   * AI path: eligible when the human has an `identityName` registered in
-   * `AI_PERSONAS`, its per-human cooldown has elapsed, no other AI bubble is
-   * in flight, and no caller-forced line was passed. On success, stores the
-   * exchange in `ConversationStore` keyed by the identity name so future
-   * bubbles (and engaged dialogue if we ever wire humans to Space) pick up
-   * prior beats. On timeout/failure, quietly falls back to the scripted pool.
+   * AI path: eligible only for close Mamma Cat proximity greetings when the
+   * human has an `identityName` registered in `AI_PERSONAS`, its per-human
+   * cooldown has elapsed, no other AI bubble is in flight, and no caller-forced
+   * line was passed. Greetings aimed at other NPC cats stay scripted so they
+   * do not create Mamma Cat conversation history from offscreen encounters.
    *
-   * Timing: AI path uses a 1.5s budget (vs 8s for engaged cat dialogue) so
+   * Timing: AI path uses a 3.5s budget (vs 8s for engaged cat dialogue) so
    * ambient bubbles never stall the scene. Caller's emote + greeting animation
    * fire synchronously in `updateHumans` regardless of which path is chosen.
    */
@@ -2903,11 +2932,17 @@ export class GameScene extends Phaser.Scene {
     const hasPersona = identity !== null && identity in AI_PERSONAS;
     const now = this.time.now;
     const cooldownUntil = this.humanAiBubbleCooldownUntil.get(human) ?? 0;
-    const aiEligible =
-      hasPersona &&
-      !this.humanAiBubbleInFlight &&
-      now >= cooldownUntil &&
-      this.dialogueService instanceof FallbackDialogueService;
+    const distanceToMammaCat = Phaser.Math.Distance.Between(human.x, human.y, this.player.x, this.player.y);
+    const aiEligible = shouldUseHumanAiBubble({
+      hasPersona,
+      aiServiceAvailable: this.dialogueService instanceof FallbackDialogueService,
+      aiInFlight: this.humanAiBubbleInFlight,
+      now,
+      cooldownUntil,
+      isMammaCatGreeting: opts?.nearNpcCat === undefined,
+      distanceToMammaCat,
+      maxMammaCatDistance: GP.CAT_PERSON_PLAYER_GREET_DIST,
+    });
 
     if (aiEligible && identity !== null) {
       // Per-human cooldown is set up front (regardless of success) so a burst
@@ -2925,7 +2960,8 @@ export class GameScene extends Phaser.Scene {
   /**
    * Ask the AI service for a single ambient line and render it. Falls back to
    * a scripted line on timeout, network failure, parse failure, or if the
-   * human becomes ineligible (off-screen, exited) mid-flight.
+   * human becomes ineligible (off-screen, exited, or no longer near Mamma Cat)
+   * mid-flight.
    */
   private async requestHumanBubbleLine(
     human: HumanNPC,
@@ -2937,7 +2973,7 @@ export class GameScene extends Phaser.Scene {
     this.humanAiBubbleAbort = abort;
 
     const renderFallback = (): void => {
-      if (!human.active || !human.visible) return;
+      if (!human.active || !human.visible || !this.isHumanCloseToMammaCat(human)) return;
       this.renderGreetingBubble(human, this.pickScriptedGreeting(human, nearNpcCat));
     };
 
@@ -2946,8 +2982,11 @@ export class GameScene extends Phaser.Scene {
       const conversationHistory: ConversationEntry[] = history.map((r) => ({
         timestamp: r.timestamp,
         speaker: r.speaker,
+        mammaCatTurn: r.mammaCatTurn,
         text: r.lines.join(" "),
       }));
+      const conversationCount = await getConversationCount(speaker);
+      const isFirstConversation = conversationCount === 0;
 
       const request: DialogueRequest = {
         speaker,
@@ -2966,6 +3005,12 @@ export class GameScene extends Phaser.Scene {
           recentEvents: [],
         },
         conversationHistory,
+        isFirstConversation,
+        relationshipStage: calculateRelationshipStage({
+          isFirstConversation,
+          conversationCount,
+          trustWithSpeaker: this.trust.global,
+        }),
         nearbyCat: nearNpcCat?.npcName,
       };
 
@@ -2974,7 +3019,7 @@ export class GameScene extends Phaser.Scene {
         { timeoutMs: GameScene.HUMAN_AI_BUBBLE_TIMEOUT_MS, signal: abort.signal },
       );
 
-      if (abort.signal.aborted || !human.active || !human.visible) {
+      if (abort.signal.aborted || !human.active || !human.visible || !this.isHumanCloseToMammaCat(human)) {
         return;
       }
       const line = response.lines[0]?.trim();
@@ -3032,6 +3077,11 @@ export class GameScene extends Phaser.Scene {
     }
     const lines = this.catPersonGreetings[human.humanType] ?? this.catPersonGreetings.feeder!;
     return lines[Math.floor(Math.random() * lines.length)]!;
+  }
+
+  private isHumanCloseToMammaCat(human: HumanNPC): boolean {
+    return Phaser.Math.Distance.Between(human.x, human.y, this.player.x, this.player.y) <=
+      GP.CAT_PERSON_PLAYER_GREET_DIST;
   }
 
   /**
@@ -3353,31 +3403,68 @@ export class GameScene extends Phaser.Scene {
     try {
       const name = cat.npcName;
       const trustBefore = this.trust.getCatTrust(name);
+      const persistenceSnapshot: CatDialoguePersistenceSnapshot = {
+        timestamp: this.dayNight.totalGameTimeMs,
+        realTimestamp: Date.now(),
+        gameDay: this.dayNight.dayCount,
+        chapter: this.chapters.chapter,
+        timeOfDay: this.dayNight.currentPhase,
+        hunger: this.stats.hunger,
+        thirst: this.stats.thirst,
+        energy: this.stats.energy,
+        trustBefore,
+      };
 
-      const history = await getRecentConversations(name, 20);
+      const [history, conversationCount, npcMemories] = await Promise.all([
+        getRecentConversations(name, 10),
+        getConversationCount(name),
+        getNpcMemories(name, 20),
+      ]);
       const conversationHistory: ConversationEntry[] = history.map((r) => ({
         timestamp: r.timestamp,
         speaker: r.speaker,
+        mammaCatTurn: r.mammaCatTurn,
         text: r.lines.join(" "),
       }));
+      const lastConversation = history.length > 0 ? history[history.length - 1]! : null;
+      const gameDaysSinceLastTalk = lastConversation
+        ? Math.max(0, this.dayNight.dayCount - lastConversation.gameDay)
+        : undefined;
+      const conversationRecency = buildDialogueRecencyContext({
+        history,
+        nowRealTimestamp: Date.now(),
+        nowGameTimestamp: this.dayNight.totalGameTimeMs,
+        currentGameDay: this.dayNight.dayCount,
+      });
+      const isFirstConversation = this.isFirstConversationWithCat(conversationCount);
 
       const request = {
         speaker: name,
         speakerType: "cat" as const,
         target: "Mamma Cat",
         gameState: {
-          chapter: this.chapters.chapter,
-          timeOfDay: this.dayNight.currentPhase,
+          chapter: persistenceSnapshot.chapter,
+          timeOfDay: persistenceSnapshot.timeOfDay,
           trustGlobal: this.trust.global,
-          trustWithSpeaker: trustBefore,
-          hunger: this.stats.hunger,
-          thirst: this.stats.thirst,
-          energy: this.stats.energy,
-          daysSurvived: this.dayNight.dayCount,
+          trustWithSpeaker: persistenceSnapshot.trustBefore,
+          hunger: persistenceSnapshot.hunger,
+          thirst: persistenceSnapshot.thirst,
+          energy: persistenceSnapshot.energy,
+          daysSurvived: persistenceSnapshot.gameDay,
           knownCats: Array.from(this.knownCats),
-          recentEvents: [] as string[],
+          recentEvents: this.buildRecentDialogueEvents(lastConversation, gameDaysSinceLastTalk),
         },
         conversationHistory,
+        isFirstConversation,
+        relationshipStage: calculateRelationshipStage({
+          isFirstConversation,
+          conversationCount,
+          trustWithSpeaker: trustBefore,
+          memories: npcMemories,
+        }),
+        npcMemories,
+        gameDaysSinceLastTalk,
+        conversationRecency,
       };
 
       const response = await this.dialogueService.getDialogue(request);
@@ -3425,7 +3512,7 @@ export class GameScene extends Phaser.Scene {
         this.engagedDialogueNPC = null;
         this.lastDialoguePartner = cat;
         this.lastDialoguePartnerAt = this.time.now;
-        this.processDialogueResponse(cat, name, trustBefore, response);
+        this.processDialogueResponse(cat, name, persistenceSnapshot, response);
       });
     } catch (err) {
       console.error("[GameScene] requestCatDialogue failed:", err);
@@ -3454,7 +3541,12 @@ export class GameScene extends Phaser.Scene {
    * trust awards, registry updates, indicator reveals, disposition
    * changes, conversation storage, and auto-saves.
    */
-  private processDialogueResponse(cat: NPCCat, catName: string, trustBefore: number, response: DialogueResponse): void {
+  private processDialogueResponse(
+    cat: NPCCat,
+    catName: string,
+    snapshot: CatDialoguePersistenceSnapshot,
+    response: DialogueResponse,
+  ): void {
     if (response.emote) {
       this.emotes.show(this, cat, response.emote as EmoteType);
     }
@@ -3510,28 +3602,79 @@ export class GameScene extends Phaser.Scene {
     }
 
     // Persist after trust awards so trustAfter matches gameplay state.
+    const mammaCatTurn = this.buildMammaCatTurnForMemory(catName, snapshot, response.mammaCatCue);
     void storeConversation({
       speaker: catName,
-      timestamp: this.dayNight.totalGameTimeMs,
-      realTimestamp: Date.now(),
-      gameDay: this.dayNight.dayCount,
+      timestamp: snapshot.timestamp,
+      realTimestamp: snapshot.realTimestamp,
+      gameDay: snapshot.gameDay,
+      mammaCatTurn,
       lines: response.lines,
-      trustBefore,
+      trustBefore: snapshot.trustBefore,
       trustAfter: this.trust.getCatTrust(catName),
-      chapter: this.chapters.chapter,
+      chapter: snapshot.chapter,
       gameStateSnapshot: {
         trustWithSpeaker: this.trust.getCatTrust(catName),
         trustGlobal: this.trust.global,
-        timeOfDay: this.dayNight.currentPhase,
-        hunger: this.stats.hunger,
-        thirst: this.stats.thirst,
-        energy: this.stats.energy,
+        timeOfDay: snapshot.timeOfDay,
+        hunger: snapshot.hunger,
+        thirst: snapshot.thirst,
+        energy: snapshot.energy,
       },
     });
+    if (response.memoryNote) {
+      void addNpcMemory(catName, {
+        kind: response.memoryNote.kind,
+        label: response.memoryNote.label,
+        value: response.memoryNote.value,
+        source: "ai",
+        gameDay: snapshot.gameDay,
+      });
+    }
+    if (event) {
+      void addNpcMemory(catName, {
+        kind: "event",
+        label: isFirst ? "first_meeting" : event,
+        value: isFirst
+          ? `Met Mamma Cat on day ${snapshot.gameDay} at ${snapshot.timeOfDay}.`
+          : `Shared a ${event.replace(/_/g, " ")} exchange on day ${snapshot.gameDay}.`,
+        source: "scripted",
+        gameDay: snapshot.gameDay,
+      });
+    }
 
     if (isFirst) {
       this.autoSave();
     }
+  }
+
+  private isFirstConversationWithCat(
+    conversationCount: number,
+  ): boolean {
+    return conversationCount === 0;
+  }
+
+  private buildRecentDialogueEvents(
+    lastConversation: { gameDay: number } | null,
+    gameDaysSinceLastTalk: number | undefined,
+  ): string[] {
+    if (!lastConversation || gameDaysSinceLastTalk === undefined) return [];
+    if (gameDaysSinceLastTalk === 0) return ["Mamma Cat already spoke with this NPC today."];
+    if (gameDaysSinceLastTalk === 1) return ["Mamma Cat last spoke with this NPC yesterday."];
+    return [`Mamma Cat last spoke with this NPC ${gameDaysSinceLastTalk} game days ago.`];
+  }
+
+  private buildMammaCatTurnForMemory(
+    catName: string,
+    snapshot: CatDialoguePersistenceSnapshot,
+    mammaCatCue?: string,
+  ): string {
+    const base = [
+      `Mamma Cat approaches ${catName} during ${snapshot.timeOfDay}.`,
+      `Her hunger is ${snapshot.hunger}, thirst is ${snapshot.thirst}, and energy is ${snapshot.energy}.`,
+      `Trust with ${catName} before this exchange is ${snapshot.trustBefore}.`,
+    ].join(" ");
+    return mammaCatCue ? `${base} ${mammaCatCue}` : base;
   }
 
   // ──────────── Snatchers (Task 4) ────────────

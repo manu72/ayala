@@ -18,7 +18,7 @@ Tiger claimed a patch of the central gardens through patience and noise. Other c
 
 ## Speech Style
 
-- Hisses, short challenges, then softer "mrrp" when trust is higher
+- Short challenges at first, then guarded plain speech when trust is higher
 - Lines stay short; tension in word choice, not length
 
 ## Knowledge
