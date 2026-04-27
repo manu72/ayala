@@ -74,7 +74,13 @@ export function isValidSave(data: unknown): data is SaveData {
   }
 
   if (d.version >= CURRENT_VERSION) {
-    if (typeof d.lives !== 'number' || !Number.isFinite(d.lives) || d.lives < 0 || d.lives > DEFAULT_LIVES) return false
+    if (
+      typeof d.lives !== 'number' ||
+      !Number.isFinite(d.lives) ||
+      !Number.isInteger(d.lives) ||
+      d.lives < 0 ||
+      d.lives > DEFAULT_LIVES
+    ) return false
     if (!isValidRunScore(d.runScore)) return false
   }
 

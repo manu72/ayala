@@ -74,6 +74,53 @@ describe('isValidSave', () => {
     ).toBe(true)
   })
 
+  it.each([
+    ['above max', 4],
+    ['negative', -1],
+    ['fractional', 2.5],
+    ['non-numeric', '3'],
+  ])('rejects v2 save with %s lives', (_caseName, lives) => {
+    expect(
+      isValidSave(
+        validSaveData({
+          version: 2,
+          lives,
+          runScore: DEFAULT_RUN_SCORE_STATE,
+        }),
+      ),
+    ).toBe(false)
+  })
+
+  it('rejects v2 save with malformed run score state', () => {
+    expect(
+      isValidSave(
+        validSaveData({
+          version: 2,
+          lives: 3,
+          runScore: { ...DEFAULT_RUN_SCORE_STATE, visitedCells: 'bad' },
+        }),
+      ),
+    ).toBe(false)
+    expect(
+      isValidSave(
+        validSaveData({
+          version: 2,
+          lives: 3,
+          runScore: { ...DEFAULT_RUN_SCORE_STATE, catEngagements: -1 },
+        }),
+      ),
+    ).toBe(false)
+    expect(
+      isValidSave(
+        validSaveData({
+          version: 2,
+          lives: 3,
+          runScore: { ...DEFAULT_RUN_SCORE_STATE, foodSourcesDiscovered: [42] },
+        }),
+      ),
+    ).toBe(false)
+  })
+
   it('rejects future version', () => {
     expect(isValidSave(validSaveData({ version: 3 }))).toBe(false)
   })

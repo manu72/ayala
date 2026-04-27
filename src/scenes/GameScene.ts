@@ -65,6 +65,7 @@ import { hasLineOfSightTiles } from "../utils/lineOfSight";
 import { shouldUseHumanAiBubble } from "../utils/humanAiBubbleEligibility";
 import { buildDialogueRecencyContext } from "../utils/dialogueRecency";
 import { computeReachableCells, getCellKey } from "../utils/mapExploration";
+import { applyLifeLoss, MAX_LIVES } from "../utils/lifeFlow";
 
 const INTERACTION_DISTANCE = GP.INTERACTION_DIST;
 const DIALOGUE_BREAK_DISTANCE = GP.DIALOGUE_BREAK_DIST;
@@ -99,7 +100,6 @@ const POSITIVE_EMOTES: ReadonlySet<EmoteType> = new Set(["heart"]);
 const DEFAULT_ZOOM = 2.5;
 const PEEK_ZOOM = 0.8;
 const ZOOM_DURATION = 500;
-const MAX_LIVES = 3;
 const HUMAN_ENGAGEMENT_COOLDOWN_MS = 5_000;
 const DUMPED_COMFORT_WINDOW_MS = 5_000;
 
@@ -2238,8 +2238,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   private loseLife(): boolean {
-    this.lives = Math.max(0, this.lives - 1);
-    return this.lives <= 0;
+    const result = applyLifeLoss(this.lives);
+    this.lives = result.lives;
+    return result.gameOver;
   }
 
   private triggerGameOver(reason: "collapse" | "snatched"): void {

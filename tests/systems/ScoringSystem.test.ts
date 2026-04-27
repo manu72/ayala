@@ -103,4 +103,48 @@ describe("ScoringSystem", () => {
     expect(scoring.toJSON().catEngagements).toBe(2);
     expect(scoring.toJSON().nightsSurvived).toBe(0);
   });
+
+  it("persists run snatch count without adding points to the score", () => {
+    const scoring = new ScoringSystem();
+
+    scoring.recordSnatch();
+    scoring.recordSnatch();
+
+    expect(scoring.toJSON().runSnatchCount).toBe(2);
+    expect(scoring.total).toBe(0);
+
+    const restored = new ScoringSystem(scoring.toJSON());
+    expect(restored.toJSON().runSnatchCount).toBe(2);
+    expect(restored.total).toBe(0);
+  });
+
+  it("ignores invalid distance deltas", () => {
+    const scoring = new ScoringSystem();
+
+    scoring.addDistance(999);
+    scoring.addDistance(-20);
+    scoring.addDistance(Number.NaN);
+    scoring.addDistance(Number.POSITIVE_INFINITY);
+    scoring.addDistance(1);
+
+    expect(scoring.toJSON().distanceTravelledPx).toBe(1000);
+    expect(scoring.getBreakdown().distanceTravelled.points).toBe(SCORING_WEIGHTS.distancePerThousandPx);
+  });
+
+  it("suspends direct scoring events during setup", () => {
+    const scoring = new ScoringSystem();
+
+    scoring.suspend();
+    scoring.recordCatEngagement();
+    scoring.recordHumanEngagement();
+    scoring.recordNightSurvived({ clean: true });
+    scoring.recordSnatch();
+    scoring.addDistance(1000);
+    scoring.visitCell(1);
+    scoring.recordDumpedPetComforted(1);
+    scoring.discoverFoodSource("fountain:1:2");
+    scoring.resume();
+
+    expect(scoring.toJSON()).toEqual(DEFAULT_RUN_SCORE_STATE);
+  });
 });
