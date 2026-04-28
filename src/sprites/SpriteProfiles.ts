@@ -5,6 +5,7 @@ export type HumanType =
   | "jogger"
   | "jogger_male"
   | "feeder"
+  | "ben"
   | "dogwalker"
   | "camille"
   | "manu"
@@ -155,6 +156,35 @@ const FEEDER_PROFILE: SpriteProfile = {
   },
 };
 
+// Ben: named feeder with dedicated 68x68 stand, walk, and crouch strips.
+const BEN_PROFILE: SpriteProfile = {
+  key: "ben",
+  cols: 8,
+  frameW: 68,
+  frameH: 68,
+  bodyW: 20,
+  bodyH: 18,
+  scale: 0.7,
+  directionalKeys: {
+    walkDown: "ben_walk_s",
+    walkLeft: "ben_walk_w",
+    walkRight: "ben_walk_e",
+    walkUp: "ben_walk_n",
+    idle: "ben_stand",
+    crouchLeft: "ben_crouch_w",
+    crouchRight: "ben_crouch_e",
+  },
+  anims: {
+    walkDown: { row: 0, count: 4 },
+    walkRight: { row: 0, count: 4 },
+    walkLeft: { row: 0, count: 4 },
+    walkUp: { row: 0, count: 4 },
+    idle: { row: 0, count: 8 },
+    crouchLeft: { row: 0, count: 5 },
+    crouchRight: { row: 0, count: 5 },
+  },
+};
+
 // Camille: 68x68 frames, scale 0.7 to match the scene's human proportions.
 // Adjust scale here if she looks too big or small.
 const CAMILLE_PROFILE: SpriteProfile = {
@@ -272,6 +302,8 @@ export function profileForType(type: HumanType): SpriteProfile {
       return JOGGER_MALE_PROFILE;
     case "feeder":
       return FEEDER_PROFILE;
+    case "ben":
+      return BEN_PROFILE;
     case "dogwalker":
       return DOGWALKER_PROFILE;
     case "camille":

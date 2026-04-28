@@ -2852,7 +2852,7 @@ export class GameScene extends Phaser.Scene {
         path: feederCircuit,
       },
       {
-        type: "feeder",
+        type: "ben",
         identityName: "Ben",
         speed: 38,
         activePhases: ["dawn", "evening"],

@@ -58,6 +58,7 @@ describe('profileForType', () => {
   const expectedKeys: Record<string, string> = {
     jogger: 'jogger',
     feeder: 'feeder',
+    ben: 'ben',
     dogwalker: 'dogwalker',
     camille: 'camille',
     manu: 'manu',
@@ -78,7 +79,7 @@ describe('profileForType', () => {
   })
 
   it('all profiles have required shape fields', () => {
-    const types = ['jogger', 'feeder', 'dogwalker', 'camille', 'manu', 'kish'] as const
+    const types = ['jogger', 'feeder', 'ben', 'dogwalker', 'camille', 'manu', 'kish'] as const
     for (const type of types) {
       const profile = profileForType(type)
       expect(typeof profile.key).toBe('string')
@@ -94,6 +95,33 @@ describe('profileForType', () => {
       expect(profile.anims.walkUp).toBeDefined()
       expect(profile.anims.idle).toBeDefined()
     }
+  })
+
+  it('ben uses dedicated stand, walk, and crouch sheets', () => {
+    const profile = profileForType('ben')
+    expect(profile.key).toBe('ben')
+    expect(profile.cols).toBe(8)
+    expect(profile.frameW).toBe(68)
+    expect(profile.frameH).toBe(68)
+    expect(profile.scale).toBe(0.7)
+    expect(profile.directionalKeys).toMatchObject({
+      walkDown: 'ben_walk_s',
+      walkLeft: 'ben_walk_w',
+      walkRight: 'ben_walk_e',
+      walkUp: 'ben_walk_n',
+      idle: 'ben_stand',
+      crouchLeft: 'ben_crouch_w',
+      crouchRight: 'ben_crouch_e',
+    })
+    expect(profile.anims).toMatchObject({
+      walkDown: { row: 0, count: 4 },
+      walkLeft: { row: 0, count: 4 },
+      walkRight: { row: 0, count: 4 },
+      walkUp: { row: 0, count: 4 },
+      idle: { row: 0, count: 8 },
+      crouchLeft: { row: 0, count: 5 },
+      crouchRight: { row: 0, count: 5 },
+    })
   })
 
   it('camille and manu have crouch animations', () => {
@@ -113,7 +141,7 @@ describe('profileForType', () => {
   })
 
   it('profiles with directionalKeys have the required direction textures', () => {
-    const types = ['dogwalker', 'feeder', 'camille', 'manu', 'kish'] as const
+    const types = ['dogwalker', 'feeder', 'ben', 'camille', 'manu', 'kish'] as const
     for (const type of types) {
       const profile = profileForType(type)
       expect(profile.directionalKeys).toBeDefined()
@@ -211,6 +239,25 @@ describe('createSpriteProfileAnimations', () => {
     expect(store.has('camille-crouch-right')).toBe(true)
     expect(store.get('camille-crouch-left')?.repeat).toBe(0)
     expect(store.get('camille-crouch-right')?.repeat).toBe(0)
+  })
+
+  it('directional (ben): registers dedicated walk, idle, and crouch frame ranges', () => {
+    const { scene, store } = buildAnimScene()
+    const profile = profileForType('ben')
+    createSpriteProfileAnimations(scene, profile)
+
+    const walkFrames = (tex: string, count: number) =>
+      Array.from({ length: count }, (_, i) => ({ key: tex, frame: i }))
+
+    expect(store.get('ben-walk-down')?.frames).toEqual(walkFrames('ben_walk_s', 4))
+    expect(store.get('ben-walk-left')?.frames).toEqual(walkFrames('ben_walk_w', 4))
+    expect(store.get('ben-walk-right')?.frames).toEqual(walkFrames('ben_walk_e', 4))
+    expect(store.get('ben-walk-up')?.frames).toEqual(walkFrames('ben_walk_n', 4))
+    expect(store.get('ben-idle')?.frames).toEqual(walkFrames('ben_stand', 8))
+    expect(store.get('ben-crouch-left')?.frames).toEqual(walkFrames('ben_crouch_w', 5))
+    expect(store.get('ben-crouch-right')?.frames).toEqual(walkFrames('ben_crouch_e', 5))
+    expect(store.get('ben-crouch-left')?.repeat).toBe(0)
+    expect(store.get('ben-crouch-right')?.repeat).toBe(0)
   })
 
   it('duplicate call: early exit when idle exists; no extra creates or generateFrameNumbers', () => {

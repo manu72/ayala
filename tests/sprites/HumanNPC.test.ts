@@ -230,13 +230,15 @@ function makeHuman(overrides: Partial<HumanConfig> & { type: HumanConfig['type']
   return { npc, ...harness }
 }
 
+const BEN_HUMAN_TYPE = 'ben' as HumanConfig['type']
+
 // ──────────────────────────────────────────────────────────────
 // H3: Manu greeting cadence
 // ──────────────────────────────────────────────────────────────
 
 describe('HumanNPC.shouldDeferManuGreet — cadence', () => {
   it('returns false (no defer) for every non-Manu type', () => {
-    for (const type of ['feeder', 'camille', 'kish', 'jogger', 'dogwalker'] as const) {
+    for (const type of ['feeder', BEN_HUMAN_TYPE, 'camille', 'kish', 'jogger', 'dogwalker'] as const) {
       const { npc } = makeHuman({ type })
       for (let i = 0; i < 6; i++) {
         expect(npc.shouldDeferManuGreet()).toBe(false)
@@ -326,6 +328,29 @@ describe('HumanNPC — feeder linger state machine', () => {
     expect(bowl.setPosition).toHaveBeenCalledWith(200, 0)
     expect(bowl.setDepth).toHaveBeenCalled()
     expect(npc.anims.play).toHaveBeenCalledWith('feeder-idle', true)
+  })
+
+  it('lets Ben use feeder linger behaviour with his own idle animation', () => {
+    const { npc, scene, graphicsInstances } = makeHuman({
+      type: BEN_HUMAN_TYPE,
+      identityName: 'Ben',
+      path: [
+        { x: 0, y: 0 },
+        { x: 200, y: 0 },
+      ],
+      lingerSec: 2,
+      lingerWaypointIndex: 1,
+    })
+    npc.setPhase('dawn')
+
+    teleport(npc, 200, 0)
+    const setVelocity = vi.spyOn(npc, 'setVelocity')
+    npc.update(16)
+
+    expect(setVelocity).toHaveBeenCalledWith(0)
+    expect((scene.add.graphics as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1)
+    expect(graphicsInstances).toHaveLength(1)
+    expect(npc.anims.play).toHaveBeenCalledWith('ben-idle', true)
   })
 
   it('does not create a second prop while already lingering', () => {
@@ -543,6 +568,7 @@ describe('HumanNPC — greeting helpers', () => {
     ['camille', 6000],
     ['kish', 3000],
     ['feeder', 4000],
+    [BEN_HUMAN_TYPE, 4000],
     ['manu', 4000],
   ])('startGreeting sets %s-specific duration (%dms) and clears on update', (type, duration) => {
     const { npc } = makeHuman({ type })
@@ -557,8 +583,8 @@ describe('HumanNPC — greeting helpers', () => {
     expect(npc.isGreeting).toBe(false)
   })
 
-  it('isCatPerson is true for feeder/camille/manu/kish and false for jogger/dogwalker', () => {
-    for (const type of ['feeder', 'camille', 'manu', 'kish'] as const) {
+  it('isCatPerson is true for feeder/ben/camille/manu/kish and false for jogger/dogwalker', () => {
+    for (const type of ['feeder', BEN_HUMAN_TYPE, 'camille', 'manu', 'kish'] as const) {
       expect(makeHuman({ type }).npc.isCatPerson).toBe(true)
     }
     for (const type of ['jogger', 'dogwalker'] as const) {
@@ -626,6 +652,19 @@ describe('HumanNPC — encounter pause', () => {
 
     npc.pauseForEncounter(npc.x - 50) // target to the left
     expect(playSpy).toHaveBeenCalledWith('camille-crouch-left', true)
+  })
+
+  it('pauseForEncounter uses Ben crouch sheets when Ben is paused', () => {
+    const { npc } = makeHuman({ type: BEN_HUMAN_TYPE, activePhases: ['evening'] })
+    npc.setPhase('evening')
+    const playSpy = npc.anims.play as ReturnType<typeof vi.fn>
+    playSpy.mockClear()
+
+    npc.pauseForEncounter(npc.x + 50)
+    expect(playSpy).toHaveBeenCalledWith('ben-crouch-right', true)
+
+    npc.pauseForEncounter(npc.x - 50)
+    expect(playSpy).toHaveBeenCalledWith('ben-crouch-left', true)
   })
 
   it('while paused, update() skips path-following entirely (velocity stays zero)', () => {
@@ -726,6 +765,7 @@ describe('HumanNPC.identityName — persona wiring', () => {
       ['camille', 'Camille'],
       ['manu', 'Manu'],
       ['kish', 'Kish'],
+      [BEN_HUMAN_TYPE, 'Ben'],
     ]
     for (const [type, expected] of cases) {
       const { npc } = makeHuman({ type })

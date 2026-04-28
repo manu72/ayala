@@ -59,9 +59,15 @@ function defaultIdentityNameFor(type: HumanType): string | null {
       return "Manu";
     case "kish":
       return "Kish";
+    case "ben":
+      return "Ben";
     default:
       return null;
   }
+}
+
+function isFeederHumanType(type: HumanType): boolean {
+  return type === "feeder" || type === "ben";
 }
 
 /** Park exit waypoints — on the road perimeter, avoiding interior obstacles. */
@@ -173,7 +179,7 @@ export class HumanNPC extends BaseNPC {
 
   get isCatPerson(): boolean {
     return (
-      this.humanType === "feeder" ||
+      isFeederHumanType(this.humanType) ||
       this.humanType === "camille" ||
       this.humanType === "manu" ||
       this.humanType === "kish"
@@ -352,7 +358,7 @@ export class HumanNPC extends BaseNPC {
     const dist = Phaser.Math.Distance.Between(this.x, this.y, target.x, target.y);
     if (dist < 20) {
       if (
-        this.humanType === "feeder" &&
+        isFeederHumanType(this.humanType) &&
         this.config.lingerSec &&
         this.config.lingerSec > 0 &&
         this.currentWaypoint === this.normalizedLingerIndex

@@ -93,6 +93,23 @@ export class BootScene extends Phaser.Scene {
       });
     }
 
+    // Ben spritesheets (68x68 frames, single-row strips)
+    const benSheets: Array<[string, string]> = [
+      ["ben_stand", "ben_stand"],
+      ["ben_walk_e", "ben_walk_east"],
+      ["ben_walk_w", "ben_walk_west"],
+      ["ben_walk_n", "ben_walk_north"],
+      ["ben_walk_s", "ben_walk_south"],
+      ["ben_crouch_e", "ben_crouch_east"],
+      ["ben_crouch_w", "ben_crouch_west"],
+    ];
+    for (const [key, file] of benSheets) {
+      this.load.spritesheet(key, `assets/sprites/${file}.png`, {
+        frameWidth: 68,
+        frameHeight: 68,
+      });
+    }
+
     // Jogger spritesheet: 8 cols x 6 rows of 150x85 frames (female jogger)
     this.load.spritesheet("jogger", "assets/sprites/girl.png", {
       frameWidth: 150,
