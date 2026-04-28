@@ -3,6 +3,7 @@ import type { TimeOfDay } from './DayNightCycle'
 import type { SourceType } from './FoodSource'
 import type { TrustData } from './TrustSystem'
 import { DEFAULT_RUN_SCORE_STATE, type RunScoreState } from './ScoringSystem'
+import { DEFAULT_LIVES } from '../utils/lifeFlow'
 
 const STORAGE_KEY = 'ayala_save'
 
@@ -22,7 +23,6 @@ export interface SaveData {
 
 const CURRENT_VERSION = 2
 const LEGACY_VERSION = 1
-const DEFAULT_LIVES = 3
 
 const TRACKED_KEYS = [
   'MET_BLACKY', 'TIGER_TALKS', 'JAYCO_TALKS', 'KNOWN_CATS',

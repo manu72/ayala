@@ -4,6 +4,7 @@ import type { GameScene } from "./GameScene";
 import { DialogueSystem } from "../systems/DialogueSystem";
 import { REST_HOLD_MS } from "../config/gameplayConstants";
 import { AUDIO_MUTED_CHANGED } from "../systems/AudioSystem";
+import { DEFAULT_LIVES } from "../utils/lifeFlow";
 
 const PANEL_X = 8;
 const PANEL_Y = 8;
@@ -237,8 +238,8 @@ export class HUDScene extends Phaser.Scene {
     const dayNight = gameScene.dayNight;
 
     this.clockLabel.setText(dayNight.clockText);
-    const lives = Math.max(0, Math.min(3, gameScene.lives ?? 0));
-    this.livesLabel.setText(`Lives ${"\u2665".repeat(lives)}${"\u2661".repeat(3 - lives)}`);
+    const lives = Math.max(0, Math.min(DEFAULT_LIVES, gameScene.lives ?? 0));
+    this.livesLabel.setText(`Lives ${"\u2665".repeat(lives)}${"\u2661".repeat(DEFAULT_LIVES - lives)}`);
     this.scoreLabel.setText(`Score ${Math.floor(gameScene.scoring?.total ?? 0).toLocaleString()}`);
 
     BARS.forEach((def, i) => {
