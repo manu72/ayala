@@ -37,19 +37,23 @@ export interface ScoreBreakdown {
   foodSourcesDiscovered: ScoreBreakdownItem;
 }
 
-export const DEFAULT_RUN_SCORE_STATE: RunScoreState = {
-  catEngagements: 0,
-  humanEngagements: 0,
-  cleanNights: 0,
-  nightsSurvived: 0,
-  distanceTravelledPx: 0,
-  totalExplorableCells: 0,
-  visitedCells: [],
-  closeFriendsMade: 0,
-  dumpedPetsComforted: [],
-  foodSourcesDiscovered: [],
-  runSnatchCount: 0,
-};
+export function createDefaultRunScoreState(): RunScoreState {
+  return {
+    catEngagements: 0,
+    humanEngagements: 0,
+    cleanNights: 0,
+    nightsSurvived: 0,
+    distanceTravelledPx: 0,
+    totalExplorableCells: 0,
+    visitedCells: [],
+    closeFriendsMade: 0,
+    dumpedPetsComforted: [],
+    foodSourcesDiscovered: [],
+    runSnatchCount: 0,
+  };
+}
+
+export const DEFAULT_RUN_SCORE_STATE: RunScoreState = createDefaultRunScoreState();
 
 export function calculateTerritoryScore(coveragePercent: number, maxPoints = SCORING_WEIGHTS.territoryMax): number {
   const clampedPercent = clamp(coveragePercent, 0, 100);

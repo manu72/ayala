@@ -2,7 +2,7 @@ import type { CatStats } from './StatsSystem'
 import type { TimeOfDay } from './DayNightCycle'
 import type { SourceType } from './FoodSource'
 import type { TrustData } from './TrustSystem'
-import { DEFAULT_RUN_SCORE_STATE, type RunScoreState } from './ScoringSystem'
+import { createDefaultRunScoreState, type RunScoreState } from './ScoringSystem'
 import { DEFAULT_LIVES } from '../utils/lifeFlow'
 
 const STORAGE_KEY = 'ayala_save'
@@ -125,7 +125,7 @@ function migrateSave(data: SaveData): SaveData {
     ...data,
     version: CURRENT_VERSION,
     lives: DEFAULT_LIVES,
-    runScore: DEFAULT_RUN_SCORE_STATE,
+    runScore: createDefaultRunScoreState(),
   }
 }
 
@@ -145,7 +145,7 @@ export const SaveSystem = {
     trust?: TrustData,
     territory?: { claimed: boolean; claimedOnDay: number },
     lives = DEFAULT_LIVES,
-    runScore: RunScoreState = DEFAULT_RUN_SCORE_STATE,
+    runScore: RunScoreState = createDefaultRunScoreState(),
   ): boolean {
     const variables: Record<string, unknown> = {}
     for (const key of TRACKED_KEYS) {

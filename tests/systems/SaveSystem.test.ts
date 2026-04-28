@@ -330,6 +330,31 @@ describe('SaveSystem.save / load / hasSave / clear', () => {
     expect(loaded?.runScore).toEqual(DEFAULT_RUN_SCORE_STATE)
   })
 
+  it('migrates v1 saves with a fresh run score object instead of the shared default', () => {
+    store['ayala_save'] = JSON.stringify(validSaveData({ version: 1 }))
+
+    const loaded = SaveSystem.load()
+    expect(loaded).not.toBeNull()
+
+    try {
+      loaded!.runScore.visitedCells.push(12)
+      loaded!.runScore.dumpedPetsComforted.push(1)
+      loaded!.runScore.foodSourcesDiscovered.push('fountain:10:20')
+
+      expect(DEFAULT_RUN_SCORE_STATE.visitedCells).toEqual([])
+      expect(DEFAULT_RUN_SCORE_STATE.dumpedPetsComforted).toEqual([])
+      expect(DEFAULT_RUN_SCORE_STATE.foodSourcesDiscovered).toEqual([])
+
+      store['ayala_save'] = JSON.stringify(validSaveData({ version: 1 }))
+      const migratedAgain = SaveSystem.load()
+      expect(migratedAgain?.runScore).toEqual(DEFAULT_RUN_SCORE_STATE)
+    } finally {
+      DEFAULT_RUN_SCORE_STATE.visitedCells.length = 0
+      DEFAULT_RUN_SCORE_STATE.dumpedPetsComforted.length = 0
+      DEFAULT_RUN_SCORE_STATE.foodSourcesDiscovered.length = 0
+    }
+  })
+
   it('hasSave is false before save and true after', () => {
     expect(SaveSystem.hasSave()).toBe(false)
     SaveSystem.save(0, 0, { hunger: 1, thirst: 1, energy: 1 }, 'dawn', 0, stubRegistry({}))
