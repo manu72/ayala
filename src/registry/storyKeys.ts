@@ -20,6 +20,9 @@ export const StoryKeys = {
   // `handleSnatcherCapture` before the save-and-restart flow so the bump
   // survives the scene reload. Surfaced in the journal footer.
   PLAYER_SNATCHED_COUNT: "PLAYER_SNATCHED_COUNT",
+  // Pending per-night scoring flag. Set when Mamma Cat is snatched before dawn,
+  // persisted in save variables, and cleared after the next new-day score tick.
+  SNATCHED_THIS_NIGHT: "SNATCHED_THIS_NIGHT",
   // Total cat population of the colony (named + Mamma + unseen background).
   // Seeded on a fresh game from `INITIAL_COLONY_TOTAL`, bumped by dumping
   // events, decremented by snatcher captures, floored at

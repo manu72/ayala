@@ -66,6 +66,11 @@ import { shouldUseHumanAiBubble } from "../utils/humanAiBubbleEligibility";
 import { buildDialogueRecencyContext } from "../utils/dialogueRecency";
 import { computeReachableCells, getCellKey } from "../utils/mapExploration";
 import { applyLifeLoss, MAX_LIVES } from "../utils/lifeFlow";
+import {
+  consumeSnatchedThisNight,
+  markSnatchedThisNight,
+  restoreSnatchedThisNight,
+} from "../utils/snatcherNightState";
 
 const INTERACTION_DISTANCE = GP.INTERACTION_DIST;
 const DIALOGUE_BREAK_DISTANCE = GP.DIALOGUE_BREAK_DIST;
@@ -530,6 +535,7 @@ export class GameScene extends Phaser.Scene {
       // Story / endgame keys — always use StoryKeys so typos become compile errors.
       StoryKeys.CATS_SNATCHED,
       StoryKeys.PLAYER_SNATCHED_COUNT,
+      StoryKeys.SNATCHED_THIS_NIGHT,
       StoryKeys.CAMILLE_ENCOUNTER,
       StoryKeys.CAMILLE_ENCOUNTER_DAY,
       StoryKeys.ENCOUNTER_5_COMPLETE,
@@ -568,6 +574,7 @@ export class GameScene extends Phaser.Scene {
         for (const [key, val] of Object.entries(save.variables)) {
           this.registry.set(key, val);
         }
+        this.snatchedThisNight = restoreSnatchedThisNight(this.registry, this.snatchedThisNight);
         const savedChapter = save.variables.CHAPTER;
         if (typeof savedChapter === "number") {
           this.chapters.restore(savedChapter);
@@ -688,7 +695,8 @@ export class GameScene extends Phaser.Scene {
 
     this.dayNight.on("newDay", () => {
       this.trust.survivedDay();
-      this.scoring.recordNightSurvived({ clean: !this.snatchedThisNight });
+      const { clean } = consumeSnatchedThisNight(this.registry, this.snatchedThisNight);
+      this.scoring.recordNightSurvived({ clean });
       this.snatchedThisNight = false;
     });
 
@@ -4141,6 +4149,7 @@ export class GameScene extends Phaser.Scene {
     const finalLife = this.loseLife();
     this.scoring.recordSnatch();
     this.snatchedThisNight = true;
+    markSnatchedThisNight(this.registry);
 
     // Increment the lifetime capture counter and persist it *before* the
     // scene restart. `snatcherCapture` reloads via `SaveSystem.load()` which

@@ -194,6 +194,7 @@ SmallDog.png, WhiteDog.png, BrownDog.png — randomly assigned to dog walkers
 - **Food source startup cooldown:** Initialize `lastUsedAt` to `-cooldownMs` (not 0) so sources are available at game start.
 - **StatsSystem.fromJSON validation:** Always clamp and validate loaded numeric values (finite check, 0-100 range).
 - **Mutable default save state:** Do not assign exported default objects with array fields directly into migrated or default save data. Use a factory that returns fresh arrays, otherwise mutating a loaded migrated save can corrupt the module-level default and leak into later saves.
+- **Transient state that affects future scoring must be save-backed.** If a flag is set by an event before an autosave but consumed later (e.g. "snatched this night" consumed at dawn), mirror it into a tracked registry/save key before saving and clear that key when the scoring event consumes it.
 - **`localStorage` access itself can throw:** In Firefox with `dom.storage.enabled=false`, sandboxed iframes, and Safari with storage blocked for third-party contexts, *reading* `window.localStorage` triggers a SecurityError from the getter. `typeof localStorage` does NOT suppress this — `typeof` only guards undeclared identifiers, and the global is declared. Any boot-path code that touches storage must wrap the reference acquisition (not just `getItem`/`setItem`) in try/catch and fall back to `undefined`. See `GameScene.create()` around `migrateLegacyIntroFlag`.
 
 ### Entity Identity

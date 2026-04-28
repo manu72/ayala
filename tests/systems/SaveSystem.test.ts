@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { isValidSave, SaveSystem } from '../../src/systems/SaveSystem'
 import { DEFAULT_RUN_SCORE_STATE } from '../../src/systems/ScoringSystem'
+import { StoryKeys } from '../../src/registry/storyKeys'
 
 function validSaveData(overrides: Record<string, unknown> = {}) {
   return {
@@ -266,6 +267,25 @@ describe('SaveSystem.save / load / hasSave / clear', () => {
     ).toBe(true)
     const loaded = SaveSystem.load()
     expect(loaded?.variables.INTRO_SEEN).toBe(true)
+  })
+
+  it('round-trips the pending snatched-this-night scoring flag', () => {
+    const registry = stubRegistry({ [StoryKeys.SNATCHED_THIS_NIGHT]: true })
+    expect(
+      SaveSystem.save(
+        1,
+        2,
+        { hunger: 50, thirst: 50, energy: 50 },
+        'night',
+        1,
+        registry,
+        undefined,
+        { global: 0, cats: {} },
+        { claimed: false, claimedOnDay: 0 },
+      ),
+    ).toBe(true)
+
+    expect(SaveSystem.load()?.variables[StoryKeys.SNATCHED_THIS_NIGHT]).toBe(true)
   })
 
   it('round-trips core fields and tracked variables', () => {
