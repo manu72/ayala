@@ -91,17 +91,24 @@ const DOGWALKER_PROFILE: SpriteProfile = {
 const JOGGER_PROFILE: SpriteProfile = {
   key: "jogger",
   cols: 8,
-  frameW: 150,
-  frameH: 85,
-  bodyW: 18,
-  bodyH: 16,
-  scale: 0.5,
+  frameW: 68,
+  frameH: 68,
+  bodyW: 20,
+  bodyH: 18,
+  scale: 0.7,
+  directionalKeys: {
+    walkDown: "jogger_run_s",
+    walkLeft: "jogger_run_w",
+    walkRight: "jogger_run_e",
+    walkUp: "jogger_run_n",
+    idle: "jogger_stand",
+  },
   anims: {
     walkDown: { row: 0, count: 8 },
-    walkRight: { row: 1, count: 8 },
-    walkLeft: { row: 2, count: 8 },
-    walkUp: { row: 3, count: 8 },
-    idle: { row: 0, count: 1 },
+    walkRight: { row: 0, count: 8 },
+    walkLeft: { row: 0, count: 8 },
+    walkUp: { row: 0, count: 8 },
+    idle: { row: 0, count: 8 },
   },
 };
 

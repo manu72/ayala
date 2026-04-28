@@ -110,11 +110,20 @@ export class BootScene extends Phaser.Scene {
       });
     }
 
-    // Jogger spritesheet: 8 cols x 6 rows of 150x85 frames (female jogger)
-    this.load.spritesheet("jogger", "assets/sprites/girl.png", {
-      frameWidth: 150,
-      frameHeight: 85,
-    });
+    // Female jogger spritesheets (68x68 frames, single-row strips)
+    const joggerSheets: Array<[string, string]> = [
+      ["jogger_stand", "jogger_stand"],
+      ["jogger_run_e", "jogger_run_east"],
+      ["jogger_run_w", "jogger_run_west"],
+      ["jogger_run_n", "jogger_run_north"],
+      ["jogger_run_s", "jogger_run_south"],
+    ];
+    for (const [key, file] of joggerSheets) {
+      this.load.spritesheet(key, `assets/sprites/${file}.png`, {
+        frameWidth: 68,
+        frameHeight: 68,
+      });
+    }
 
     // Male jogger directional spritesheets (48x48 frames, single-row strips of 8)
     const mjogSheets: Array<[string, string]> = [

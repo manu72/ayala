@@ -10,8 +10,6 @@ vi.mock('phaser', () => ({
   },
 }))
 
-import { BaseNPC } from '../../src/sprites/BaseNPC'
-
 const { profileForType, createSpriteProfileAnimations } = await import('../../src/sprites/SpriteProfiles')
 
 /** Minimal anim config captured from scene.anims.create (Phaser-compatible shape). */
@@ -46,17 +44,10 @@ function buildAnimScene() {
   return { scene, store, generateFrameNumbers }
 }
 
-function framesForRow(profileKey: string, row: number, cols: number, count: number) {
-  const { start, end } = BaseNPC.rowFrames(row, cols, count)
-  return Array.from({ length: end - start + 1 }, (_, i) => ({
-    key: profileKey,
-    frame: start + i,
-  }))
-}
-
 describe('profileForType', () => {
   const expectedKeys: Record<string, string> = {
     jogger: 'jogger',
+    jogger_male: 'jogger_male',
     feeder: 'feeder',
     ben: 'ben',
     dogwalker: 'dogwalker',
@@ -79,7 +70,7 @@ describe('profileForType', () => {
   })
 
   it('all profiles have required shape fields', () => {
-    const types = ['jogger', 'feeder', 'ben', 'dogwalker', 'camille', 'manu', 'kish'] as const
+    const types = ['jogger', 'jogger_male', 'feeder', 'ben', 'dogwalker', 'camille', 'manu', 'kish'] as const
     for (const type of types) {
       const profile = profileForType(type)
       expect(typeof profile.key).toBe('string')
@@ -140,8 +131,45 @@ describe('profileForType', () => {
     expect(profile.anims.crouchRight).toBeUndefined()
   })
 
+  it('female jogger uses dedicated stand and directional run sheets', () => {
+    const profile = profileForType('jogger')
+    expect(profile.key).toBe('jogger')
+    expect(profile.cols).toBe(8)
+    expect(profile.frameW).toBe(68)
+    expect(profile.frameH).toBe(68)
+    expect(profile.scale).toBe(0.7)
+    expect(profile.directionalKeys).toMatchObject({
+      walkDown: 'jogger_run_s',
+      walkLeft: 'jogger_run_w',
+      walkRight: 'jogger_run_e',
+      walkUp: 'jogger_run_n',
+      idle: 'jogger_stand',
+    })
+    expect(profile.anims).toMatchObject({
+      walkDown: { row: 0, count: 8 },
+      walkLeft: { row: 0, count: 8 },
+      walkRight: { row: 0, count: 8 },
+      walkUp: { row: 0, count: 8 },
+      idle: { row: 0, count: 8 },
+    })
+  })
+
+  it('male jogger keeps using the male jogger directional sheets', () => {
+    const profile = profileForType('jogger_male')
+    expect(profile.key).toBe('jogger_male')
+    expect(profile.frameW).toBe(48)
+    expect(profile.frameH).toBe(48)
+    expect(profile.directionalKeys).toMatchObject({
+      walkDown: 'mjog_run_s',
+      walkLeft: 'mjog_run_w',
+      walkRight: 'mjog_run_e',
+      walkUp: 'mjog_run_n',
+      idle: 'mjog_stand',
+    })
+  })
+
   it('profiles with directionalKeys have the required direction textures', () => {
-    const types = ['dogwalker', 'feeder', 'ben', 'camille', 'manu', 'kish'] as const
+    const types = ['jogger', 'jogger_male', 'dogwalker', 'feeder', 'ben', 'camille', 'manu', 'kish'] as const
     for (const type of types) {
       const profile = profileForType(type)
       expect(profile.directionalKeys).toBeDefined()
@@ -153,20 +181,16 @@ describe('profileForType', () => {
     }
   })
 
-  it('jogger uses row-based (no directionalKeys)', () => {
-    const profile = profileForType('jogger')
-    expect(profile.directionalKeys).toBeUndefined()
+  it('legacy row-based jogger sheet is no longer used by HumanType jogger', () => {
+    expect(profileForType('jogger').directionalKeys).toBeDefined()
   })
 })
 
 describe('createSpriteProfileAnimations', () => {
-  it('row-based (jogger): registers walk + idle keys and row-derived frame ranges', () => {
+  it('directional (female jogger): registers new run and idle sheet frame ranges', () => {
     const { scene, store } = buildAnimScene()
     const profile = profileForType('jogger')
     createSpriteProfileAnimations(scene, profile)
-
-    const cols = profile.cols
-    const a = profile.anims
 
     expect(new Set(store.keys())).toEqual(
       new Set([
@@ -178,11 +202,14 @@ describe('createSpriteProfileAnimations', () => {
       ]),
     )
 
-    expect(store.get('jogger-walk-down')?.frames).toEqual(framesForRow('jogger', a.walkDown.row, cols, a.walkDown.count))
-    expect(store.get('jogger-walk-left')?.frames).toEqual(framesForRow('jogger', a.walkLeft.row, cols, a.walkLeft.count))
-    expect(store.get('jogger-walk-right')?.frames).toEqual(framesForRow('jogger', a.walkRight.row, cols, a.walkRight.count))
-    expect(store.get('jogger-walk-up')?.frames).toEqual(framesForRow('jogger', a.walkUp.row, cols, a.walkUp.count))
-    expect(store.get('jogger-idle')?.frames).toEqual(framesForRow('jogger', a.idle.row, cols, a.idle.count))
+    const walkFrames = (tex: string, count: number) =>
+      Array.from({ length: count }, (_, i) => ({ key: tex, frame: i }))
+
+    expect(store.get('jogger-walk-down')?.frames).toEqual(walkFrames('jogger_run_s', 8))
+    expect(store.get('jogger-walk-left')?.frames).toEqual(walkFrames('jogger_run_w', 8))
+    expect(store.get('jogger-walk-right')?.frames).toEqual(walkFrames('jogger_run_e', 8))
+    expect(store.get('jogger-walk-up')?.frames).toEqual(walkFrames('jogger_run_n', 8))
+    expect(store.get('jogger-idle')?.frames).toEqual(walkFrames('jogger_stand', 8))
 
     for (const k of ['jogger-walk-down', 'jogger-walk-left', 'jogger-walk-right', 'jogger-walk-up'] as const) {
       expect(store.get(k)?.frameRate).toBe(6)
@@ -190,6 +217,21 @@ describe('createSpriteProfileAnimations', () => {
     }
     expect(store.get('jogger-idle')?.frameRate).toBe(3)
     expect(store.get('jogger-idle')?.repeat).toBe(-1)
+  })
+
+  it('directional (male jogger): keeps registering male jogger texture keys', () => {
+    const { scene, store } = buildAnimScene()
+    const profile = profileForType('jogger_male')
+    createSpriteProfileAnimations(scene, profile)
+
+    const walkFrames = (tex: string, count: number) =>
+      Array.from({ length: count }, (_, i) => ({ key: tex, frame: i }))
+
+    expect(store.get('jogger_male-walk-down')?.frames).toEqual(walkFrames('mjog_run_s', 8))
+    expect(store.get('jogger_male-walk-left')?.frames).toEqual(walkFrames('mjog_run_w', 8))
+    expect(store.get('jogger_male-walk-right')?.frames).toEqual(walkFrames('mjog_run_e', 8))
+    expect(store.get('jogger_male-walk-up')?.frames).toEqual(walkFrames('mjog_run_n', 8))
+    expect(store.get('jogger_male-idle')?.frames).toEqual(walkFrames('mjog_stand', 8))
   })
 
   it('directional (dogwalker): registers keys per directionalKeys and idle', () => {
@@ -276,6 +318,11 @@ describe('createSpriteProfileAnimations', () => {
     expect(scene.anims.exists('jogger-idle')).toBe(true)
     expect([...store.keys()].sort()).toEqual(keysAfterFirst)
     expect(generateFrameNumbers.mock.calls.length).toBe(genCallsAfterFirst)
-    expect(store.get('jogger-walk-down')?.frames).toEqual(framesForRow('jogger', profile.anims.walkDown.row, profile.cols, profile.anims.walkDown.count))
+    expect(store.get('jogger-walk-down')?.frames).toEqual(
+      Array.from({ length: profile.anims.walkDown.count }, (_, i) => ({
+        key: 'jogger_run_s',
+        frame: i,
+      })),
+    )
   })
 })
