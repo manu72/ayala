@@ -1157,7 +1157,9 @@ export class GameScene extends Phaser.Scene {
 
     // Escape must be checked before the pause gate so it can unpause.
     // When the journal is open, ESC closes it (same pattern as J key).
-    if ((this.escapeKey && Phaser.Input.Keyboard.JustDown(this.escapeKey)) || this.consumeTouchPauseQueue()) {
+    const pauseRequested = (this.escapeKey && Phaser.Input.Keyboard.JustDown(this.escapeKey)) || this.consumeTouchPauseQueue();
+    if (pauseRequested) {
+      if (this.playerInputFrozen) return;
       this.handlePauseInput();
       return;
     }
@@ -1231,7 +1233,9 @@ export class GameScene extends Phaser.Scene {
     }
 
     // ──── Tab peek (toggle) ────
-    if ((this.tabKey && Phaser.Input.Keyboard.JustDown(this.tabKey)) || this.consumeTouchPeekQueue()) {
+    const peekRequested = (this.tabKey && Phaser.Input.Keyboard.JustDown(this.tabKey)) || this.consumeTouchPeekQueue();
+    if (peekRequested) {
+      if (this.playerInputFrozen) return;
       this.togglePeekInput();
     }
     if (this.isPeeking) {

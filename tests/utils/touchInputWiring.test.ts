@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import gameSceneSource from "../../src/scenes/GameScene.ts?raw";
 import hudSceneSource from "../../src/scenes/HUDScene.ts?raw";
 import journalSceneSource from "../../src/scenes/JournalScene.ts?raw";
 
@@ -16,5 +17,10 @@ describe("touch input scene wiring", () => {
     expect(hudSceneSource).toContain('this.game.events.on("blur"');
     expect(hudSceneSource).toContain("private cancelActiveTouchControls(): void");
     expect(hudSceneSource).toContain("this.dialogue.isActive ? -120 : 0");
+  });
+
+  it("guards pause and peek touch requests while player input is frozen", () => {
+    expect(gameSceneSource).toContain("if (pauseRequested) {\n      if (this.playerInputFrozen) return;");
+    expect(gameSceneSource).toContain("if (peekRequested) {\n      if (this.playerInputFrozen) return;");
   });
 });
