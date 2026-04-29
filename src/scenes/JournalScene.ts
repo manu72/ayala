@@ -41,6 +41,23 @@ export class JournalScene extends Phaser.Scene {
   private dragScrollPointerId: number | null = null;
   private dragStartY = 0;
   private dragStartScrollY = 0;
+  private onJournalPointerDown = (pointer: Phaser.Input.Pointer): void => {
+    this.dragScrollPointerId = pointer.id;
+    this.dragStartY = pointer.y;
+    this.dragStartScrollY = this.scrollY;
+  };
+  private onJournalPointerMove = (pointer: Phaser.Input.Pointer): void => {
+    if (this.dragScrollPointerId !== pointer.id) return;
+    this.setScrollY(this.dragStartScrollY + this.dragStartY - pointer.y);
+  };
+  private onJournalPointerUp = (pointer: Phaser.Input.Pointer): void => {
+    if (this.dragScrollPointerId === pointer.id) {
+      this.dragScrollPointerId = null;
+    }
+  };
+  private onJournalWheel = (_pointer: unknown, _gos: unknown, _dx: number, dy: number): void => {
+    this.setScrollY(this.scrollY + dy * 0.5);
+  };
 
   constructor() {
     super({ key: "JournalScene" });
@@ -57,19 +74,15 @@ export class JournalScene extends Phaser.Scene {
     // Full-screen dimmed background
     const bg = this.add.rectangle(width / 2, height / 2, width, height, BG_COLOR, BG_ALPHA);
     bg.setInteractive();
-    bg.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
-      this.dragScrollPointerId = pointer.id;
-      this.dragStartY = pointer.y;
-      this.dragStartScrollY = this.scrollY;
-    });
-    this.input.on("pointermove", (pointer: Phaser.Input.Pointer) => {
-      if (this.dragScrollPointerId !== pointer.id) return;
-      this.setScrollY(this.dragStartScrollY + this.dragStartY - pointer.y);
-    });
-    this.input.on("pointerup", (pointer: Phaser.Input.Pointer) => {
-      if (this.dragScrollPointerId === pointer.id) {
-        this.dragScrollPointerId = null;
-      }
+    bg.on("pointerdown", this.onJournalPointerDown);
+    this.input.on("pointermove", this.onJournalPointerMove);
+    this.input.on("pointerup", this.onJournalPointerUp);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      bg.off("pointerdown", this.onJournalPointerDown);
+      this.input.off("pointermove", this.onJournalPointerMove);
+      this.input.off("pointerup", this.onJournalPointerUp);
+      this.input.off("wheel", this.onJournalWheel);
+      this.dragScrollPointerId = null;
     });
 
     // Title
@@ -288,9 +301,7 @@ export class JournalScene extends Phaser.Scene {
     this.scrollY = 0;
 
     // Scroll with mouse wheel
-    this.input.on("wheel", (_pointer: unknown, _gos: unknown, _dx: number, dy: number) => {
-      this.setScrollY(this.scrollY + dy * 0.5);
-    });
+    this.input.on("wheel", this.onJournalWheel);
 
     // ESC closing is handled by GameScene to avoid double-fire across scenes.
   }

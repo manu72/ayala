@@ -28,4 +28,11 @@ describe("touch input scene wiring", () => {
     const resetCalls = gameSceneSource.match(/this\.clearTouchInputState\(true\);/g) ?? [];
     expect(resetCalls).toHaveLength(2);
   });
+
+  it("removes JournalScene touch and wheel listeners on shutdown", () => {
+    expect(journalSceneSource).toContain('bg.off("pointerdown", this.onJournalPointerDown)');
+    expect(journalSceneSource).toContain('this.input.off("pointermove", this.onJournalPointerMove)');
+    expect(journalSceneSource).toContain('this.input.off("pointerup", this.onJournalPointerUp)');
+    expect(journalSceneSource).toContain('this.input.off("wheel", this.onJournalWheel)');
+  });
 });
