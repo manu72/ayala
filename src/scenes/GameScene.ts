@@ -339,6 +339,7 @@ export class GameScene extends Phaser.Scene {
   shutdown(): void {
     this.trustEventUnsubscribe?.();
     this.trustEventUnsubscribe = null;
+    this.clearTouchInputState(true);
     this.clearIntroCinematicResources();
     if (this.cinematicActive) {
       this.cinematicActive = false;
@@ -431,6 +432,7 @@ export class GameScene extends Phaser.Scene {
     // subscribe to the scene-lifecycle "shutdown" event explicitly. `once` is
     // correct here because a new create() will re-subscribe on scene restart.
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.shutdown, this);
+    this.clearTouchInputState(true);
 
     this.npcs = [];
     this.humans = [];
