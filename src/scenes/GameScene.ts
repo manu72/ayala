@@ -66,6 +66,7 @@ import { shouldUseHumanAiBubble } from "../utils/humanAiBubbleEligibility";
 import { buildDialogueRecencyContext } from "../utils/dialogueRecency";
 import { computeReachableCells, getCellKey } from "../utils/mapExploration";
 import { applyLifeLoss, MAX_LIVES } from "../utils/lifeFlow";
+import { markGameOver } from "../utils/gameOverState";
 import {
   consumeSnatchedThisNight,
   markSnatchedThisNight,
@@ -2262,6 +2263,7 @@ export class GameScene extends Phaser.Scene {
     this.scene.stop("JournalScene");
     this.scene.stop("HUDScene");
     SaveSystem.clear();
+    markGameOver(this.registry);
 
     const breakdown: ScoreBreakdown = this.scoring.getBreakdown();
     this.audio.stop();
@@ -4163,7 +4165,7 @@ export class GameScene extends Phaser.Scene {
       this.autoSave();
     } else {
       SaveSystem.clear();
-      this.registry.set(StoryKeys.GAME_OVER, true);
+      markGameOver(this.registry);
     }
 
     this.cameras.main.fade(100, 0, 0, 0, false, (_cam: Phaser.Cameras.Scene2D.Camera, progress: number) => {
