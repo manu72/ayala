@@ -392,13 +392,16 @@ describe('DialogueSystem.advance — via dialogue box tap', () => {
   it('hides the dialogue and fires onComplete after the final line is tapped past', () => {
     const onComplete = vi.fn()
     const { system, background, container, backdrop } = buildDialogue()
+    const stopSpy = vi.fn()
 
     system.show(['Only line'], onComplete)
-    background.emit('pointerdown', {}, 0, 0, { stopPropagation: vi.fn() })
+    background.emit('pointerdown', {}, 0, 0, { stopPropagation: stopSpy })
 
     expect(system.isActive).toBe(false)
     expect(container.visible).toBe(false)
     expect(backdrop.visible).toBe(false)
+    expect(backdrop.input?.enabled).toBe(false)
+    expect(stopSpy).toHaveBeenCalled()
     expect(onComplete).toHaveBeenCalledTimes(1)
   })
 })
