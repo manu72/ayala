@@ -11,8 +11,14 @@ export interface GameOverSceneData {
 }
 
 export class GameOverScene extends Phaser.Scene {
+  private newGameStarting = false;
+
   constructor() {
     super({ key: "GameOverScene" });
+  }
+
+  init(): void {
+    this.newGameStarting = false;
   }
 
   create(data: GameOverSceneData): void {
@@ -72,7 +78,7 @@ export class GameOverScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setInteractive({ useHandCursor: true });
 
-    button.on("pointerdown", () => {
+    button.once("pointerdown", () => {
       void this.startNewGame();
     });
 
@@ -85,6 +91,8 @@ export class GameOverScene extends Phaser.Scene {
   }
 
   private async startNewGame(): Promise<void> {
+    if (this.newGameStarting) return;
+    this.newGameStarting = true;
     await clearAllConversations();
     this.scene.stop("HUDScene");
     this.scene.stop("JournalScene");

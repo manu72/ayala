@@ -168,6 +168,7 @@ SmallDog.png, WhiteDog.png, BrownDog.png — randomly assigned to dog walkers
 - **Rest key (Z) stale JustDown bug:** When entering rest mode via hold timer, consume the `JustDown` flag immediately before `enterRest()`, otherwise the first frame of resting reads the stale flag and wakes the player instantly.
 - **Crouch tap-vs-hold pattern:** Track `keyDownTime` on keydown event. On keyup, if held < threshold, toggle latch; if held >= threshold, release temporary crouch. Reset latch on `enterRest()`.
 - **Pause early-return ordering:** Escape key check must come BEFORE the `if (isPaused) return` gate, otherwise the player cannot unpause.
+- **Scene-level input guards must reset on lifecycle entry.** Phaser can reuse scene instances across `scene.start()` cycles, so one-shot flags such as "restart in progress" should reset in `init()` or `create()`, not only at field initialization.
 
 ### Animation
 
