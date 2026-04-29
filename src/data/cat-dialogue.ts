@@ -64,6 +64,7 @@ const tigerScripts: DialogueScript[] = [
       lines: ["*The cat's ears flatten slightly. Its tail flicks once.*", '"This is my spot."'],
       speakerPose: "hostile",
       emote: "hostile",
+      narration: "This tiger watches you with a hostile look.",
       trustChange: 10,
       event: "tiger_first",
     },
@@ -101,7 +102,7 @@ const jaycoScripts: DialogueScript[] = [
     response: {
       lines: [
         "*This cat approaches with tail up. Curious.*",
-        '"New face! I\'m Jayco. I know every corner of these steps."',
+        '"Hi there new face! I\'m Jayco. I know every corner of these steps."',
         '"The humans below, the coffee place, they leave good scraps. But watch for the guard."',
       ],
       speakerPose: "friendly",
@@ -157,9 +158,9 @@ const fluffyScripts: DialogueScript[] = [
     condition: isFirstMeeting,
     response: {
       lines: [
-        "*This cat regards you with half-closed eyes. Its long fur is immaculate.*",
-        '"..."',
-        "*It returns to grooming. You've been dismissed.*",
+        "*This cat is wary of you, half-scared and half-curious.*",
+        '"Meow to you too..."',
+        "*It slinks back into the bushes, watching you intently.*",
       ],
       speakerPose: "wary",
       emote: "curious",
@@ -171,8 +172,9 @@ const fluffyScripts: DialogueScript[] = [
     condition: (req) => req.gameState.trustWithSpeaker >= 20,
     response: {
       lines: [
-        "\"You're still alive. That's something, I suppose.\"",
+        "\"You don't seem so bad. I've tried to make friends before but the others don't let me near the food.\"",
         '"The humans with the bags come at dawn and dusk. Follow the sound of rustling."',
+        '"I heard a big noise the other day. It scared me. I think it was the guard."',
       ],
       speakerPose: "curious",
       emote: "curious",
@@ -183,7 +185,7 @@ const fluffyScripts: DialogueScript[] = [
   {
     condition: () => true,
     response: {
-      lines: ["*The cat flicks an ear in your direction but doesn't look up.*"],
+      lines: ["*The cat watches you from the bushes, keeping a safe distance.*"],
       speakerPose: "wary",
       emote: "curious",
       trustChange: 5,
