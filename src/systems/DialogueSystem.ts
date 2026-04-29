@@ -25,7 +25,7 @@ export interface DialogueHooks {
 
 /**
  * Dialogue overlay rendered inside a given scene.
- * Shows lines of text one at a time, advancing on Space.
+ * Shows lines of text one at a time, advancing on Space or tap.
  *
  * Non-blocking: the player can move while dialogue is visible.
  * Dismissible: click outside the box or the X button to close early.
