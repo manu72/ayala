@@ -277,6 +277,26 @@ function buildDialogue() {
   }
 }
 
+function buildDialogueWithReservedZones() {
+  const h = makeSceneHarness()
+  const system = new DialogueSystem(h.scene, {
+    reservedLeftPx: 120,
+    reservedRightPx: 160,
+    horizontalGapPx: 16,
+  })
+
+  return {
+    system,
+    backdrop: h.rectangles[0]!,
+    background: h.rectangles[1]!,
+    body: h.texts[0]!,
+    prompt: h.texts[1]!,
+    closeBtn: h.texts[2]!,
+    container: h.containers[0]!,
+    spaceKey: h.keys[0]!,
+  }
+}
+
 describe('DialogueSystem — constructor wiring', () => {
   it('creates a hidden container, hidden backdrop with disabled input, and a SPACE key', () => {
     const { container, backdrop, spaceKey } = buildDialogue()
@@ -285,6 +305,16 @@ describe('DialogueSystem — constructor wiring', () => {
     expect(backdrop.visible).toBe(false)
     expect(backdrop.input?.enabled).toBe(false)
     expect(spaceKey.keyCode).toBe(32)
+  })
+
+  it('can reserve left and right touch-control safe zones for the bottom drawer', () => {
+    const { background, body, closeBtn, container, prompt } = buildDialogueWithReservedZones()
+
+    expect(background.w).toBe(488)
+    expect(container.x).toBe(380)
+    expect(body.style).toMatchObject({ wordWrap: { width: 448 } })
+    expect(prompt.x).toBe(230)
+    expect(closeBtn.x).toBe(232)
   })
 
   it('close button toggles colour on pointerover / pointerout', () => {

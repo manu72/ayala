@@ -26,6 +26,11 @@ const BAR_H = 10;
 const BAR_GAP = 6;
 const BAR_LABEL_W = 50;
 const FONT_FAMILY = "Arial, Helvetica, sans-serif";
+const TOUCH_BUTTON_FONT_SIZE = "14px";
+const TOUCH_BUTTON_COMPACT_FONT_SIZE = "12px";
+const TOUCH_EDGE_MARGIN_PX = 24;
+const TOUCH_DIALOGUE_GAP_PX = 16;
+const TOUCH_ACTION_COLUMNS = 2;
 
 interface BarDef {
   stat: "hunger" | "thirst" | "energy";
@@ -243,7 +248,20 @@ export class HUDScene extends Phaser.Scene {
     this.edgePulseGraphics = this.add.graphics().setDepth(80).setAlpha(0);
 
     // ──── Dialogue ────
-    this.dialogue = new DialogueSystem(this);
+    const touchControlsVisible = this.shouldShowTouchControls();
+    this.dialogue = new DialogueSystem(
+      this,
+      touchControlsVisible
+        ? {
+            reservedLeftPx: TOUCH_EDGE_MARGIN_PX + TOUCH_STICK_RADIUS_PX * 2,
+            reservedRightPx:
+              TOUCH_EDGE_MARGIN_PX +
+              TOUCH_ACTION_COLUMNS * TOUCH_BUTTON_SIZE_PX +
+              (TOUCH_ACTION_COLUMNS - 1) * TOUCH_BUTTON_GAP_PX,
+            horizontalGapPx: TOUCH_DIALOGUE_GAP_PX,
+          }
+        : undefined,
+    );
 
     // ──── Pause menu ────
     this.pauseContainer = this.createPauseMenu(width, height);
@@ -323,8 +341,8 @@ export class HUDScene extends Phaser.Scene {
     this.touchControlsContainer = this.add.container(0, 0).setDepth(101);
     this.touchControlsContainer.setVisible(this.shouldShowTouchControls());
 
-    const stickX = TOUCH_STICK_RADIUS_PX + 24;
-    const stickY = height - TOUCH_STICK_RADIUS_PX - 24;
+    const stickX = TOUCH_STICK_RADIUS_PX + TOUCH_EDGE_MARGIN_PX;
+    const stickY = height - TOUCH_STICK_RADIUS_PX - TOUCH_EDGE_MARGIN_PX;
     this.touchStickOriginX = stickX;
     this.touchStickOriginY = stickY;
 
@@ -369,16 +387,17 @@ export class HUDScene extends Phaser.Scene {
     this.touchCancelHandler = () => this.cancelActiveTouchControls();
     this.game.events.on("blur", this.touchCancelHandler);
 
-    const right = width - 24 - TOUCH_BUTTON_SIZE_PX / 2;
-    const bottom = height - 24 - TOUCH_BUTTON_SIZE_PX / 2;
+    const right = width - TOUCH_EDGE_MARGIN_PX - TOUCH_BUTTON_SIZE_PX / 2;
+    const bottom = height - TOUCH_EDGE_MARGIN_PX - TOUCH_BUTTON_SIZE_PX / 2;
     const step = TOUCH_BUTTON_SIZE_PX + TOUCH_BUTTON_GAP_PX;
+    const left = right - step;
     const gameScene = this.scene.get("GameScene") as GameScene;
 
     const buttons = [
       this.createTouchButton(right, bottom, "Act", {
         down: () => gameScene.queueTouchInteract(),
       }),
-      this.createTouchButton(right - step, bottom, "Run", {
+      this.createTouchButton(left, bottom, "Run", {
         down: () => {
           this.touchRunActive = true;
           gameScene.setTouchRun(this.touchRunActive);
@@ -392,17 +411,17 @@ export class HUDScene extends Phaser.Scene {
         down: () => gameScene.beginTouchCrouch(),
         up: () => gameScene.endTouchCrouch(),
       }),
-      this.createTouchButton(right - step, bottom - step, "Rest", {
+      this.createTouchButton(left, bottom - step, "Rest", {
         down: () => gameScene.beginTouchRest(),
         up: () => gameScene.endTouchRest(),
       }),
-      this.createTouchButton(right - step * 2, bottom, "Look", {
+      this.createTouchButton(left, bottom - step * 2, "Look", {
         down: () => gameScene.queueTouchPeek(),
       }),
-      this.createTouchButton(right - step * 2, bottom - step, "Journal", {
+      this.createTouchButton(right, bottom - step * 2, "Journal", {
         down: () => gameScene.queueTouchJournal(),
       }),
-      this.createTouchButton(right, bottom - step * 2, "Pause", {
+      this.createTouchButton(right, bottom - step * 3, "Pause", {
         down: () => gameScene.queueTouchPause(),
       }),
     ];
@@ -465,10 +484,10 @@ export class HUDScene extends Phaser.Scene {
     const text = this.add
       .text(0, 0, label, {
         fontFamily: FONT_FAMILY,
-        fontSize: label.length > 5 ? "8px" : "10px",
+        fontSize: label.length > 5 ? TOUCH_BUTTON_COMPACT_FONT_SIZE : TOUCH_BUTTON_FONT_SIZE,
         color: "#ffffff",
         align: "center",
-        wordWrap: { width: TOUCH_BUTTON_SIZE_PX - 6 },
+        wordWrap: { width: TOUCH_BUTTON_SIZE_PX - 8 },
       })
       .setOrigin(0.5);
     const button = this.add.container(x, y, [bg, text]);
@@ -519,7 +538,7 @@ export class HUDScene extends Phaser.Scene {
       gameScene.clearTouchInputState(true);
     }
 
-    this.touchControlsContainer.setY(this.dialogue.isActive ? -120 : 0);
+    this.touchControlsContainer.setY(0);
     this.touchControlsContainer.setVisible(visible);
   }
 

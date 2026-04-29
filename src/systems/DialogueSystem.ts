@@ -1,6 +1,14 @@
 import Phaser from "phaser";
 
 const FONT_FAMILY = "Arial, Helvetica, sans-serif";
+const DEFAULT_HORIZONTAL_MARGIN_PX = 20;
+const BOX_HEIGHT_PX = 90;
+
+export interface DialogueLayoutOptions {
+  reservedLeftPx?: number;
+  reservedRightPx?: number;
+  horizontalGapPx?: number;
+}
 
 /**
  * Optional per-call lifecycle hooks for {@link DialogueSystem.show}.
@@ -48,10 +56,15 @@ export class DialogueSystem {
   private hooks: DialogueHooks | null = null;
   private advanceKey: Phaser.Input.Keyboard.Key | null = null;
 
-  constructor(scene: Phaser.Scene) {
+  constructor(scene: Phaser.Scene, layout: DialogueLayoutOptions = {}) {
     const { width, height } = scene.cameras.main;
-    const boxW = width - 40;
-    const boxH = 90;
+    const gap = layout.horizontalGapPx ?? 0;
+    const leftEdge = layout.reservedLeftPx !== undefined ? layout.reservedLeftPx + gap : DEFAULT_HORIZONTAL_MARGIN_PX;
+    const rightEdge =
+      layout.reservedRightPx !== undefined ? width - layout.reservedRightPx - gap : width - DEFAULT_HORIZONTAL_MARGIN_PX;
+    const boxW = Math.max(240, rightEdge - leftEdge);
+    const boxH = BOX_HEIGHT_PX;
+    const boxCenterX = leftEdge + boxW / 2;
 
     // Full-screen invisible backdrop catches clicks outside the dialogue box
     this.backdrop = scene.add
@@ -121,7 +134,7 @@ export class DialogueSystem {
       },
     );
 
-    this.container = scene.add.container(width / 2, height - 65, [
+    this.container = scene.add.container(boxCenterX, height - 65, [
       this.background,
       this.text,
       this.promptText,
@@ -169,7 +182,7 @@ export class DialogueSystem {
     this.hide();
   }
 
-  private advance(): void {
+  advance(): void {
     if (!this.active) return;
 
     this.currentLine++;
