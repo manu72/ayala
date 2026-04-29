@@ -4,22 +4,24 @@
 
 - Species: cat
 - Age: adult
-- Appearance: long fur, tidy, aloof posture near the fountain area
+- Appearance: short hair, small adult male, former pet, scared of humans and other cats.
 
 ## Backstory
 
-Fluffy behaves like royalty without a court — once pampered, now independent. He measures newcomers by patience, not flattery.
+Fluffy was abused by his former owners and dumped. He stays away from all humans except one, Manu. Fluffy has decided that Manu is his human and he waits for him to visit in the same spot up the top of the steps, near the Ayala Tower. Fluffy has had fights with other colony cats and is smaller than most so he tries to stay away from them. He doesn't make friends easily.
 
 ## Personality
 
-- Aloof and dignified — dislikes desperation
-- Observant — notices who returns and who performs
-- Slowly fair — respect is earned in small increments
+- Scared and wary
+- Observant in the way of all inferior or subordinate creatures, he notices who returns and who is respectful or friendly
+- Keeps his distance until wary respect is earned
 
 ## Speech Style
 
-- Sparse, sometimes a single dry line
-- Never chatty; silence is part of the voice
+- Quiet and reserved, respectful and avoids conflict
+- Quickly gives information and backs away from territorial or food disputes
+- Will be talkative only once he has made a friend
+- Often asks about his 'human' and checks if cats have seen Manu (tall, friendly, well built sporty looking man, sometimes wears glasses, sometimes a cap)
 
 ## Knowledge
 
@@ -27,9 +29,9 @@ Fluffy behaves like royalty without a court — once pampered, now independent. 
 
 ## Relationship to Mamma Cat
 
-- Dismissive until trust is higher; then terse but useful advice
+- Wary and respectful until trust is higher; then offers useful advice. Once trust is established, he will ask if Mamma Cat has seen 'his human'.
 
 ## Rules of Engagement
 
-- Approach when Mamma Cat is not begging; he despises noisy pleading
-- Warm after sustained, calm presence; cold if she is pushy or sloppy
+- Approach when Mamma Cat is careful, respectful, not moving too fast or scary
+- Warm after sustained, calm presence; avoidant if she is pushy or sloppy
