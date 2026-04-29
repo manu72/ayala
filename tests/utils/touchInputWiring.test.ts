@@ -683,6 +683,35 @@ describe("touch input scene wiring", () => {
     expect(scene["tryPrimaryInteract"]).not.toHaveBeenCalled();
   });
 
+  it("does not interact in the same frame that touch Act closes dialogue", () => {
+    const scene = makeFrozenUpdateScene();
+    const dialogue = {
+      dismiss: vi.fn(),
+      isActive: true,
+      show: vi.fn(),
+      advance: vi.fn(() => {
+        dialogue.isActive = false;
+      }),
+    };
+    scene.scene.get.mockImplementation((key: unknown) =>
+      key === "HUDScene" ? { dialogue } : undefined,
+    );
+    Object.assign(scene, {
+      dialogueRequestInFlight: false,
+      isPaused: false,
+      journalKey: { isDown: false },
+      playerInputFrozen: false,
+      spaceKey: { justDown: true },
+      tryPrimaryInteract: vi.fn(),
+    });
+
+    scene.queueTouchInteract();
+    scene.update(0, 16);
+
+    expect(dialogue.advance).toHaveBeenCalledOnce();
+    expect(scene["tryPrimaryInteract"]).not.toHaveBeenCalled();
+  });
+
   it("ignores pause and peek inputs while preserving a frozen update frame", () => {
     const scene = makeFrozenUpdateScene();
     scene["escapeKey"] = { justDown: true };

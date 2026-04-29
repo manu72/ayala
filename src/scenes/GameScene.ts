@@ -1277,10 +1277,17 @@ export class GameScene extends Phaser.Scene {
         frozen: this.playerInputFrozen,
       });
     }
+    let dialogueAdvanced = false;
     if (dialogueWasActiveForTouch) {
       this.dialogue.advance();
+      dialogueAdvanced = true;
     }
-    if ((spaceJust || (touchInteract && !dialogueWasActiveForTouch)) && !this.dialogue.isActive && !this.playerInputFrozen) {
+    if (
+      (spaceJust || (touchInteract && !dialogueWasActiveForTouch)) &&
+      !dialogueAdvanced &&
+      !this.dialogue.isActive &&
+      !this.playerInputFrozen
+    ) {
       this.tryPrimaryInteract(time);
     }
 

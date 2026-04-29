@@ -62,7 +62,8 @@ export class DialogueSystem {
     const leftEdge = layout.reservedLeftPx !== undefined ? layout.reservedLeftPx + gap : DEFAULT_HORIZONTAL_MARGIN_PX;
     const rightEdge =
       layout.reservedRightPx !== undefined ? width - layout.reservedRightPx - gap : width - DEFAULT_HORIZONTAL_MARGIN_PX;
-    const boxW = Math.max(240, rightEdge - leftEdge);
+    const availableSpan = rightEdge - leftEdge;
+    const boxW = availableSpan < 240 ? Math.max(0, availableSpan) : availableSpan;
     const boxH = BOX_HEIGHT_PX;
     const boxCenterX = leftEdge + boxW / 2;
 
