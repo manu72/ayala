@@ -1175,6 +1175,9 @@ export class GameScene extends Phaser.Scene {
     // J toggles the colony journal. Use key-locking to avoid double-toggles
     // when multiple scenes process the same key-down event in one frame.
     const touchJournalRequested = this.consumeTouchJournalQueue();
+    if (this.playerInputFrozen && this.journalKey?.isDown) {
+      this.journalToggleLocked = true;
+    }
     const journalRequested = touchJournalRequested || (this.journalKey?.isDown && !this.journalToggleLocked);
     if (journalRequested && !this.playerInputFrozen) {
       if (this.journalKey?.isDown) this.journalToggleLocked = true;

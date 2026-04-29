@@ -508,7 +508,7 @@ export class HUDScene extends Phaser.Scene {
       this.touchStickPointerId = null;
       this.touchRunActive = false;
       this.touchMovementIntent = { ...EMPTY_MOVEMENT_INTENT };
-      gameScene.clearTouchInputState(false);
+      gameScene.clearTouchInputState(true);
     }
 
     this.touchControlsContainer.setY(this.dialogue.isActive ? -120 : 0);
