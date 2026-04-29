@@ -92,6 +92,8 @@ export interface DialogueService {
 // ── Scripted Implementation ─────────────────────────────────────────
 
 export interface DialogueScript {
+  /** Stable branch identifier for tests/tooling. Story side effects use response.event. */
+  id: string;
   condition: (req: DialogueRequest) => boolean;
   response: DialogueResponse;
 }

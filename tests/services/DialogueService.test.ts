@@ -40,10 +40,12 @@ const returnResponse: DialogueResponse = {
 const testScripts: Record<string, DialogueScript[]> = {
   TestCat: [
     {
+      id: 'test_first',
       condition: (req) => req.conversationHistory.length === 0,
       response: firstMeetResponse,
     },
     {
+      id: 'test_return',
       condition: () => true,
       response: returnResponse,
     },
@@ -82,7 +84,7 @@ describe('ScriptedDialogueService', () => {
 
   it('returns default when no conditions match', async () => {
     const neverMatchScripts: Record<string, DialogueScript[]> = {
-      TestCat: [{ condition: () => false, response: firstMeetResponse }],
+      TestCat: [{ id: 'test_never', condition: () => false, response: firstMeetResponse }],
     }
     const svc = new ScriptedDialogueService(neverMatchScripts)
     const result = await svc.getDialogue(makeRequest())
@@ -94,8 +96,8 @@ describe('ScriptedDialogueService', () => {
     const lateResponse: DialogueResponse = { lines: ['I matched second.'] }
     const ordered: Record<string, DialogueScript[]> = {
       TestCat: [
-        { condition: () => true, response: earlyResponse },
-        { condition: () => true, response: lateResponse },
+        { id: 'test_early', condition: () => true, response: earlyResponse },
+        { id: 'test_late', condition: () => true, response: lateResponse },
       ],
     }
     const svc = new ScriptedDialogueService(ordered)

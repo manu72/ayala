@@ -7,6 +7,7 @@ import {
   type HumanType,
   type SpriteProfile,
 } from "./SpriteProfiles";
+import { isFeederHumanType } from "../utils/humanSpawnPolicy";
 
 export type { HumanType } from "./SpriteProfiles";
 
@@ -64,10 +65,6 @@ function defaultIdentityNameFor(type: HumanType): string | null {
     default:
       return null;
   }
-}
-
-function isFeederHumanType(type: HumanType): boolean {
-  return type === "feeder" || type === "ben";
 }
 
 /** Park exit waypoints — on the road perimeter, avoiding interior obstacles. */

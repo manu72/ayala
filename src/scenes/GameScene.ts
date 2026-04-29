@@ -63,6 +63,7 @@ import { resolveSnatcherSpawnAction } from "../systems/SnatcherSystem";
 import { AudioSystem } from "../systems/AudioSystem";
 import { hasLineOfSightTiles } from "../utils/lineOfSight";
 import { shouldUseHumanAiBubble } from "../utils/humanAiBubbleEligibility";
+import { getEffectiveHumanPhase } from "../utils/humanSpawnPolicy";
 import { buildDialogueRecencyContext } from "../utils/dialogueRecency";
 import { computeReachableCells, getCellKey } from "../utils/mapExploration";
 import { applyLifeLoss, MAX_LIVES } from "../utils/lifeFlow";
@@ -2900,7 +2901,9 @@ export class GameScene extends Phaser.Scene {
   private updateHumans(delta: number): void {
     const now = this.time.now;
     for (const human of this.humans) {
-      human.setPhase(this.dayNight.currentPhase);
+      human.setPhase(
+        getEffectiveHumanPhase(human.humanType, this.dayNight.currentPhase, this.dayNight.dayCount),
+      );
       human.update(delta);
 
       if (!human.visible) continue;

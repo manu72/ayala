@@ -28,6 +28,7 @@ function talkCount(req: DialogueRequest): number {
 
 const blackyScripts: DialogueScript[] = [
   {
+    id: "blacky_first",
     condition: isFirstMeeting,
     response: {
       lines: [
@@ -44,6 +45,7 @@ const blackyScripts: DialogueScript[] = [
     },
   },
   {
+    id: "blacky_return",
     condition: () => true,
     response: {
       lines: ["Still here? Good. You're tougher than you look."],
@@ -59,16 +61,19 @@ const blackyScripts: DialogueScript[] = [
 
 const tigerScripts: DialogueScript[] = [
   {
+    id: "tiger_first",
     condition: isFirstMeeting,
     response: {
       lines: ["*The cat's ears flatten slightly. Its tail flicks once.*", '"This is my spot."'],
       speakerPose: "hostile",
       emote: "hostile",
+      narration: "This tiger watches you with a hostile look.",
       trustChange: 10,
       event: "tiger_first",
     },
   },
   {
+    id: "tiger_warmup",
     condition: (req) => talkCount(req) === 1,
     response: {
       lines: [
@@ -82,6 +87,7 @@ const tigerScripts: DialogueScript[] = [
     },
   },
   {
+    id: "tiger_return",
     condition: () => true,
     response: {
       lines: ['"You can rest here. Under this tree. I\'ll keep watch."'],
@@ -97,11 +103,12 @@ const tigerScripts: DialogueScript[] = [
 
 const jaycoScripts: DialogueScript[] = [
   {
+    id: "jayco_first",
     condition: isFirstMeeting,
     response: {
       lines: [
         "*This cat approaches with tail up. Curious.*",
-        '"New face! I\'m Jayco. I know every corner of these steps."',
+        '"Hi there new face! I\'m Jayco. I know every corner of these steps."',
         '"The humans below, the coffee place, they leave good scraps. But watch for the guard."',
       ],
       speakerPose: "friendly",
@@ -111,6 +118,7 @@ const jaycoScripts: DialogueScript[] = [
     },
   },
   {
+    id: "jayco_return",
     condition: () => true,
     response: {
       lines: ['"The ginger ones fight over the bench near the fountain. Stay clear at dusk."'],
@@ -126,6 +134,7 @@ const jaycoScripts: DialogueScript[] = [
 
 const jaycoJrScripts: DialogueScript[] = [
   {
+    id: "jaycojr_first",
     condition: isFirstMeeting,
     response: {
       lines: [
@@ -139,6 +148,7 @@ const jaycoJrScripts: DialogueScript[] = [
     },
   },
   {
+    id: "jaycojr_return",
     condition: () => true,
     response: {
       lines: ['"Did you find the water bowls? They\'re near the big trees! I can show you!"'],
@@ -154,12 +164,13 @@ const jaycoJrScripts: DialogueScript[] = [
 
 const fluffyScripts: DialogueScript[] = [
   {
+    id: "fluffy_first",
     condition: isFirstMeeting,
     response: {
       lines: [
-        "*This cat regards you with half-closed eyes. Its long fur is immaculate.*",
-        '"..."',
-        "*It returns to grooming. You've been dismissed.*",
+        "*This cat is wary of you, half-scared and half-curious.*",
+        '"Meow to you too..."',
+        "*It slinks back into the bushes, watching you intently.*",
       ],
       speakerPose: "wary",
       emote: "curious",
@@ -168,11 +179,13 @@ const fluffyScripts: DialogueScript[] = [
     },
   },
   {
+    id: "fluffy_trust_return",
     condition: (req) => req.gameState.trustWithSpeaker >= 20,
     response: {
       lines: [
-        "\"You're still alive. That's something, I suppose.\"",
+        "\"You don't seem so bad. I've tried to make friends before but the others don't let me near the food.\"",
         '"The humans with the bags come at dawn and dusk. Follow the sound of rustling."',
+        '"I heard a big noise the other day. It scared me. I think it was the guard."',
       ],
       speakerPose: "curious",
       emote: "curious",
@@ -181,9 +194,10 @@ const fluffyScripts: DialogueScript[] = [
     },
   },
   {
+    id: "fluffy_cautious_return",
     condition: () => true,
     response: {
-      lines: ["*The cat flicks an ear in your direction but doesn't look up.*"],
+      lines: ["*The cat watches you from the bushes, keeping a safe distance.*"],
       speakerPose: "wary",
       emote: "curious",
       trustChange: 5,
@@ -196,6 +210,7 @@ const fluffyScripts: DialogueScript[] = [
 
 const pedigreeScripts: DialogueScript[] = [
   {
+    id: "pedigree_first",
     condition: isFirstMeeting,
     response: {
       lines: [
@@ -210,6 +225,7 @@ const pedigreeScripts: DialogueScript[] = [
     },
   },
   {
+    id: "pedigree_return",
     condition: () => true,
     response: {
       lines: ['"The ones in dark clothes at night... they took my friend. Stay hidden after dark."'],
@@ -225,6 +241,7 @@ const pedigreeScripts: DialogueScript[] = [
 
 const gingerScripts: DialogueScript[] = [
   {
+    id: "ginger_first",
     condition: isFirstMeeting,
     response: {
       lines: ["*Two orange cats glare at you from beside the fountain. One hisses.*", '"This water is ours."'],
@@ -235,6 +252,7 @@ const gingerScripts: DialogueScript[] = [
     },
   },
   {
+    id: "ginger_trust_return",
     condition: (req) => req.gameState.trustWithSpeaker >= 30,
     response: {
       lines: ["*The ginger cat flicks an ear at you.*", '"...Fine. Drink. But don\'t bring anyone else."'],
@@ -245,6 +263,7 @@ const gingerScripts: DialogueScript[] = [
     },
   },
   {
+    id: "ginger_hostile_return",
     condition: () => true,
     response: {
       lines: ["*The ginger cat hisses softly.*"],
@@ -260,6 +279,7 @@ const gingerScripts: DialogueScript[] = [
 
 const gingerBScripts: DialogueScript[] = [
   {
+    id: "gingerb_first",
     condition: isFirstMeeting,
     response: {
       lines: ["*This one just watches. It doesn't speak. Its brother does the talking.*"],
@@ -270,6 +290,7 @@ const gingerBScripts: DialogueScript[] = [
     },
   },
   {
+    id: "gingerb_return",
     condition: () => true,
     response: {
       lines: ["*The cat stares at you, unblinking.*"],
@@ -293,6 +314,7 @@ const COLONY_LINES = [
 
 const colonyScripts: DialogueScript[] = [
   {
+    id: "colony_cat_default",
     condition: () => true,
     response: {
       lines: [COLONY_LINES[Math.floor(Math.random() * COLONY_LINES.length)]!],
