@@ -60,6 +60,18 @@ export const STATIONARY_MOVE_THRESHOLD_PX = 24;
 /** Duration (ms) the player must hold the rest key to enter resting state. */
 export const REST_HOLD_MS = 1000;
 
+/** Radius (px) of the on-screen movement control in HUD space. */
+export const TOUCH_STICK_RADIUS_PX = 48;
+
+/** Movement input below this distance is treated as neutral. */
+export const TOUCH_STICK_DEAD_ZONE_PX = 10;
+
+/** Base size for on-screen touch action buttons. Kept on the 8px grid. */
+export const TOUCH_BUTTON_SIZE_PX = 48;
+
+/** Gap between touch controls. Kept on the 8px grid. */
+export const TOUCH_BUTTON_GAP_PX = 8;
+
 /** Duration (ms) Mamma Cat lies immobilised before the collapse recovery fires. */
 export const COLLAPSE_RECOVERY_MS = 3000;
 

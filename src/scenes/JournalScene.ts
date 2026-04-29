@@ -38,6 +38,9 @@ export class JournalScene extends Phaser.Scene {
   private contentHeight = 0;
   private visibleHeight = 0;
   private openedFromPauseMenu = false;
+  private dragScrollPointerId: number | null = null;
+  private dragStartY = 0;
+  private dragStartScrollY = 0;
 
   constructor() {
     super({ key: "JournalScene" });
@@ -54,6 +57,20 @@ export class JournalScene extends Phaser.Scene {
     // Full-screen dimmed background
     const bg = this.add.rectangle(width / 2, height / 2, width, height, BG_COLOR, BG_ALPHA);
     bg.setInteractive();
+    bg.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
+      this.dragScrollPointerId = pointer.id;
+      this.dragStartY = pointer.y;
+      this.dragStartScrollY = this.scrollY;
+    });
+    this.input.on("pointermove", (pointer: Phaser.Input.Pointer) => {
+      if (this.dragScrollPointerId !== pointer.id) return;
+      this.setScrollY(this.dragStartScrollY + this.dragStartY - pointer.y);
+    });
+    this.input.on("pointerup", (pointer: Phaser.Input.Pointer) => {
+      if (this.dragScrollPointerId === pointer.id) {
+        this.dragScrollPointerId = null;
+      }
+    });
 
     // Title
     this.add
@@ -77,7 +94,18 @@ export class JournalScene extends Phaser.Scene {
       .setDepth(10);
     closeBtn.on("pointerover", () => closeBtn.setColor("#ffffff"));
     closeBtn.on("pointerout", () => closeBtn.setColor("#aaaaaa"));
-    closeBtn.on("pointerdown", () => this.closeJournal());
+    closeBtn.on(
+      "pointerdown",
+      (
+        _pointer: Phaser.Input.Pointer,
+        _localX: number,
+        _localY: number,
+        event?: Phaser.Types.Input.EventData,
+      ) => {
+        event?.stopPropagation();
+        this.closeJournal();
+      },
+    );
 
     // Gather entries
     const entries = this.gatherEntries();
@@ -261,15 +289,19 @@ export class JournalScene extends Phaser.Scene {
 
     // Scroll with mouse wheel
     this.input.on("wheel", (_pointer: unknown, _gos: unknown, _dx: number, dy: number) => {
-      this.scrollY = Phaser.Math.Clamp(
-        this.scrollY + dy * 0.5,
-        0,
-        Math.max(0, this.contentHeight - this.visibleHeight + 60),
-      );
-      this.container.setY(PANEL_PADDING + 40 - this.scrollY);
+      this.setScrollY(this.scrollY + dy * 0.5);
     });
 
     // ESC closing is handled by GameScene to avoid double-fire across scenes.
+  }
+
+  private setScrollY(nextScrollY: number): void {
+    this.scrollY = Phaser.Math.Clamp(
+      nextScrollY,
+      0,
+      Math.max(0, this.contentHeight - this.visibleHeight + 60),
+    );
+    this.container.setY(PANEL_PADDING + 40 - this.scrollY);
   }
 
   private closeJournal(): void {

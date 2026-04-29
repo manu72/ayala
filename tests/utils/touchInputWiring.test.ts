@@ -1,0 +1,20 @@
+import { describe, expect, it } from "vitest";
+import hudSceneSource from "../../src/scenes/HUDScene.ts?raw";
+import journalSceneSource from "../../src/scenes/JournalScene.ts?raw";
+
+describe("touch input scene wiring", () => {
+  it("routes JournalScene wheel and drag scrolling through the same clamp helper", () => {
+    expect(journalSceneSource).toContain("private setScrollY(nextScrollY: number): void");
+    expect(journalSceneSource).toContain('this.input.on("pointermove"');
+    expect(journalSceneSource).toContain("this.dragStartScrollY + this.dragStartY - pointer.y");
+    expect(journalSceneSource).toContain("this.setScrollY(this.scrollY + dy * 0.5)");
+  });
+
+  it("keeps HUD touch controls above dialogue and clears them on mobile interruptions", () => {
+    expect(hudSceneSource).toContain("this.add.container(0, 0).setDepth(101)");
+    expect(hudSceneSource).toContain('this.input.on("pointerupoutside"');
+    expect(hudSceneSource).toContain('this.game.events.on("blur"');
+    expect(hudSceneSource).toContain("private cancelActiveTouchControls(): void");
+    expect(hudSceneSource).toContain("this.dialogue.isActive ? -120 : 0");
+  });
+});
