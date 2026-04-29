@@ -1175,8 +1175,7 @@ export class GameScene extends Phaser.Scene {
     // when multiple scenes process the same key-down event in one frame.
     const touchJournalRequested = this.consumeTouchJournalQueue();
     const journalRequested = touchJournalRequested || (this.journalKey?.isDown && !this.journalToggleLocked);
-    if (journalRequested) {
-      if (this.playerInputFrozen) return;
+    if (journalRequested && !this.playerInputFrozen) {
       if (this.journalKey?.isDown) this.journalToggleLocked = true;
       this.handleJournalToggleInput();
       return;
@@ -1239,8 +1238,7 @@ export class GameScene extends Phaser.Scene {
     // ──── Tab peek (toggle) ────
     const peekRequested = (this.tabKey && Phaser.Input.Keyboard.JustDown(this.tabKey)) || this.consumeTouchPeekQueue();
     if (peekRequested) {
-      if (this.playerInputFrozen) return;
-      this.togglePeekInput();
+      if (!this.playerInputFrozen) this.togglePeekInput();
     }
     if (this.isPeeking) {
       if (this.player.isMoving) {

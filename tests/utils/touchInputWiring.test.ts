@@ -19,13 +19,16 @@ describe("touch input scene wiring", () => {
     expect(hudSceneSource).toContain("this.dialogue.isActive ? -120 : 0");
   });
 
-  it("guards pause and peek touch requests while player input is frozen", () => {
+  it("guards pause touch requests while player input is frozen", () => {
     expect(gameSceneSource).toContain("if (pauseRequested) {\n      if (this.playerInputFrozen) return;");
-    expect(gameSceneSource).toContain("if (peekRequested) {\n      if (this.playerInputFrozen) return;");
+  });
+
+  it("guards peek touch requests while player input is frozen without skipping the update frame", () => {
+    expect(gameSceneSource).toContain("if (peekRequested) {\n      if (!this.playerInputFrozen) this.togglePeekInput();\n    }");
   });
 
   it("guards journal touch and keyboard requests while player input is frozen", () => {
-    expect(gameSceneSource).toContain("if (journalRequested) {\n      if (this.playerInputFrozen) return;");
+    expect(gameSceneSource).toContain("if (journalRequested && !this.playerInputFrozen) {");
   });
 
   it("clears touch input state on GameScene lifecycle entry and shutdown", () => {
