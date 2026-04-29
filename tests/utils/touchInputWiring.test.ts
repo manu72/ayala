@@ -415,13 +415,13 @@ describe("touch input scene wiring", () => {
     scene["togglePeekInput"] = vi.fn();
 
     scene.update(0, 16);
-    expect(scene["handlePauseInput"]).not.toHaveBeenCalled();
 
-    scene["escapeKey"] = { justDown: false };
-    scene.update(0, 16);
+    expect(scene["handlePauseInput"]).not.toHaveBeenCalled();
     expect(scene["togglePeekInput"]).not.toHaveBeenCalled();
     expect(scene["touchPeekQueued"]).toBe(false);
-    expect(scene["dayNight"]).toMatchObject({ update: expect.any(Function) });
+    expect(scene["dayNight"].update).toHaveBeenCalledWith(16);
+    expect(scene["foodSources"].update).toHaveBeenCalledWith("day", 0);
+    expect(scene["player"].setVelocity).toHaveBeenCalledWith(0);
   });
 
   it("consumes frozen journal input without opening later when J is still held", () => {

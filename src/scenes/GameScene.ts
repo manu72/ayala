@@ -1162,9 +1162,10 @@ export class GameScene extends Phaser.Scene {
     // When the journal is open, ESC closes it (same pattern as J key).
     const pauseRequested = (this.escapeKey && Phaser.Input.Keyboard.JustDown(this.escapeKey)) || this.consumeTouchPauseQueue();
     if (pauseRequested) {
-      if (this.playerInputFrozen) return;
-      this.handlePauseInput();
-      return;
+      if (!this.playerInputFrozen) {
+        this.handlePauseInput();
+        return;
+      }
     }
 
     // Release J toggle lock only after the key is fully released.
