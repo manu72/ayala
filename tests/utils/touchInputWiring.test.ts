@@ -24,6 +24,10 @@ describe("touch input scene wiring", () => {
     expect(gameSceneSource).toContain("if (peekRequested) {\n      if (this.playerInputFrozen) return;");
   });
 
+  it("guards journal touch and keyboard requests while player input is frozen", () => {
+    expect(gameSceneSource).toContain("if (journalRequested) {\n      if (this.playerInputFrozen) return;");
+  });
+
   it("clears touch input state on GameScene lifecycle entry and shutdown", () => {
     const resetCalls = gameSceneSource.match(/this\.clearTouchInputState\(true\);/g) ?? [];
     expect(resetCalls).toHaveLength(2);
