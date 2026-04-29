@@ -103,10 +103,16 @@ function buildManager(sources: Array<[SourceType, number, number]>) {
 }
 
 describe('FoodSourceManager.tryInteract — cooldown enforcement', () => {
-  it('returns true on first use at now=0 (sources start immediately available)', () => {
+  it('returns source identity on first use at now=0 (sources start immediately available)', () => {
     const { manager, stats } = buildManager([['fountain', 100, 100]])
     stats.thirst = 50
-    expect(manager.tryInteract(100, 100, stats, 'day', 0)).toBe(true)
+    expect(manager.tryInteract(100, 100, stats, 'day', 0)).toEqual({
+      type: 'fountain',
+      stat: 'thirst',
+      x: 100,
+      y: 100,
+      actualRestored: 50,
+    })
     expect(stats.thirst).toBe(100)
   })
 
@@ -116,7 +122,7 @@ describe('FoodSourceManager.tryInteract — cooldown enforcement', () => {
     manager.tryInteract(100, 100, stats, 'day', 0)
     stats.thirst = 50
     const cooldownMs = SOURCE_DEFS.fountain.cooldownMs
-    expect(manager.tryInteract(100, 100, stats, 'day', cooldownMs - 1)).toBe(false)
+    expect(manager.tryInteract(100, 100, stats, 'day', cooldownMs - 1)).toBeNull()
     expect(stats.thirst).toBe(50)
   })
 
@@ -125,7 +131,7 @@ describe('FoodSourceManager.tryInteract — cooldown enforcement', () => {
     stats.thirst = 50
     manager.tryInteract(100, 100, stats, 'day', 0)
     stats.thirst = 50
-    expect(manager.tryInteract(100, 100, stats, 'day', SOURCE_DEFS.fountain.cooldownMs)).toBe(true)
+    expect(manager.tryInteract(100, 100, stats, 'day', SOURCE_DEFS.fountain.cooldownMs)).not.toBeNull()
     expect(stats.thirst).toBe(100)
   })
 })
@@ -133,7 +139,7 @@ describe('FoodSourceManager.tryInteract — cooldown enforcement', () => {
 describe('FoodSourceManager.tryInteract — range gating', () => {
   it('returns false when no sources have been registered', () => {
     const { manager, stats } = buildManager([])
-    expect(manager.tryInteract(0, 0, stats, 'day', 0)).toBe(false)
+    expect(manager.tryInteract(0, 0, stats, 'day', 0)).toBeNull()
   })
 
   it('returns false when the only source sits outside INTERACT_RANGE', () => {
@@ -143,7 +149,7 @@ describe('FoodSourceManager.tryInteract — range gating', () => {
     const axisOffset = INTERACT_RANGE
     expect(
       manager.tryInteract(200 - axisOffset, 200 - axisOffset, stats, 'day', 0),
-    ).toBe(false)
+    ).toBeNull()
   })
 
   it('returns true on the near side of INTERACT_RANGE', () => {
@@ -153,7 +159,7 @@ describe('FoodSourceManager.tryInteract — range gating', () => {
     const axisOffset = Math.floor(INTERACT_RANGE / 2)
     expect(
       manager.tryInteract(100 - axisOffset, 100 - axisOffset, stats, 'day', 0),
-    ).toBe(true)
+    ).not.toBeNull()
   })
 
   it('picks the nearest in-range source when multiple are in range', () => {
@@ -162,7 +168,7 @@ describe('FoodSourceManager.tryInteract — range gating', () => {
       ['water_bowl', 110, 100],   // dist 10 from (100,100)
     ])
     stats.thirst = 0
-    expect(manager.tryInteract(100, 100, stats, 'day', 0)).toBe(true)
+    expect(manager.tryInteract(100, 100, stats, 'day', 0)?.type).toBe('fountain')
     // fountain restores 50; water_bowl restores 30 — restored value proves which was picked.
     expect(stats.thirst).toBe(50)
   })
@@ -181,14 +187,14 @@ describe('FoodSourceManager.tryInteract — activePhases gating', () => {
     ['restaurant_scraps', false, 'night'],
   ])('%s is %s during phase=%s', (type, expected, phase) => {
     const { manager, stats } = buildManager([[type, 100, 100]])
-    expect(manager.tryInteract(100, 100, stats, phase, 0)).toBe(expected)
+    expect(Boolean(manager.tryInteract(100, 100, stats, phase, 0))).toBe(expected)
   })
 
   it('fountain and water_bowl are available across all phases', () => {
     for (const type of ['fountain', 'water_bowl'] as const) {
       for (const phase of ['dawn', 'day', 'evening', 'night'] as const) {
         const { manager, stats } = buildManager([[type, 100, 100]])
-        expect(manager.tryInteract(100, 100, stats, phase, 0)).toBe(true)
+        expect(manager.tryInteract(100, 100, stats, phase, 0)).not.toBeNull()
       }
     }
   })
@@ -200,7 +206,7 @@ describe('FoodSourceManager.tryInteract — safe_sleep is skipped', () => {
     (phase) => {
       const { manager, stats } = buildManager([['safe_sleep', 100, 100]])
       const before = stats.energy
-      expect(manager.tryInteract(100, 100, stats, phase, 0)).toBe(false)
+      expect(manager.tryInteract(100, 100, stats, phase, 0)).toBeNull()
       expect(stats.energy).toBe(before)
     },
   )
@@ -211,7 +217,7 @@ describe('FoodSourceManager.tryInteract — safe_sleep is skipped', () => {
       ['fountain', 110, 100],
     ])
     stats.thirst = 60
-    expect(manager.tryInteract(100, 100, stats, 'day', 0)).toBe(true)
+    expect(manager.tryInteract(100, 100, stats, 'day', 0)?.type).toBe('fountain')
     expect(stats.thirst).toBe(100) // fountain: +50, clamped at 100
   })
 })
@@ -220,14 +226,14 @@ describe('FoodSourceManager.tryInteract — stat routing', () => {
   it('feeding_station restores hunger', () => {
     const { manager, stats } = buildManager([['feeding_station', 100, 100]])
     stats.hunger = 30
-    expect(manager.tryInteract(100, 100, stats, 'dawn', 0)).toBe(true)
+    expect(manager.tryInteract(100, 100, stats, 'dawn', 0)?.type).toBe('feeding_station')
     expect(stats.hunger).toBe(70) // +40
   })
 
   it('bugs restore hunger by a small amount', () => {
     const { manager, stats } = buildManager([['bugs', 100, 100]])
     stats.hunger = 50
-    expect(manager.tryInteract(100, 100, stats, 'day', 0)).toBe(true)
+    expect(manager.tryInteract(100, 100, stats, 'day', 0)?.type).toBe('bugs')
     expect(stats.hunger).toBe(55) // +5
   })
 })
@@ -317,7 +323,7 @@ describe('FoodSourceManager — getSourceStates / restoreFromStates round-trip',
     // Post-restore: tryInteract at now=0 should succeed even though the saved
     // lastUsedAt was "now" — restoration intentionally resets cooldowns.
     stats.thirst = 50
-    expect(manager.tryInteract(100, 100, stats, 'day', 0)).toBe(true)
+    expect(manager.tryInteract(100, 100, stats, 'day', 0)).not.toBeNull()
     expect(stats.thirst).toBe(100)
   })
 

@@ -2,6 +2,8 @@ import type { CatStats } from './StatsSystem'
 import type { TimeOfDay } from './DayNightCycle'
 import type { SourceType } from './FoodSource'
 import type { TrustData } from './TrustSystem'
+import { createDefaultRunScoreState, type RunScoreState } from './ScoringSystem'
+import { DEFAULT_LIVES } from '../utils/lifeFlow'
 
 const STORAGE_KEY = 'ayala_save'
 
@@ -15,9 +17,12 @@ export interface SaveData {
   sourceStates?: Array<{ type: SourceType; x: number; y: number; lastUsedAt: number }>
   trust?: TrustData
   territory?: { claimed: boolean; claimedOnDay: number }
+  lives: number
+  runScore: RunScoreState
 }
 
-const CURRENT_VERSION = 1
+const CURRENT_VERSION = 2
+const LEGACY_VERSION = 1
 
 const TRACKED_KEYS = [
   'MET_BLACKY', 'TIGER_TALKS', 'JAYCO_TALKS', 'KNOWN_CATS',
@@ -27,8 +32,8 @@ const TRACKED_KEYS = [
   'VISITED_ZONE_6', 'TERRITORY_CLAIMED', 'TERRITORY_DAY',
   'CAMILLE_ENCOUNTER', 'CAMILLE_ENCOUNTER_DAY', 'ENCOUNTER_5_COMPLETE',
   'COLONY_COUNT', 'DUMPING_EVENTS_SEEN', 'CATS_SNATCHED',
-  'GAME_COMPLETED', 'NEW_GAME_PLUS', 'INTRO_SEEN', 'FIRST_SNATCHER_SEEN',
-  'COLLAPSE_COUNT', 'PLAYER_SNATCHED_COUNT',
+  'GAME_COMPLETED', 'GAME_OVER', 'NEW_GAME_PLUS', 'INTRO_SEEN', 'FIRST_SNATCHER_SEEN',
+  'COLLAPSE_COUNT', 'PLAYER_SNATCHED_COUNT', 'SNATCHED_THIS_NIGHT',
 ] as const
 
 const VALID_PHASES: ReadonlySet<string> = new Set(['dawn', 'day', 'evening', 'night'])
@@ -44,7 +49,7 @@ const VALID_SOURCE_TYPES: ReadonlySet<string> = new Set([
 export function isValidSave(data: unknown): data is SaveData {
   if (typeof data !== 'object' || data === null) return false
   const d = data as Record<string, unknown>
-  if (typeof d.version !== 'number' || d.version > CURRENT_VERSION) return false
+  if (typeof d.version !== 'number' || d.version < LEGACY_VERSION || d.version > CURRENT_VERSION) return false
   if (typeof d.gameTimeMs !== 'number' || !Number.isFinite(d.gameTimeMs)) return false
   if (typeof d.timeOfDay !== 'string' || !VALID_PHASES.has(d.timeOfDay)) return false
 
@@ -68,7 +73,60 @@ export function isValidSave(data: unknown): data is SaveData {
     }
   }
 
+  if (d.version >= CURRENT_VERSION) {
+    if (
+      typeof d.lives !== 'number' ||
+      !Number.isFinite(d.lives) ||
+      !Number.isInteger(d.lives) ||
+      d.lives < 0 ||
+      d.lives > DEFAULT_LIVES
+    ) return false
+    if (!isValidRunScore(d.runScore)) return false
+  }
+
   return true
+}
+
+function isValidRunScore(data: unknown): data is RunScoreState {
+  if (typeof data !== 'object' || data === null) return false
+  const score = data as Record<string, unknown>
+  const numericKeys = [
+    'catEngagements',
+    'humanEngagements',
+    'cleanNights',
+    'nightsSurvived',
+    'distanceTravelledPx',
+    'totalExplorableCells',
+    'closeFriendsMade',
+    'runSnatchCount',
+  ]
+  for (const key of numericKeys) {
+    const val = score[key]
+    if (typeof val !== 'number' || !Number.isFinite(val) || val < 0) return false
+  }
+  return (
+    isNumberArray(score.visitedCells) &&
+    isNumberArray(score.dumpedPetsComforted) &&
+    isStringArray(score.foodSourcesDiscovered)
+  )
+}
+
+function isNumberArray(data: unknown): boolean {
+  return Array.isArray(data) && data.every((entry) => typeof entry === 'number' && Number.isFinite(entry) && entry >= 0)
+}
+
+function isStringArray(data: unknown): boolean {
+  return Array.isArray(data) && data.every((entry) => typeof entry === 'string')
+}
+
+function migrateSave(data: SaveData): SaveData {
+  if (data.version >= CURRENT_VERSION) return data
+  return {
+    ...data,
+    version: CURRENT_VERSION,
+    lives: DEFAULT_LIVES,
+    runScore: createDefaultRunScoreState(),
+  }
 }
 
 export const SaveSystem = {
@@ -86,6 +144,8 @@ export const SaveSystem = {
     sourceStates?: Array<{ type: SourceType; x: number; y: number; lastUsedAt: number }>,
     trust?: TrustData,
     territory?: { claimed: boolean; claimedOnDay: number },
+    lives = DEFAULT_LIVES,
+    runScore: RunScoreState = createDefaultRunScoreState(),
   ): boolean {
     const variables: Record<string, unknown> = {}
     for (const key of TRACKED_KEYS) {
@@ -103,6 +163,8 @@ export const SaveSystem = {
       sourceStates,
       trust,
       territory,
+      lives,
+      runScore,
     }
 
     try {
@@ -119,7 +181,7 @@ export const SaveSystem = {
       if (!raw) return null
       const data = JSON.parse(raw)
       if (!isValidSave(data)) return null
-      return data
+      return migrateSave(data)
     } catch {
       return null
     }

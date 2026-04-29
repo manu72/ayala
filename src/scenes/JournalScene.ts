@@ -136,6 +136,35 @@ export class JournalScene extends Phaser.Scene {
       yOffset += LINE_HEIGHT + 12;
     }
 
+    if (gameScene?.scoring) {
+      const breakdown = gameScene.scoring.getBreakdown();
+      this.container.add(
+        this.add.text(0, yOffset, `Run score: ${Math.floor(gameScene.scoring.total).toLocaleString()}`, {
+          fontFamily: FONT_FAMILY,
+          fontSize: "14px",
+          fontStyle: "bold",
+          color: "#f0e8d0",
+        }),
+      );
+      yOffset += LINE_HEIGHT + 4;
+
+      for (const row of Object.values(breakdown)) {
+        const value =
+          row.label === "Territory explored" && "percent" in row
+            ? `${Math.round(row.percent)}%`
+            : Math.floor(row.value).toLocaleString();
+        this.container.add(
+          this.add.text(12, yOffset, `${row.label}: ${value} (+${row.points})`, {
+            fontFamily: FONT_FAMILY,
+            fontSize: "11px",
+            color: "#888888",
+          }),
+        );
+        yOffset += LINE_HEIGHT;
+      }
+      yOffset += 8;
+    }
+
     // Footer stats: dynamic colony total (named + Mamma + background) from
     // the registry. The number moves during play — dumping events bump it up,
     // snatcher captures bring it down (floored at NAMED_AND_MAMMA_COUNT).

@@ -5,6 +5,7 @@ export type HumanType =
   | "jogger"
   | "jogger_male"
   | "feeder"
+  | "ben"
   | "dogwalker"
   | "camille"
   | "manu"
@@ -90,17 +91,24 @@ const DOGWALKER_PROFILE: SpriteProfile = {
 const JOGGER_PROFILE: SpriteProfile = {
   key: "jogger",
   cols: 8,
-  frameW: 150,
-  frameH: 85,
-  bodyW: 18,
-  bodyH: 16,
-  scale: 0.5,
+  frameW: 68,
+  frameH: 68,
+  bodyW: 20,
+  bodyH: 18,
+  scale: 0.7,
+  directionalKeys: {
+    walkDown: "jogger_run_s",
+    walkLeft: "jogger_run_w",
+    walkRight: "jogger_run_e",
+    walkUp: "jogger_run_n",
+    idle: "jogger_stand",
+  },
   anims: {
     walkDown: { row: 0, count: 8 },
-    walkRight: { row: 1, count: 8 },
-    walkLeft: { row: 2, count: 8 },
-    walkUp: { row: 3, count: 8 },
-    idle: { row: 0, count: 1 },
+    walkRight: { row: 0, count: 8 },
+    walkLeft: { row: 0, count: 8 },
+    walkUp: { row: 0, count: 8 },
+    idle: { row: 0, count: 8 },
   },
 };
 
@@ -152,6 +160,35 @@ const FEEDER_PROFILE: SpriteProfile = {
     walkLeft: { row: 0, count: 8 },
     walkUp: { row: 0, count: 8 },
     idle: { row: 0, count: 8 },
+  },
+};
+
+// Ben: named feeder with dedicated 68x68 stand, walk, and crouch strips.
+const BEN_PROFILE: SpriteProfile = {
+  key: "ben",
+  cols: 8,
+  frameW: 68,
+  frameH: 68,
+  bodyW: 20,
+  bodyH: 18,
+  scale: 0.7,
+  directionalKeys: {
+    walkDown: "ben_walk_s",
+    walkLeft: "ben_walk_w",
+    walkRight: "ben_walk_e",
+    walkUp: "ben_walk_n",
+    idle: "ben_stand",
+    crouchLeft: "ben_crouch_w",
+    crouchRight: "ben_crouch_e",
+  },
+  anims: {
+    walkDown: { row: 0, count: 4 },
+    walkRight: { row: 0, count: 4 },
+    walkLeft: { row: 0, count: 4 },
+    walkUp: { row: 0, count: 4 },
+    idle: { row: 0, count: 8 },
+    crouchLeft: { row: 0, count: 5 },
+    crouchRight: { row: 0, count: 5 },
   },
 };
 
@@ -272,6 +309,8 @@ export function profileForType(type: HumanType): SpriteProfile {
       return JOGGER_MALE_PROFILE;
     case "feeder":
       return FEEDER_PROFILE;
+    case "ben":
+      return BEN_PROFILE;
     case "dogwalker":
       return DOGWALKER_PROFILE;
     case "camille":

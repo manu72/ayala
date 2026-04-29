@@ -4,6 +4,7 @@ import type { GameScene } from "./GameScene";
 import { DialogueSystem } from "../systems/DialogueSystem";
 import { REST_HOLD_MS } from "../config/gameplayConstants";
 import { AUDIO_MUTED_CHANGED } from "../systems/AudioSystem";
+import { DEFAULT_LIVES } from "../utils/lifeFlow";
 
 const PANEL_X = 8;
 const PANEL_Y = 8;
@@ -38,6 +39,8 @@ export class HUDScene extends Phaser.Scene {
   private fills: Phaser.GameObjects.Rectangle[] = [];
   private barLabels: Phaser.GameObjects.Text[] = [];
   private clockLabel!: Phaser.GameObjects.Text;
+  private livesLabel!: Phaser.GameObjects.Text;
+  private scoreLabel!: Phaser.GameObjects.Text;
   private warningOverlay!: Phaser.GameObjects.Rectangle;
   private exhaustedText!: Phaser.GameObjects.Text;
   private saveNotice!: Phaser.GameObjects.Text;
@@ -79,7 +82,7 @@ export class HUDScene extends Phaser.Scene {
 
     // ──── Stats panel background ────
     const panelBg = this.add.graphics();
-    const panelH = PANEL_PADDING + 20 + BARS.length * (BAR_H + BAR_GAP) + PANEL_PADDING - BAR_GAP;
+    const panelH = PANEL_PADDING + 20 + BARS.length * (BAR_H + BAR_GAP) + 34 + PANEL_PADDING - BAR_GAP;
     panelBg.fillStyle(0x000000, 0.45);
     panelBg.fillRoundedRect(PANEL_X, PANEL_Y, PANEL_W, panelH, 6);
 
@@ -111,6 +114,18 @@ export class HUDScene extends Phaser.Scene {
       this.add.rectangle(barX, y + 1, BAR_W, BAR_H, 0x222222).setOrigin(0, 0);
       const fill = this.add.rectangle(barX, y + 1, BAR_W, BAR_H, def.color).setOrigin(0, 0);
       this.fills.push(fill);
+    });
+
+    const summaryY = barsStartY + BARS.length * (BAR_H + BAR_GAP) + 4;
+    this.livesLabel = this.add.text(PANEL_X + PANEL_PADDING, summaryY, "", {
+      fontFamily: FONT_FAMILY,
+      fontSize: "12px",
+      color: "#ff99aa",
+    });
+    this.scoreLabel = this.add.text(PANEL_X + PANEL_PADDING, summaryY + 16, "", {
+      fontFamily: FONT_FAMILY,
+      fontSize: "12px",
+      color: "#f0e8d0",
     });
 
     // ──── Warning vignette ────
@@ -223,6 +238,9 @@ export class HUDScene extends Phaser.Scene {
     const dayNight = gameScene.dayNight;
 
     this.clockLabel.setText(dayNight.clockText);
+    const lives = Math.max(0, Math.min(DEFAULT_LIVES, gameScene.lives ?? 0));
+    this.livesLabel.setText(`Lives ${"\u2665".repeat(lives)}${"\u2661".repeat(DEFAULT_LIVES - lives)}`);
+    this.scoreLabel.setText(`Score ${Math.floor(gameScene.scoring?.total ?? 0).toLocaleString()}`);
 
     BARS.forEach((def, i) => {
       const fill = this.fills[i];

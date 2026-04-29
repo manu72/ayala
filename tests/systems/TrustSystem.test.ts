@@ -189,4 +189,52 @@ describe('TrustSystem', () => {
       expect(trust.global).toBe(0)
     })
   })
+
+  describe('events', () => {
+    it('emits dependency-free events for trust-awarding cat interactions', () => {
+      const events: Array<{ type: string; catName?: string; globalDelta: number; catDelta?: number }> = []
+      trust.onEvent((event) => events.push(event))
+
+      trust.firstConversation('Tiger')
+      trust.returnConversation('Tiger')
+      trust.proximityTick('Tiger', 30_000)
+      trust.supportedDuringCollapse('Blacky')
+
+      expect(events).toEqual([
+        { type: 'cat:first-conversation', catName: 'Tiger', globalDelta: 5, catDelta: 10 },
+        { type: 'cat:return-conversation', catName: 'Tiger', globalDelta: 2, catDelta: 5 },
+        { type: 'cat:proximity-tick', catName: 'Tiger', globalDelta: 1, catDelta: 2 },
+        { type: 'cat:collapse-witness', catName: 'Blacky', globalDelta: 1, catDelta: 3 },
+      ])
+    })
+
+    it('does not emit proximity events while the cooldown blocks trust awards', () => {
+      const events: Array<{ type: string }> = []
+      trust.onEvent((event) => events.push(event))
+
+      trust.proximityTick('Jayco', 0)
+
+      expect(events).toEqual([])
+    })
+
+    it('supports unsubscribing listeners', () => {
+      const events: Array<{ type: string }> = []
+      const unsubscribe = trust.onEvent((event) => events.push(event))
+
+      trust.seenEating()
+      unsubscribe()
+      trust.seenEating()
+
+      expect(events).toEqual([{ type: 'cat:seen-eating', globalDelta: 1 }])
+    })
+
+    it('does not emit events while restoring from saved trust data', () => {
+      const events: Array<{ type: string }> = []
+      trust.onEvent((event) => events.push(event))
+
+      trust.fromJSON({ global: 25, cats: { Tiger: 50 } })
+
+      expect(events).toEqual([])
+    })
+  })
 })

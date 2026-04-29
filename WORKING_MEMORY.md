@@ -168,6 +168,7 @@ SmallDog.png, WhiteDog.png, BrownDog.png — randomly assigned to dog walkers
 - **Rest key (Z) stale JustDown bug:** When entering rest mode via hold timer, consume the `JustDown` flag immediately before `enterRest()`, otherwise the first frame of resting reads the stale flag and wakes the player instantly.
 - **Crouch tap-vs-hold pattern:** Track `keyDownTime` on keydown event. On keyup, if held < threshold, toggle latch; if held >= threshold, release temporary crouch. Reset latch on `enterRest()`.
 - **Pause early-return ordering:** Escape key check must come BEFORE the `if (isPaused) return` gate, otherwise the player cannot unpause.
+- **Scene-level input guards must reset on lifecycle entry.** Phaser can reuse scene instances across `scene.start()` cycles, so one-shot flags such as "restart in progress" should reset in `init()` or `create()`, not only at field initialization.
 
 ### Animation
 
@@ -193,6 +194,8 @@ SmallDog.png, WhiteDog.png, BrownDog.png — randomly assigned to dog walkers
 - **Met-day randomization bug:** Never use `Math.random()` for data that should be stable across views. Store deterministic values (like first-met day) at the moment they're created, not when they're displayed.
 - **Food source startup cooldown:** Initialize `lastUsedAt` to `-cooldownMs` (not 0) so sources are available at game start.
 - **StatsSystem.fromJSON validation:** Always clamp and validate loaded numeric values (finite check, 0-100 range).
+- **Mutable default save state:** Do not assign exported default objects with array fields directly into migrated or default save data. Use a factory that returns fresh arrays, otherwise mutating a loaded migrated save can corrupt the module-level default and leak into later saves.
+- **Transient state that affects future scoring must be save-backed.** If a flag is set by an event before an autosave but consumed later (e.g. "snatched this night" consumed at dawn), mirror it into a tracked registry/save key before saving and clear that key when the scoring event consumes it.
 - **`localStorage` access itself can throw:** In Firefox with `dom.storage.enabled=false`, sandboxed iframes, and Safari with storage blocked for third-party contexts, *reading* `window.localStorage` triggers a SecurityError from the getter. `typeof localStorage` does NOT suppress this — `typeof` only guards undeclared identifiers, and the global is declared. Any boot-path code that touches storage must wrap the reference acquisition (not just `getItem`/`setItem`) in try/catch and fall back to `undefined`. See `GameScene.create()` around `migrateLegacyIntroFlag`.
 
 ### Entity Identity

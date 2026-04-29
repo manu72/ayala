@@ -65,6 +65,14 @@ interface Source {
   lastUsedAt: number;
 }
 
+export interface FoodSourceInteraction {
+  type: SourceType;
+  stat: "hunger" | "thirst" | "energy";
+  x: number;
+  y: number;
+  actualRestored: number;
+}
+
 /**
  * Manages all interactive food, water, and rest sources on the map.
  * Sources are placed based on map object-layer POIs.
@@ -137,8 +145,8 @@ export class FoodSourceManager {
     }
   }
 
-  /** Try to interact with the nearest available source in range. Returns true if used. */
-  tryInteract(playerX: number, playerY: number, stats: StatsSystem, currentPhase: TimeOfDay, now: number): boolean {
+  /** Try to interact with the nearest available source in range. Returns source identity if used. */
+  tryInteract(playerX: number, playerY: number, stats: StatsSystem, currentPhase: TimeOfDay, now: number): FoodSourceInteraction | null {
     let nearest: Source | null = null;
     let nearestDist = Infinity;
 
@@ -156,7 +164,7 @@ export class FoodSourceManager {
       }
     }
 
-    if (!nearest) return false;
+    if (!nearest) return null;
 
     const def = SOURCE_DEFS[nearest.type];
     const actual = stats.restore(def.stat, def.amount);
@@ -164,7 +172,13 @@ export class FoodSourceManager {
 
     this.showFloatingText(`+${Math.round(actual)}`, nearest.x, nearest.y - 16, def.symbolColor);
 
-    return true;
+    return {
+      type: nearest.type,
+      stat: def.stat,
+      x: nearest.x,
+      y: nearest.y,
+      actualRestored: actual,
+    };
   }
 
   /** Update markers to reflect availability. */

@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { isValidSave, SaveSystem } from '../../src/systems/SaveSystem'
+import { DEFAULT_RUN_SCORE_STATE } from '../../src/systems/ScoringSystem'
+import { StoryKeys } from '../../src/registry/storyKeys'
 
 function validSaveData(overrides: Record<string, unknown> = {}) {
   return {
@@ -61,8 +63,67 @@ describe('isValidSave', () => {
     expect(isValidSave(data)).toBe(false)
   })
 
+  it('accepts v2 saves with lives and run score state', () => {
+    expect(
+      isValidSave(
+        validSaveData({
+          version: 2,
+          lives: 2,
+          runScore: DEFAULT_RUN_SCORE_STATE,
+        }),
+      ),
+    ).toBe(true)
+  })
+
+  it.each([
+    ['above max', 4],
+    ['negative', -1],
+    ['fractional', 2.5],
+    ['non-numeric', '3'],
+  ])('rejects v2 save with %s lives', (_caseName, lives) => {
+    expect(
+      isValidSave(
+        validSaveData({
+          version: 2,
+          lives,
+          runScore: DEFAULT_RUN_SCORE_STATE,
+        }),
+      ),
+    ).toBe(false)
+  })
+
+  it('rejects v2 save with malformed run score state', () => {
+    expect(
+      isValidSave(
+        validSaveData({
+          version: 2,
+          lives: 3,
+          runScore: { ...DEFAULT_RUN_SCORE_STATE, visitedCells: 'bad' },
+        }),
+      ),
+    ).toBe(false)
+    expect(
+      isValidSave(
+        validSaveData({
+          version: 2,
+          lives: 3,
+          runScore: { ...DEFAULT_RUN_SCORE_STATE, catEngagements: -1 },
+        }),
+      ),
+    ).toBe(false)
+    expect(
+      isValidSave(
+        validSaveData({
+          version: 2,
+          lives: 3,
+          runScore: { ...DEFAULT_RUN_SCORE_STATE, foodSourcesDiscovered: [42] },
+        }),
+      ),
+    ).toBe(false)
+  })
+
   it('rejects future version', () => {
-    expect(isValidSave(validSaveData({ version: 2 }))).toBe(false)
+    expect(isValidSave(validSaveData({ version: 3 }))).toBe(false)
   })
 
   it('rejects invalid timeOfDay', () => {
@@ -208,6 +269,25 @@ describe('SaveSystem.save / load / hasSave / clear', () => {
     expect(loaded?.variables.INTRO_SEEN).toBe(true)
   })
 
+  it('round-trips the pending snatched-this-night scoring flag', () => {
+    const registry = stubRegistry({ [StoryKeys.SNATCHED_THIS_NIGHT]: true })
+    expect(
+      SaveSystem.save(
+        1,
+        2,
+        { hunger: 50, thirst: 50, energy: 50 },
+        'night',
+        1,
+        registry,
+        undefined,
+        { global: 0, cats: {} },
+        { claimed: false, claimedOnDay: 0 },
+      ),
+    ).toBe(true)
+
+    expect(SaveSystem.load()?.variables[StoryKeys.SNATCHED_THIS_NIGHT]).toBe(true)
+  })
+
   it('round-trips core fields and tracked variables', () => {
     const stats = { hunger: 70, thirst: 65, energy: 80 }
     const registry = stubRegistry({ CHAPTER: 3, MET_BLACKY: true })
@@ -228,6 +308,71 @@ describe('SaveSystem.save / load / hasSave / clear', () => {
     expect(loaded!.variables.MET_BLACKY).toBe(true)
     expect(loaded!.trust).toEqual(trust)
     expect(loaded!.territory).toEqual(territory)
+  })
+
+  it('round-trips lives and run score state', () => {
+    const runScore = {
+      ...DEFAULT_RUN_SCORE_STATE,
+      catEngagements: 2,
+      visitedCells: [3, 9],
+      foodSourcesDiscovered: ['fountain:10:20'],
+    }
+
+    expect(
+      SaveSystem.save(
+        100,
+        200,
+        { hunger: 70, thirst: 65, energy: 80 },
+        'evening',
+        500_000,
+        stubRegistry({}),
+        undefined,
+        { global: 0, cats: {} },
+        { claimed: false, claimedOnDay: 0 },
+        2,
+        runScore,
+      ),
+    ).toBe(true)
+
+    const loaded = SaveSystem.load()
+    expect(loaded?.version).toBe(2)
+    expect(loaded?.lives).toBe(2)
+    expect(loaded?.runScore).toEqual(runScore)
+  })
+
+  it('migrates v1 saves with default lives and empty run score', () => {
+    store['ayala_save'] = JSON.stringify(validSaveData({ version: 1 }))
+
+    const loaded = SaveSystem.load()
+
+    expect(loaded?.version).toBe(2)
+    expect(loaded?.lives).toBe(3)
+    expect(loaded?.runScore).toEqual(DEFAULT_RUN_SCORE_STATE)
+  })
+
+  it('migrates v1 saves with a fresh run score object instead of the shared default', () => {
+    store['ayala_save'] = JSON.stringify(validSaveData({ version: 1 }))
+
+    const loaded = SaveSystem.load()
+    expect(loaded).not.toBeNull()
+
+    try {
+      loaded!.runScore.visitedCells.push(12)
+      loaded!.runScore.dumpedPetsComforted.push(1)
+      loaded!.runScore.foodSourcesDiscovered.push('fountain:10:20')
+
+      expect(DEFAULT_RUN_SCORE_STATE.visitedCells).toEqual([])
+      expect(DEFAULT_RUN_SCORE_STATE.dumpedPetsComforted).toEqual([])
+      expect(DEFAULT_RUN_SCORE_STATE.foodSourcesDiscovered).toEqual([])
+
+      store['ayala_save'] = JSON.stringify(validSaveData({ version: 1 }))
+      const migratedAgain = SaveSystem.load()
+      expect(migratedAgain?.runScore).toEqual(DEFAULT_RUN_SCORE_STATE)
+    } finally {
+      DEFAULT_RUN_SCORE_STATE.visitedCells.length = 0
+      DEFAULT_RUN_SCORE_STATE.dumpedPetsComforted.length = 0
+      DEFAULT_RUN_SCORE_STATE.foodSourcesDiscovered.length = 0
+    }
   })
 
   it('hasSave is false before save and true after', () => {
