@@ -981,7 +981,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   setTouchMovementIntent(intent: MovementIntent): void {
-    this.touchMovementIntent = { ...intent };
+    const run = this.touchMovementIntent.run;
+    this.touchMovementIntent = { ...intent, run };
     this.player?.setExternalMovementIntent(this.touchMovementIntent);
   }
 

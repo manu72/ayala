@@ -358,7 +358,7 @@ export class HUDScene extends Phaser.Scene {
     this.touchPointerUpHandler = (pointer: Phaser.Input.Pointer) => {
       if (this.touchStickPointerId !== pointer.id) return;
       this.touchStickPointerId = null;
-      this.touchMovementIntent = { ...EMPTY_MOVEMENT_INTENT, run: this.touchRunActive };
+      this.touchMovementIntent = { ...EMPTY_MOVEMENT_INTENT };
       this.touchStickKnob.setPosition(this.touchStickOriginX, this.touchStickOriginY);
       this.syncTouchMovementIntent();
     };
@@ -381,11 +381,11 @@ export class HUDScene extends Phaser.Scene {
       this.createTouchButton(right - step, bottom, "Run", {
         down: () => {
           this.touchRunActive = true;
-          this.syncTouchMovementIntent();
+          gameScene.setTouchRun(this.touchRunActive);
         },
         up: () => {
           this.touchRunActive = false;
-          this.syncTouchMovementIntent();
+          gameScene.setTouchRun(this.touchRunActive);
         },
       }),
       this.createTouchButton(right, bottom - step, "Crouch", {
@@ -439,10 +439,7 @@ export class HUDScene extends Phaser.Scene {
       this.touchStickOriginX + Math.cos(angle) * clamped,
       this.touchStickOriginY + Math.sin(angle) * clamped,
     );
-    this.touchMovementIntent = {
-      ...vectorToMovementIntent(dx, dy),
-      run: this.touchRunActive,
-    };
+    this.touchMovementIntent = vectorToMovementIntent(dx, dy);
     this.syncTouchMovementIntent();
   }
 

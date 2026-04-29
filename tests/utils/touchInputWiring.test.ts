@@ -36,6 +36,14 @@ describe("touch input scene wiring", () => {
     expect(resetCalls).toHaveLength(2);
   });
 
+  it("keeps touch run state independent from stick movement updates", () => {
+    expect(gameSceneSource).toContain(
+      "const run = this.touchMovementIntent.run;\n    this.touchMovementIntent = { ...intent, run };",
+    );
+    expect(hudSceneSource).toContain("gameScene.setTouchRun(this.touchRunActive);");
+    expect(hudSceneSource).toContain("this.touchMovementIntent = vectorToMovementIntent(dx, dy);");
+  });
+
   it("removes JournalScene touch and wheel listeners on shutdown", () => {
     expect(journalSceneSource).toContain('bg.off("pointerdown", this.onJournalPointerDown)');
     expect(journalSceneSource).toContain('this.input.off("pointermove", this.onJournalPointerMove)');
