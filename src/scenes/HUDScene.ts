@@ -2,9 +2,19 @@ import Phaser from "phaser";
 import { GAME_VERSION } from "../config/gameVersion";
 import type { GameScene } from "./GameScene";
 import { DialogueSystem } from "../systems/DialogueSystem";
-import { REST_HOLD_MS } from "../config/gameplayConstants";
+import {
+  REST_HOLD_MS,
+  TOUCH_BUTTON_GAP_PX,
+  TOUCH_BUTTON_SIZE_PX,
+  TOUCH_STICK_RADIUS_PX,
+} from "../config/gameplayConstants";
 import { AUDIO_MUTED_CHANGED } from "../systems/AudioSystem";
 import { DEFAULT_LIVES } from "../utils/lifeFlow";
+import {
+  EMPTY_MOVEMENT_INTENT,
+  vectorToMovementIntent,
+  type MovementIntent,
+} from "../input/playerIntent";
 
 const PANEL_X = 8;
 const PANEL_Y = 8;
@@ -57,6 +67,17 @@ export class HUDScene extends Phaser.Scene {
 
   private pauseContainer!: Phaser.GameObjects.Container;
   private pauseVersionLabel!: Phaser.GameObjects.Text;
+  private touchControlsContainer!: Phaser.GameObjects.Container;
+  private touchMovementIntent: MovementIntent = { ...EMPTY_MOVEMENT_INTENT };
+  private touchRunActive = false;
+  private touchStickPointerId: number | null = null;
+  private touchStickBase!: Phaser.GameObjects.Arc;
+  private touchStickKnob!: Phaser.GameObjects.Arc;
+  private touchStickOriginX = 0;
+  private touchStickOriginY = 0;
+  private touchPointerMoveHandler: ((pointer: Phaser.Input.Pointer) => void) | null = null;
+  private touchPointerUpHandler: ((pointer: Phaser.Input.Pointer) => void) | null = null;
+  private touchCancelHandler: (() => void) | null = null;
 
   private narrationText!: Phaser.GameObjects.Text;
   private narrationTween: Phaser.Tweens.Tween | null = null;
@@ -228,6 +249,8 @@ export class HUDScene extends Phaser.Scene {
     this.pauseContainer = this.createPauseMenu(width, height);
     this.pauseContainer.setVisible(false);
     this.pauseContainer.setDepth(200);
+
+    this.buildTouchControls(width, height);
   }
 
   update(): void {
@@ -264,6 +287,7 @@ export class HUDScene extends Phaser.Scene {
 
     this.updateRestProgress(gameScene);
     this.restingLabel.setVisible(gameScene.player?.isResting ?? false);
+    this.updateTouchControlsVisibility(gameScene);
   }
 
   private updateRestProgress(gameScene: GameScene): void {
@@ -287,6 +311,220 @@ export class HUDScene extends Phaser.Scene {
       this.restProgressArc.setVisible(false);
       this.restLabel.setVisible(false);
     }
+  }
+
+  // ──────────── Touch Controls ────────────
+
+  private shouldShowTouchControls(): boolean {
+    return this.sys.game.device.input.touch;
+  }
+
+  private buildTouchControls(width: number, height: number): void {
+    this.touchControlsContainer = this.add.container(0, 0).setDepth(101);
+    this.touchControlsContainer.setVisible(this.shouldShowTouchControls());
+
+    const stickX = TOUCH_STICK_RADIUS_PX + 24;
+    const stickY = height - TOUCH_STICK_RADIUS_PX - 24;
+    this.touchStickOriginX = stickX;
+    this.touchStickOriginY = stickY;
+
+    this.touchStickBase = this.add
+      .circle(stickX, stickY, TOUCH_STICK_RADIUS_PX, 0x000000, 0.35)
+      .setStrokeStyle(2, 0xffffff, 0.45)
+      .setInteractive();
+
+    this.touchStickKnob = this.add.circle(stickX, stickY, 18, 0xffffff, 0.35);
+    this.touchControlsContainer.add([this.touchStickBase, this.touchStickKnob]);
+
+    this.touchStickBase.on(
+      "pointerdown",
+      (
+        pointer: Phaser.Input.Pointer,
+        _localX: number,
+        _localY: number,
+        event?: Phaser.Types.Input.EventData,
+      ) => {
+        event?.stopPropagation();
+        this.touchStickPointerId = pointer.id;
+        this.updateTouchStick(pointer);
+      },
+    );
+
+    this.touchPointerMoveHandler = (pointer: Phaser.Input.Pointer) => {
+      if (this.touchStickPointerId !== pointer.id) return;
+      this.updateTouchStick(pointer);
+    };
+
+    this.touchPointerUpHandler = (pointer: Phaser.Input.Pointer) => {
+      if (this.touchStickPointerId !== pointer.id) return;
+      this.touchStickPointerId = null;
+      this.touchMovementIntent = { ...EMPTY_MOVEMENT_INTENT };
+      this.touchStickKnob.setPosition(this.touchStickOriginX, this.touchStickOriginY);
+      this.syncTouchMovementIntent();
+    };
+
+    this.input.on("pointermove", this.touchPointerMoveHandler);
+    this.input.on("pointerup", this.touchPointerUpHandler);
+    this.input.on("pointerupoutside", this.touchPointerUpHandler);
+    this.touchCancelHandler = () => this.cancelActiveTouchControls();
+    this.game.events.on("blur", this.touchCancelHandler);
+
+    const right = width - 24 - TOUCH_BUTTON_SIZE_PX / 2;
+    const bottom = height - 24 - TOUCH_BUTTON_SIZE_PX / 2;
+    const step = TOUCH_BUTTON_SIZE_PX + TOUCH_BUTTON_GAP_PX;
+    const gameScene = this.scene.get("GameScene") as GameScene;
+
+    const buttons = [
+      this.createTouchButton(right, bottom, "Act", {
+        down: () => gameScene.queueTouchInteract(),
+      }),
+      this.createTouchButton(right - step, bottom, "Run", {
+        down: () => {
+          this.touchRunActive = true;
+          gameScene.setTouchRun(this.touchRunActive);
+        },
+        up: () => {
+          this.touchRunActive = false;
+          gameScene.setTouchRun(this.touchRunActive);
+        },
+      }),
+      this.createTouchButton(right, bottom - step, "Crouch", {
+        down: () => gameScene.beginTouchCrouch(),
+        up: () => gameScene.endTouchCrouch(),
+      }),
+      this.createTouchButton(right - step, bottom - step, "Rest", {
+        down: () => gameScene.beginTouchRest(),
+        up: () => gameScene.endTouchRest(),
+      }),
+      this.createTouchButton(right - step * 2, bottom, "Look", {
+        down: () => gameScene.queueTouchPeek(),
+      }),
+      this.createTouchButton(right - step * 2, bottom - step, "Journal", {
+        down: () => gameScene.queueTouchJournal(),
+      }),
+      this.createTouchButton(right, bottom - step * 2, "Pause", {
+        down: () => gameScene.queueTouchPause(),
+      }),
+    ];
+    this.touchControlsContainer.add(buttons);
+
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      gameScene?.clearTouchInputState();
+      this.touchStickPointerId = null;
+      this.touchRunActive = false;
+      this.touchMovementIntent = { ...EMPTY_MOVEMENT_INTENT };
+      if (this.touchPointerMoveHandler) {
+        this.input.off("pointermove", this.touchPointerMoveHandler);
+        this.touchPointerMoveHandler = null;
+      }
+      if (this.touchPointerUpHandler) {
+        this.input.off("pointerup", this.touchPointerUpHandler);
+        this.input.off("pointerupoutside", this.touchPointerUpHandler);
+        this.touchPointerUpHandler = null;
+      }
+      if (this.touchCancelHandler) {
+        this.game.events.off("blur", this.touchCancelHandler);
+        this.touchCancelHandler = null;
+      }
+    });
+  }
+
+  private updateTouchStick(pointer: Phaser.Input.Pointer): void {
+    const sceneOriginX = this.touchStickOriginX + this.touchControlsContainer.x;
+    const sceneOriginY = this.touchStickOriginY + this.touchControlsContainer.y;
+    const dx = pointer.x - sceneOriginX;
+    const dy = pointer.y - sceneOriginY;
+    const distance = Math.hypot(dx, dy);
+    const clamped = Math.min(distance, TOUCH_STICK_RADIUS_PX);
+    const angle = Math.atan2(dy, dx);
+
+    this.touchStickKnob.setPosition(
+      this.touchStickOriginX + Math.cos(angle) * clamped,
+      this.touchStickOriginY + Math.sin(angle) * clamped,
+    );
+    this.touchMovementIntent = vectorToMovementIntent(dx, dy);
+    this.syncTouchMovementIntent();
+  }
+
+  private syncTouchMovementIntent(): void {
+    const gameScene = this.scene.get("GameScene") as GameScene | undefined;
+    gameScene?.setTouchMovementIntent(this.touchMovementIntent);
+  }
+
+  private createTouchButton(
+    x: number,
+    y: number,
+    label: string,
+    handlers: { down?: () => void; up?: () => void },
+  ): Phaser.GameObjects.Container {
+    const bg = this.add
+      .rectangle(0, 0, TOUCH_BUTTON_SIZE_PX, TOUCH_BUTTON_SIZE_PX, 0x000000, 0.45)
+      .setStrokeStyle(1, 0xffffff, 0.45)
+      .setInteractive({ useHandCursor: true });
+    const text = this.add
+      .text(0, 0, label, {
+        fontFamily: FONT_FAMILY,
+        fontSize: label.length > 5 ? "8px" : "10px",
+        color: "#ffffff",
+        align: "center",
+        wordWrap: { width: TOUCH_BUTTON_SIZE_PX - 6 },
+      })
+      .setOrigin(0.5);
+    const button = this.add.container(x, y, [bg, text]);
+
+    bg.on("pointerdown", (
+      _pointer: Phaser.Input.Pointer,
+      _localX: number,
+      _localY: number,
+      event?: Phaser.Types.Input.EventData,
+    ) => {
+      event?.stopPropagation();
+      bg.setAlpha(0.7);
+      handlers.down?.();
+    });
+    bg.on("pointerup", (
+      _pointer: Phaser.Input.Pointer,
+      _localX: number,
+      _localY: number,
+      event?: Phaser.Types.Input.EventData,
+    ) => {
+      event?.stopPropagation();
+      bg.setAlpha(1);
+      handlers.up?.();
+    });
+    bg.on("pointerout", () => {
+      bg.setAlpha(1);
+      handlers.up?.();
+    });
+
+    return button;
+  }
+
+  private updateTouchControlsVisibility(gameScene: GameScene): void {
+    const visible =
+      this.shouldShowTouchControls() &&
+      !gameScene.isPaused &&
+      !this.scene.isActive("JournalScene") &&
+      !gameScene.cinematicActive;
+
+    if (!visible && this.touchControlsContainer.visible) {
+      this.touchStickPointerId = null;
+      this.touchRunActive = false;
+      this.touchMovementIntent = { ...EMPTY_MOVEMENT_INTENT };
+      gameScene.clearTouchInputState(true);
+    }
+
+    this.touchControlsContainer.setY(this.dialogue.isActive ? -120 : 0);
+    this.touchControlsContainer.setVisible(visible);
+  }
+
+  private cancelActiveTouchControls(): void {
+    this.touchStickPointerId = null;
+    this.touchRunActive = false;
+    this.touchMovementIntent = { ...EMPTY_MOVEMENT_INTENT };
+    this.touchStickKnob?.setPosition(this.touchStickOriginX, this.touchStickOriginY);
+    const gameScene = this.scene.get("GameScene") as GameScene | undefined;
+    gameScene?.clearTouchInputState();
   }
 
   // ──────────── Pause Menu ────────────

@@ -376,6 +376,36 @@ describe('DialogueSystem.advance — via SPACE key', () => {
   })
 })
 
+describe('DialogueSystem.advance — via dialogue box tap', () => {
+  it('advances to the next line and stops backdrop propagation', () => {
+    const { system, background, body } = buildDialogue()
+    const event = { stopPropagation: vi.fn() }
+
+    system.show(['first', 'second'])
+    background.emit('pointerdown', {}, 0, 0, event)
+
+    expect(body.text).toBe('second')
+    expect(event.stopPropagation).toHaveBeenCalledTimes(1)
+    expect(system.isActive).toBe(true)
+  })
+
+  it('hides the dialogue and fires onComplete after the final line is tapped past', () => {
+    const onComplete = vi.fn()
+    const { system, background, container, backdrop } = buildDialogue()
+    const stopSpy = vi.fn()
+
+    system.show(['Only line'], onComplete)
+    background.emit('pointerdown', {}, 0, 0, { stopPropagation: stopSpy })
+
+    expect(system.isActive).toBe(false)
+    expect(container.visible).toBe(false)
+    expect(backdrop.visible).toBe(false)
+    expect(backdrop.input?.enabled).toBe(false)
+    expect(stopSpy).toHaveBeenCalled()
+    expect(onComplete).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe('DialogueSystem.dismiss — early close never fires onComplete', () => {
   it('dismiss() hides the dialogue and does NOT invoke onComplete', () => {
     const onComplete = vi.fn()

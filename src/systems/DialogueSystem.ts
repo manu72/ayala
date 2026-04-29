@@ -25,7 +25,7 @@ export interface DialogueHooks {
 
 /**
  * Dialogue overlay rendered inside a given scene.
- * Shows lines of text one at a time, advancing on Space.
+ * Shows lines of text one at a time, advancing on Space or tap.
  *
  * Non-blocking: the player can move while dialogue is visible.
  * Dismissible: click outside the box or the X button to close early.
@@ -67,6 +67,18 @@ export class DialogueSystem {
       .setOrigin(0.5)
       .setStrokeStyle(1, 0xffffff, 0.3)
       .setInteractive();
+    this.background.on(
+      "pointerdown",
+      (
+        _pointer: Phaser.Input.Pointer,
+        _localX: number,
+        _localY: number,
+        event?: Phaser.Types.Input.EventData,
+      ) => {
+        event?.stopPropagation();
+        this.advance();
+      },
+    );
 
     this.text = scene.add
       .text(0, -8, "", {
@@ -79,7 +91,7 @@ export class DialogueSystem {
       .setOrigin(0.5, 0.5);
 
     this.promptText = scene.add
-      .text(boxW / 2 - 14, boxH / 2 - 12, "[Space]", {
+      .text(boxW / 2 - 14, boxH / 2 - 12, "[Space / Tap]", {
         fontFamily: FONT_FAMILY,
         fontSize: "11px",
         color: "#888888",
@@ -96,7 +108,18 @@ export class DialogueSystem {
       .setInteractive({ useHandCursor: true });
     this.closeBtn.on("pointerover", () => this.closeBtn.setColor("#ffffff"));
     this.closeBtn.on("pointerout", () => this.closeBtn.setColor("#666666"));
-    this.closeBtn.on("pointerdown", () => this.dismiss());
+    this.closeBtn.on(
+      "pointerdown",
+      (
+        _pointer: Phaser.Input.Pointer,
+        _localX: number,
+        _localY: number,
+        event?: Phaser.Types.Input.EventData,
+      ) => {
+        event?.stopPropagation();
+        this.dismiss();
+      },
+    );
 
     this.container = scene.add.container(width / 2, height - 65, [
       this.background,

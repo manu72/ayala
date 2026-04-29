@@ -73,6 +73,7 @@ import {
   markSnatchedThisNight,
   restoreSnatchedThisNight,
 } from "../utils/snatcherNightState";
+import { EMPTY_MOVEMENT_INTENT, type MovementIntent } from "../input/playerIntent";
 
 const INTERACTION_DISTANCE = GP.INTERACTION_DIST;
 const DIALOGUE_BREAK_DISTANCE = GP.DIALOGUE_BREAK_DIST;
@@ -155,6 +156,14 @@ export class GameScene extends Phaser.Scene {
   private tabKey!: Phaser.Input.Keyboard.Key;
   private escapeKey!: Phaser.Input.Keyboard.Key;
   private journalKey!: Phaser.Input.Keyboard.Key;
+  private touchMovementIntent: MovementIntent = { ...EMPTY_MOVEMENT_INTENT };
+  private touchInteractQueued = false;
+  private touchRestDown = false;
+  private touchRestPressedQueued = false;
+  private touchRestReleased = false;
+  private touchPeekQueued = false;
+  private touchJournalQueued = false;
+  private touchPauseQueued = false;
   private journalToggleLocked = false;
   journalOpenedFromPause = false;
   private groundLayer: Phaser.Tilemaps.TilemapLayer | null = null;
@@ -330,6 +339,7 @@ export class GameScene extends Phaser.Scene {
   shutdown(): void {
     this.trustEventUnsubscribe?.();
     this.trustEventUnsubscribe = null;
+    this.clearTouchInputState(true);
     this.clearIntroCinematicResources();
     if (this.cinematicActive) {
       this.cinematicActive = false;
@@ -422,6 +432,7 @@ export class GameScene extends Phaser.Scene {
     // subscribe to the scene-lifecycle "shutdown" event explicitly. `once` is
     // correct here because a new create() will re-subscribe on scene restart.
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.shutdown, this);
+    this.clearTouchInputState(true);
 
     this.npcs = [];
     this.humans = [];
@@ -969,6 +980,166 @@ export class GameScene extends Phaser.Scene {
     g.destroy();
   }
 
+  setTouchMovementIntent(intent: MovementIntent): void {
+    const run = this.touchMovementIntent.run;
+    this.touchMovementIntent = { ...intent, run };
+    this.player?.setExternalMovementIntent(this.touchMovementIntent);
+  }
+
+  clearTouchMovementIntent(): void {
+    this.touchMovementIntent = { ...EMPTY_MOVEMENT_INTENT };
+    this.player?.clearExternalMovementIntent();
+  }
+
+  clearTouchInputState(clearQueues = true): void {
+    this.touchMovementIntent = { ...EMPTY_MOVEMENT_INTENT };
+    this.touchRestDown = false;
+    this.touchRestPressedQueued = false;
+    this.touchRestReleased = false;
+    if (clearQueues) {
+      this.touchInteractQueued = false;
+      this.touchPeekQueued = false;
+      this.touchJournalQueued = false;
+      this.touchPauseQueued = false;
+    }
+    this.player?.clearExternalMovementIntent();
+    this.player?.cancelExternalCrouchPress();
+  }
+
+  setTouchRun(active: boolean): void {
+    this.touchMovementIntent = { ...this.touchMovementIntent, run: active };
+    this.player?.setExternalMovementIntent(this.touchMovementIntent);
+  }
+
+  beginTouchCrouch(): void {
+    this.player?.beginExternalCrouchPress();
+  }
+
+  endTouchCrouch(): void {
+    this.player?.endExternalCrouchPress();
+  }
+
+  queueTouchInteract(): void {
+    this.touchInteractQueued = true;
+  }
+
+  beginTouchRest(): void {
+    this.touchRestDown = true;
+    this.touchRestPressedQueued = true;
+  }
+
+  endTouchRest(): void {
+    this.touchRestDown = false;
+    this.touchRestReleased = true;
+  }
+
+  queueTouchPeek(): void {
+    this.touchPeekQueued = true;
+  }
+
+  queueTouchJournal(): void {
+    this.touchJournalQueued = true;
+  }
+
+  queueTouchPause(): void {
+    this.touchPauseQueued = true;
+  }
+
+  private consumeTouchPauseQueue(): boolean {
+    const requested = this.touchPauseQueued;
+    this.touchPauseQueued = false;
+    return requested;
+  }
+
+  private consumeTouchJournalQueue(): boolean {
+    const requested = this.touchJournalQueued;
+    this.touchJournalQueued = false;
+    return requested;
+  }
+
+  private consumeTouchPeekQueue(): boolean {
+    const requested = this.touchPeekQueued;
+    this.touchPeekQueued = false;
+    return requested;
+  }
+
+  private consumeTouchInteractQueue(): boolean {
+    const requested = this.touchInteractQueued;
+    this.touchInteractQueued = false;
+    return requested;
+  }
+
+  private handlePauseInput(): void {
+    if (this.scene.isActive("JournalScene")) {
+      this.scene.stop("JournalScene");
+      if (this.journalOpenedFromPause) {
+        this.journalOpenedFromPause = false;
+        const hud = this.scene.get("HUDScene") as HUDScene | undefined;
+        hud?.showPauseMenu?.();
+      } else {
+        this.resumeGame();
+      }
+      return;
+    }
+
+    this.togglePause();
+  }
+
+  private handleJournalToggleInput(): void {
+    if (this.scene.isActive("JournalScene")) {
+      this.scene.stop("JournalScene");
+      if (this.journalOpenedFromPause) {
+        this.journalOpenedFromPause = false;
+        const hud = this.scene.get("HUDScene") as HUDScene | undefined;
+        hud?.showPauseMenu?.();
+      } else {
+        this.resumeGame();
+      }
+      return;
+    }
+
+    if (!this.isPaused && !this.dialogue.isActive && !this.stats.collapsed) {
+      this.openJournal();
+    }
+  }
+
+  private togglePeekInput(): void {
+    this.isPeeking = !this.isPeeking;
+    this.cameras.main.zoomTo(this.isPeeking ? PEEK_ZOOM : DEFAULT_ZOOM, ZOOM_DURATION);
+  }
+
+  private tryPrimaryInteract(time: number): void {
+    if (this.dialogue.isActive || this.playerInputFrozen) return;
+
+    const usedSource = this.foodSources.tryInteract(
+      this.player.x,
+      this.player.y,
+      this.stats,
+      this.dayNight.currentPhase,
+      time,
+    );
+
+    if (usedSource) {
+      this.scoring.discoverFoodSource(this.foodSourceKey(usedSource));
+      // Play the directional drinking / eating animation as feedback.
+      // Shared by every FoodSource type (water_bowl, fountain,
+      // feeding_station, restaurant_scraps, bugs); startConsuming() is a
+      // no-op while resting/waking/greeting/already-consuming so it can't
+      // stack or restart a half-played beat.
+      this.player.startConsuming();
+
+      for (const { cat } of this.npcs) {
+        if (Phaser.Math.Distance.Between(this.player.x, this.player.y, cat.x, cat.y) < LEARN_NAME_DISTANCE) {
+          this.trust.seenEating();
+          break;
+        }
+      }
+      return;
+    }
+
+    this.tryInteract();
+  }
+
   update(time: number, delta: number): void {
     if (this.cinematicActive) return;
 
@@ -989,20 +1160,12 @@ export class GameScene extends Phaser.Scene {
 
     // Escape must be checked before the pause gate so it can unpause.
     // When the journal is open, ESC closes it (same pattern as J key).
-    if (this.escapeKey && Phaser.Input.Keyboard.JustDown(this.escapeKey)) {
-      if (this.scene.isActive("JournalScene")) {
-        this.scene.stop("JournalScene");
-        if (this.journalOpenedFromPause) {
-          this.journalOpenedFromPause = false;
-          const hud = this.scene.get("HUDScene") as HUDScene | undefined;
-          hud?.showPauseMenu?.();
-        } else {
-          this.resumeGame();
-        }
-      } else {
-        this.togglePause();
+    const pauseRequested = (this.escapeKey && Phaser.Input.Keyboard.JustDown(this.escapeKey)) || this.consumeTouchPauseQueue();
+    if (pauseRequested) {
+      if (!this.playerInputFrozen) {
+        this.handlePauseInput();
+        return;
       }
-      return;
     }
 
     // Release J toggle lock only after the key is fully released.
@@ -1012,20 +1175,14 @@ export class GameScene extends Phaser.Scene {
 
     // J toggles the colony journal. Use key-locking to avoid double-toggles
     // when multiple scenes process the same key-down event in one frame.
-    if (this.journalKey?.isDown && !this.journalToggleLocked) {
+    const touchJournalRequested = this.consumeTouchJournalQueue();
+    if (this.playerInputFrozen && this.journalKey?.isDown) {
       this.journalToggleLocked = true;
-      if (this.scene.isActive("JournalScene")) {
-        this.scene.stop("JournalScene");
-        if (this.journalOpenedFromPause) {
-          this.journalOpenedFromPause = false;
-          const hud = this.scene.get("HUDScene") as HUDScene | undefined;
-          hud?.showPauseMenu?.();
-        } else {
-          this.resumeGame();
-        }
-      } else if (!this.isPaused && !this.dialogue.isActive && !this.stats.collapsed) {
-        this.openJournal();
-      }
+    }
+    const journalRequested = touchJournalRequested || (this.journalKey?.isDown && !this.journalToggleLocked);
+    if (journalRequested && !this.playerInputFrozen) {
+      if (this.journalKey?.isDown) this.journalToggleLocked = true;
+      this.handleJournalToggleInput();
       return;
     }
 
@@ -1084,9 +1241,9 @@ export class GameScene extends Phaser.Scene {
     }
 
     // ──── Tab peek (toggle) ────
-    if (this.tabKey && Phaser.Input.Keyboard.JustDown(this.tabKey)) {
-      this.isPeeking = !this.isPeeking;
-      this.cameras.main.zoomTo(this.isPeeking ? PEEK_ZOOM : DEFAULT_ZOOM, ZOOM_DURATION);
+    const peekRequested = (this.tabKey && Phaser.Input.Keyboard.JustDown(this.tabKey)) || this.consumeTouchPeekQueue();
+    if (peekRequested) {
+      if (!this.playerInputFrozen) this.togglePeekInput();
     }
     if (this.isPeeking) {
       if (this.player.isMoving) {
@@ -1104,6 +1261,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     // ──── Interact (Space tap) ────
+    const touchInteract = this.consumeTouchInteractQueue();
     const spaceJust = this.spaceKey && Phaser.Input.Keyboard.JustDown(this.spaceKey);
     if (spaceJust && (this.dialogue.isActive || this.playerInputFrozen) && import.meta.env.DEV) {
       // console.log (not .debug) so the diagnostic shows at Chrome's
@@ -1117,39 +1275,16 @@ export class GameScene extends Phaser.Scene {
         frozen: this.playerInputFrozen,
       });
     }
-    if (spaceJust && !this.dialogue.isActive && !this.playerInputFrozen) {
-      const usedSource = this.foodSources.tryInteract(
-        this.player.x,
-        this.player.y,
-        this.stats,
-        this.dayNight.currentPhase,
-        time,
-      );
-      if (usedSource) {
-        this.scoring.discoverFoodSource(this.foodSourceKey(usedSource));
-        // Play the directional drinking / eating animation as feedback.
-        // Shared by every FoodSource type (water_bowl, fountain,
-        // feeding_station, restaurant_scraps, bugs); startConsuming() is a
-        // no-op while resting/waking/greeting/already-consuming so it can't
-        // stack or restart a half-played beat.
-        this.player.startConsuming();
-
-        for (const { cat } of this.npcs) {
-          if (Phaser.Math.Distance.Between(this.player.x, this.player.y, cat.x, cat.y) < LEARN_NAME_DISTANCE) {
-            this.trust.seenEating();
-            break;
-          }
-        }
-      } else {
-        this.tryInteract();
-      }
+    if ((spaceJust || touchInteract) && !this.dialogue.isActive && !this.playerInputFrozen) {
+      this.tryPrimaryInteract(time);
     }
 
     // ──── Z key: tap toggles catloaf, hold enters sleep ────
     const playerBody = this.player.body as Phaser.Physics.Arcade.Body;
     const playerStationary = playerBody.velocity.length() < 1;
-    const zDown = this.restKey?.isDown ?? false;
-    const zJustUp = this.restKey ? Phaser.Input.Keyboard.JustUp(this.restKey) : false;
+    const zDown = (this.restKey?.isDown ?? false) || this.touchRestDown;
+    const zJustUp = (this.restKey ? Phaser.Input.Keyboard.JustUp(this.restKey) : false) || this.touchRestReleased;
+    this.touchRestReleased = false;
     const REST_TAP_MS = 300;
 
     if (
@@ -1164,7 +1299,8 @@ export class GameScene extends Phaser.Scene {
       this.restHoldActive = true;
       if (this.restHoldTimer >= REST_HOLD_MS) {
         // Consume stale JustDown flag so updateResting doesn't immediately wake
-        Phaser.Input.Keyboard.JustDown(this.restKey);
+        if (this.restKey) Phaser.Input.Keyboard.JustDown(this.restKey);
+        this.touchRestPressedQueued = false;
         this.player.enterRest();
         this.restHoldTimer = 0;
         this.restHoldActive = false;
@@ -1201,6 +1337,7 @@ export class GameScene extends Phaser.Scene {
       this.restHoldTimer = 0;
       this.restHoldActive = false;
     }
+    this.touchRestPressedQueued = false;
 
     // Exit catloaf when any movement key is pressed
     if (this.player.isCatloaf && this.player.isMoving) {
@@ -1265,14 +1402,17 @@ export class GameScene extends Phaser.Scene {
 
     this.stats.update(deltaSec, false, false, this.dayNight.isHeatActive, inShade, inShelter, true);
 
-    // Wake on any movement key, Space, or Z
+    // Wake on any movement key, Space, Z, or their touch equivalents.
     if (this.player.isMoving) {
       this.player.wakeUp();
       return;
     }
     const wakePressed =
       (this.spaceKey && Phaser.Input.Keyboard.JustDown(this.spaceKey)) ||
-      (this.restKey && Phaser.Input.Keyboard.JustDown(this.restKey));
+      (this.restKey && Phaser.Input.Keyboard.JustDown(this.restKey)) ||
+      this.consumeTouchInteractQueue() ||
+      this.touchRestPressedQueued;
+    this.touchRestPressedQueued = false;
     if (wakePressed) {
       this.player.wakeUp();
     }

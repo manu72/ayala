@@ -1,4 +1,9 @@
 import Phaser from "phaser";
+import {
+  EMPTY_MOVEMENT_INTENT,
+  mergeMovementIntents,
+  type MovementIntent,
+} from "../input/playerIntent";
 
 const BASE_SPEED = 80;
 const RUN_SPEED = 160;
@@ -107,6 +112,9 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
   private shiftKey!: Phaser.Input.Keyboard.Key;
   private crouchKey!: Phaser.Input.Keyboard.Key;
   private nameLabel: Phaser.GameObjects.Text;
+  private externalMovementIntent: MovementIntent = { ...EMPTY_MOVEMENT_INTENT };
+  private externalCrouchDown = false;
+  private externalCrouchDownTime = 0;
 
   speedMultiplier = 1.0;
   isRunning = false;
@@ -144,6 +152,37 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
 
   get isMoving(): boolean {
     return this.anyDirectionDown();
+  }
+
+  setExternalMovementIntent(intent: MovementIntent): void {
+    this.externalMovementIntent = { ...intent };
+  }
+
+  clearExternalMovementIntent(): void {
+    this.externalMovementIntent = { ...EMPTY_MOVEMENT_INTENT };
+  }
+
+  beginExternalCrouchPress(): void {
+    this.externalCrouchDown = true;
+    this.externalCrouchDownTime = this.scene.time.now;
+    this.crouchHoldActive = false;
+  }
+
+  endExternalCrouchPress(): void {
+    if (!this.externalCrouchDown) return;
+    const heldMs = this.externalCrouchDownTime > 0 ? this.scene.time.now - this.externalCrouchDownTime : 0;
+    if (heldMs < CROUCH_TAP_THRESHOLD_MS) {
+      this.crouchLatched = !this.crouchLatched;
+    }
+    this.externalCrouchDown = false;
+    this.externalCrouchDownTime = 0;
+    this.crouchHoldActive = false;
+  }
+
+  cancelExternalCrouchPress(): void {
+    this.externalCrouchDown = false;
+    this.externalCrouchDownTime = 0;
+    this.crouchHoldActive = false;
   }
 
   constructor(scene: Phaser.Scene, x: number, y: number) {
@@ -447,8 +486,6 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
   }
 
   update(canRun = true, delta = 0): void {
-    if (!this.cursors) return;
-
     if (this.playerState === "waking") {
       this.setVelocity(0);
       this.wakeTimer -= delta;
@@ -493,16 +530,23 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
     this.setVelocity(0);
     this.isRunning = false;
 
-    const up = this.cursors.up.isDown || this.wasd.up.isDown;
-    const down = this.cursors.down.isDown || this.wasd.down.isDown;
-    const left = this.cursors.left.isDown || this.wasd.left.isDown;
-    const right = this.cursors.right.isDown || this.wasd.right.isDown;
-    const shift = this.shiftKey?.isDown ?? false;
-    const crouch = this.crouchKey?.isDown ?? false;
+    const keyboardIntent: MovementIntent = {
+      up: Boolean(this.cursors?.up.isDown || this.wasd?.up.isDown),
+      down: Boolean(this.cursors?.down.isDown || this.wasd?.down.isDown),
+      left: Boolean(this.cursors?.left.isDown || this.wasd?.left.isDown),
+      right: Boolean(this.cursors?.right.isDown || this.wasd?.right.isDown),
+      run: this.shiftKey?.isDown ?? false,
+    };
+    const movementIntent = mergeMovementIntents(keyboardIntent, this.externalMovementIntent);
+    const { up, down, left, right } = movementIntent;
+    const shift = movementIntent.run;
+    const crouch = (this.crouchKey?.isDown ?? false) || this.externalCrouchDown;
 
-    if (crouch && this.crouchKeyDownTime > 0) {
-      const heldMs = this.scene.time.now - this.crouchKeyDownTime;
-      this.crouchHoldActive = heldMs >= CROUCH_TAP_THRESHOLD_MS;
+    if (crouch) {
+      const keyHeldMs = this.crouchKeyDownTime > 0 ? this.scene.time.now - this.crouchKeyDownTime : 0;
+      const touchHeldMs =
+        this.externalCrouchDownTime > 0 ? this.scene.time.now - this.externalCrouchDownTime : 0;
+      this.crouchHoldActive = keyHeldMs >= CROUCH_TAP_THRESHOLD_MS || touchHeldMs >= CROUCH_TAP_THRESHOLD_MS;
     } else {
       this.crouchHoldActive = false;
     }
@@ -645,16 +689,24 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
 
   /** True if any directional key (arrows or WASD) is pressed. */
   private anyDirectionDown(): boolean {
-    if (!this.cursors) return false;
+    const externalMoving =
+      this.externalMovementIntent.left ||
+      this.externalMovementIntent.right ||
+      this.externalMovementIntent.up ||
+      this.externalMovementIntent.down;
+
     return (
-      this.cursors.left.isDown ||
-      this.cursors.right.isDown ||
-      this.cursors.up.isDown ||
-      this.cursors.down.isDown ||
-      this.wasd?.up.isDown ||
-      this.wasd?.down.isDown ||
-      this.wasd?.left.isDown ||
-      this.wasd?.right.isDown
+      externalMoving ||
+      Boolean(
+        this.cursors?.left.isDown ||
+          this.cursors?.right.isDown ||
+          this.cursors?.up.isDown ||
+          this.cursors?.down.isDown ||
+          this.wasd?.up.isDown ||
+          this.wasd?.down.isDown ||
+          this.wasd?.left.isDown ||
+          this.wasd?.right.isDown,
+      )
     );
   }
 
