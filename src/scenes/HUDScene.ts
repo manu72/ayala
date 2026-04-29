@@ -407,16 +407,16 @@ export class HUDScene extends Phaser.Scene {
           gameScene.setTouchRun(this.touchRunActive);
         },
       }),
-      this.createTouchButton(right, bottom - step, "Crouch", {
-        down: () => gameScene.beginTouchCrouch(),
-        up: () => gameScene.endTouchCrouch(),
-      }),
       this.createTouchButton(left, bottom - step, "Rest", {
         down: () => gameScene.beginTouchRest(),
         up: () => gameScene.endTouchRest(),
       }),
-      this.createTouchButton(left, bottom - step * 2, "Look", {
+      this.createTouchButton(right, bottom - step, "Look", {
         down: () => gameScene.queueTouchPeek(),
+      }),
+      this.createTouchButton(left, bottom - step * 2, "Crouch", {
+        down: () => gameScene.beginTouchCrouch(),
+        up: () => gameScene.endTouchCrouch(),
       }),
       this.createTouchButton(right, bottom - step * 2, "Journal", {
         down: () => gameScene.queueTouchJournal(),

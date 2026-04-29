@@ -429,8 +429,8 @@ describe("touch input scene wiring", () => {
     expect(labelToButton.get("Run")).toMatchObject({ x: 688, y: 568 });
     expect(labelToButton.get("Act")).toMatchObject({ x: 760, y: 568 });
     expect(labelToButton.get("Rest")).toMatchObject({ x: 688, y: 496 });
-    expect(labelToButton.get("Crouch")).toMatchObject({ x: 760, y: 496 });
-    expect(labelToButton.get("Look")).toMatchObject({ x: 688, y: 424 });
+    expect(labelToButton.get("Crouch")).toMatchObject({ x: 688, y: 424 });
+    expect(labelToButton.get("Look")).toMatchObject({ x: 760, y: 496 });
     expect(labelToButton.get("Journal")).toMatchObject({ x: 760, y: 424 });
     expect(labelToButton.get("Pause")).toMatchObject({ x: 760, y: 352 });
   });
