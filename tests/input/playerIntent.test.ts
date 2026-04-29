@@ -26,6 +26,16 @@ describe("playerIntent", () => {
     });
   });
 
+  it("uses only the radial dead zone before deriving directions from signs", () => {
+    expect(vectorToMovementIntent(8, -8, 10)).toEqual({
+      up: true,
+      down: false,
+      left: false,
+      right: true,
+      run: false,
+    });
+  });
+
   it("merges keyboard and touch intent without losing either source", () => {
     expect(
       mergeMovementIntents(

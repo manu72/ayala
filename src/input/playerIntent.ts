@@ -38,10 +38,10 @@ export function vectorToMovementIntent(
   if (Math.hypot(dx, dy) < deadZonePx) return { ...EMPTY_MOVEMENT_INTENT };
 
   return {
-    up: dy < -deadZonePx,
-    down: dy > deadZonePx,
-    left: dx < -deadZonePx,
-    right: dx > deadZonePx,
+    up: dy < 0,
+    down: dy > 0,
+    left: dx < 0,
+    right: dx > 0,
     run: false,
   };
 }
