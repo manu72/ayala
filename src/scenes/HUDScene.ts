@@ -410,6 +410,9 @@ export class HUDScene extends Phaser.Scene {
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       gameScene?.clearTouchInputState();
+      this.touchStickPointerId = null;
+      this.touchRunActive = false;
+      this.touchMovementIntent = { ...EMPTY_MOVEMENT_INTENT };
       if (this.touchPointerMoveHandler) {
         this.input.off("pointermove", this.touchPointerMoveHandler);
         this.touchPointerMoveHandler = null;

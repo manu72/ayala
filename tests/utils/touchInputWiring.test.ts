@@ -381,6 +381,35 @@ describe("touch input scene wiring", () => {
     expect(gameScene.clearTouchInputState).toHaveBeenCalledOnce();
   });
 
+  it("clears HUD-local touch state on scene shutdown", () => {
+    const scene = new HUDScene() as unknown as AnyScene;
+    const gameScene = {
+      beginTouchCrouch: vi.fn(),
+      clearTouchInputState: vi.fn(),
+      endTouchCrouch: vi.fn(),
+      queueTouchInteract: vi.fn(),
+      queueTouchJournal: vi.fn(),
+      queueTouchPause: vi.fn(),
+      queueTouchPeek: vi.fn(),
+      setTouchRun: vi.fn(),
+    };
+    scene.scene.get.mockImplementation((key: unknown) => (key === "GameScene" ? gameScene : undefined));
+
+    scene["buildTouchControls"](816, 624);
+    Object.assign(scene, {
+      touchMovementIntent: { ...EMPTY_MOVEMENT_INTENT, down: true, run: true },
+      touchRunActive: true,
+      touchStickPointerId: 9,
+    });
+
+    scene.events.emit(Phaser.Scenes.Events.SHUTDOWN);
+
+    expect(scene["touchStickPointerId"]).toBeNull();
+    expect(scene["touchRunActive"]).toBe(false);
+    expect(scene["touchMovementIntent"]).toEqual(EMPTY_MOVEMENT_INTENT);
+    expect(gameScene.clearTouchInputState).toHaveBeenCalledOnce();
+  });
+
   it("routes the HUD Run button through GameScene.setTouchRun", () => {
     const scene = new HUDScene() as unknown as AnyScene;
     const gameScene = {
