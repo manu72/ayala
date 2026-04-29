@@ -28,6 +28,7 @@ function talkCount(req: DialogueRequest): number {
 
 const blackyScripts: DialogueScript[] = [
   {
+    id: "blacky_first",
     condition: isFirstMeeting,
     response: {
       lines: [
@@ -44,6 +45,7 @@ const blackyScripts: DialogueScript[] = [
     },
   },
   {
+    id: "blacky_return",
     condition: () => true,
     response: {
       lines: ["Still here? Good. You're tougher than you look."],
@@ -59,6 +61,7 @@ const blackyScripts: DialogueScript[] = [
 
 const tigerScripts: DialogueScript[] = [
   {
+    id: "tiger_first",
     condition: isFirstMeeting,
     response: {
       lines: ["*The cat's ears flatten slightly. Its tail flicks once.*", '"This is my spot."'],
@@ -70,6 +73,7 @@ const tigerScripts: DialogueScript[] = [
     },
   },
   {
+    id: "tiger_warmup",
     condition: (req) => talkCount(req) === 1,
     response: {
       lines: [
@@ -83,6 +87,7 @@ const tigerScripts: DialogueScript[] = [
     },
   },
   {
+    id: "tiger_return",
     condition: () => true,
     response: {
       lines: ['"You can rest here. Under this tree. I\'ll keep watch."'],
@@ -98,6 +103,7 @@ const tigerScripts: DialogueScript[] = [
 
 const jaycoScripts: DialogueScript[] = [
   {
+    id: "jayco_first",
     condition: isFirstMeeting,
     response: {
       lines: [
@@ -112,6 +118,7 @@ const jaycoScripts: DialogueScript[] = [
     },
   },
   {
+    id: "jayco_return",
     condition: () => true,
     response: {
       lines: ['"The ginger ones fight over the bench near the fountain. Stay clear at dusk."'],
@@ -127,6 +134,7 @@ const jaycoScripts: DialogueScript[] = [
 
 const jaycoJrScripts: DialogueScript[] = [
   {
+    id: "jaycojr_first",
     condition: isFirstMeeting,
     response: {
       lines: [
@@ -140,6 +148,7 @@ const jaycoJrScripts: DialogueScript[] = [
     },
   },
   {
+    id: "jaycojr_return",
     condition: () => true,
     response: {
       lines: ['"Did you find the water bowls? They\'re near the big trees! I can show you!"'],
@@ -155,6 +164,7 @@ const jaycoJrScripts: DialogueScript[] = [
 
 const fluffyScripts: DialogueScript[] = [
   {
+    id: "fluffy_first",
     condition: isFirstMeeting,
     response: {
       lines: [
@@ -169,6 +179,7 @@ const fluffyScripts: DialogueScript[] = [
     },
   },
   {
+    id: "fluffy_trust_return",
     condition: (req) => req.gameState.trustWithSpeaker >= 20,
     response: {
       lines: [
@@ -183,6 +194,7 @@ const fluffyScripts: DialogueScript[] = [
     },
   },
   {
+    id: "fluffy_cautious_return",
     condition: () => true,
     response: {
       lines: ["*The cat watches you from the bushes, keeping a safe distance.*"],
@@ -198,6 +210,7 @@ const fluffyScripts: DialogueScript[] = [
 
 const pedigreeScripts: DialogueScript[] = [
   {
+    id: "pedigree_first",
     condition: isFirstMeeting,
     response: {
       lines: [
@@ -212,6 +225,7 @@ const pedigreeScripts: DialogueScript[] = [
     },
   },
   {
+    id: "pedigree_return",
     condition: () => true,
     response: {
       lines: ['"The ones in dark clothes at night... they took my friend. Stay hidden after dark."'],
@@ -227,6 +241,7 @@ const pedigreeScripts: DialogueScript[] = [
 
 const gingerScripts: DialogueScript[] = [
   {
+    id: "ginger_first",
     condition: isFirstMeeting,
     response: {
       lines: ["*Two orange cats glare at you from beside the fountain. One hisses.*", '"This water is ours."'],
@@ -237,6 +252,7 @@ const gingerScripts: DialogueScript[] = [
     },
   },
   {
+    id: "ginger_trust_return",
     condition: (req) => req.gameState.trustWithSpeaker >= 30,
     response: {
       lines: ["*The ginger cat flicks an ear at you.*", '"...Fine. Drink. But don\'t bring anyone else."'],
@@ -247,6 +263,7 @@ const gingerScripts: DialogueScript[] = [
     },
   },
   {
+    id: "ginger_hostile_return",
     condition: () => true,
     response: {
       lines: ["*The ginger cat hisses softly.*"],
@@ -262,6 +279,7 @@ const gingerScripts: DialogueScript[] = [
 
 const gingerBScripts: DialogueScript[] = [
   {
+    id: "gingerb_first",
     condition: isFirstMeeting,
     response: {
       lines: ["*This one just watches. It doesn't speak. Its brother does the talking.*"],
@@ -272,6 +290,7 @@ const gingerBScripts: DialogueScript[] = [
     },
   },
   {
+    id: "gingerb_return",
     condition: () => true,
     response: {
       lines: ["*The cat stares at you, unblinking.*"],
@@ -295,6 +314,7 @@ const COLONY_LINES = [
 
 const colonyScripts: DialogueScript[] = [
   {
+    id: "colony_cat_default",
     condition: () => true,
     response: {
       lines: [COLONY_LINES[Math.floor(Math.random() * COLONY_LINES.length)]!],

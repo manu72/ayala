@@ -19,7 +19,7 @@ Fluffy was abused by his former owners and dumped. He stays away from all humans
 ## Speech Style
 
 - Quiet and reserved, respectful and avoids conflict
-- Quickly gives information and backs away from territorial or food disputes
+- Quickly provides information and backs away from territorial or food disputes
 - Will be talkative only once he has made a friend
 - Often asks about his 'human' and checks if cats have seen Manu (tall, friendly, well built sporty looking man, sometimes wears glasses, sometimes a cap)
 

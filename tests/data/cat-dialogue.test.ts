@@ -37,6 +37,7 @@ describe('cat-dialogue — isFirstMeeting (via script conditions)', () => {
       const scripts = CAT_DIALOGUE_SCRIPTS[cat]!
       const match = scripts.find(s => s.condition(req))
       expect(match).toBeDefined()
+      expect(match!.id).toBe(`${cat.toLowerCase().replace(/\s/g, '')}_first`)
       expect(match!.response.event).toContain('first')
     })
   }
@@ -49,6 +50,7 @@ describe('cat-dialogue — isFirstMeeting (via script conditions)', () => {
     const scripts = CAT_DIALOGUE_SCRIPTS['Blacky']!
     const match = scripts.find(s => s.condition(req))
     expect(match).toBeDefined()
+    expect(match!.id).toBe('blacky_return')
     expect(match!.response.event).toBe('blacky_return')
   })
 
@@ -62,6 +64,7 @@ describe('cat-dialogue — isFirstMeeting (via script conditions)', () => {
     })
     const scripts = CAT_DIALOGUE_SCRIPTS['Blacky']!
     const match = scripts.find(s => s.condition(req))
+    expect(match!.id).toBe('blacky_first')
     expect(match!.response.event).toBe('blacky_first')
   })
 })
@@ -74,6 +77,7 @@ describe('cat-dialogue — talkCount (via Tiger scripts)', () => {
     })
     const scripts = CAT_DIALOGUE_SCRIPTS['Tiger']!
     const match = scripts.find(s => s.condition(req))
+    expect(match!.id).toBe('tiger_warmup')
     expect(match!.response.event).toBe('tiger_warmup')
   })
 
@@ -87,6 +91,7 @@ describe('cat-dialogue — talkCount (via Tiger scripts)', () => {
     })
     const scripts = CAT_DIALOGUE_SCRIPTS['Tiger']!
     const match = scripts.find(s => s.condition(req))
+    expect(match!.id).toBe('tiger_first')
     expect(match!.response.event).toBe('tiger_first')
   })
 
@@ -100,6 +105,7 @@ describe('cat-dialogue — talkCount (via Tiger scripts)', () => {
     })
     const scripts = CAT_DIALOGUE_SCRIPTS['Tiger']!
     const match = scripts.find(s => s.condition(req))
+    expect(match!.id).toBe('tiger_return')
     expect(match!.response.event).toBe('tiger_return')
   })
 })
@@ -116,8 +122,9 @@ describe('cat-dialogue — trust-gated scripts', () => {
     })
     const scripts = CAT_DIALOGUE_SCRIPTS['Fluffy']!
     const match = scripts.find(s => s.condition(lowTrust))
-    // Falls through to the catch-all, not the trust-gated one
-    expect(match!.response.lines[0]).toContain('flicks an ear')
+    expect(match!.id).toBe('fluffy_cautious_return')
+    expect(match!.response.event).toBe('fluffy_return')
+    expect(match!.response.speakerPose).toBe('wary')
   })
 
   it('Fluffy: unlocks trust-gated dialogue at trust >= 20', () => {
@@ -131,7 +138,9 @@ describe('cat-dialogue — trust-gated scripts', () => {
     })
     const scripts = CAT_DIALOGUE_SCRIPTS['Fluffy']!
     const match = scripts.find(s => s.condition(highTrust))
-    expect(match!.response.lines[0]).toContain('still alive')
+    expect(match!.id).toBe('fluffy_trust_return')
+    expect(match!.response.event).toBe('fluffy_return')
+    expect(match!.response.speakerPose).toBe('curious')
   })
 
   it('Ginger: requires trust >= 30 for friendly response', () => {
@@ -145,7 +154,9 @@ describe('cat-dialogue — trust-gated scripts', () => {
     })
     const scripts = CAT_DIALOGUE_SCRIPTS['Ginger']!
     const match = scripts.find(s => s.condition(highTrust))
-    expect(match!.response.lines[1]).toContain('Drink')
+    expect(match!.id).toBe('ginger_trust_return')
+    expect(match!.response.event).toBe('ginger_return')
+    expect(match!.response.speakerPose).toBe('wary')
   })
 })
 
@@ -155,6 +166,7 @@ describe('cat-dialogue — Colony Cat', () => {
     const scripts = CAT_DIALOGUE_SCRIPTS['Colony Cat']!
     const match = scripts.find(s => s.condition(req))
     expect(match).toBeDefined()
+    expect(match!.id).toBe('colony_cat_default')
     expect(match!.response.lines.length).toBe(1)
   })
 })
@@ -168,4 +180,11 @@ describe('cat-dialogue — all named cats have scripts', () => {
       expect(CAT_DIALOGUE_SCRIPTS[name]!.length).toBeGreaterThan(0)
     })
   }
+
+  it('every scripted dialogue entry has a unique stable id', () => {
+    const ids = Object.values(CAT_DIALOGUE_SCRIPTS).flatMap(scripts => scripts.map(script => script.id))
+
+    expect(ids.every(Boolean)).toBe(true)
+    expect(new Set(ids).size).toBe(ids.length)
+  })
 })
