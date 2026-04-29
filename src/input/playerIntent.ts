@@ -1,5 +1,7 @@
 import { TOUCH_STICK_DEAD_ZONE_PX } from "../config/gameplayConstants";
 
+const CARDINAL_SNAP_RATIO = Math.tan(Math.PI / 8);
+
 export interface MovementIntent {
   up: boolean;
   down: boolean;
@@ -36,6 +38,30 @@ export function vectorToMovementIntent(
 ): MovementIntent {
   if (!Number.isFinite(dx) || !Number.isFinite(dy)) return { ...EMPTY_MOVEMENT_INTENT };
   if (Math.hypot(dx, dy) < deadZonePx) return { ...EMPTY_MOVEMENT_INTENT };
+
+  const absDx = Math.abs(dx);
+  const absDy = Math.abs(dy);
+
+  if (absDx > 0 && absDy > 0) {
+    if (absDy / absDx <= CARDINAL_SNAP_RATIO) {
+      return {
+        up: false,
+        down: false,
+        left: dx < 0,
+        right: dx > 0,
+        run: false,
+      };
+    }
+    if (absDx / absDy <= CARDINAL_SNAP_RATIO) {
+      return {
+        up: dy < 0,
+        down: dy > 0,
+        left: false,
+        right: false,
+        run: false,
+      };
+    }
+  }
 
   return {
     up: dy < 0,

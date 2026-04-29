@@ -67,7 +67,7 @@ export const TOUCH_STICK_RADIUS_PX = 48;
 export const TOUCH_STICK_DEAD_ZONE_PX = 10;
 
 /** Base size for on-screen touch action buttons. Kept on the 8px grid. */
-export const TOUCH_BUTTON_SIZE_PX = 48;
+export const TOUCH_BUTTON_SIZE_PX = 64;
 
 /** Gap between touch controls. Kept on the 8px grid. */
 export const TOUCH_BUTTON_GAP_PX = 8;

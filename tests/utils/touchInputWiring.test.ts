@@ -36,7 +36,10 @@ function createEventHub() {
 function createGameObject() {
   const hub = createEventHub();
   const obj = {
+    height: 0,
+    style: {} as Record<string, unknown>,
     visible: true,
+    width: 0,
     x: 0,
     y: 0,
     text: "",
@@ -93,14 +96,19 @@ function createMockSceneSurface() {
     circles,
     containers,
     add: {
-      rectangle: vi.fn(() => {
+      rectangle: vi.fn((_x = 0, _y = 0, width = 0, height = 0) => {
         const obj = createGameObject();
+        obj.width = Number(width);
+        obj.height = Number(height);
         rectangles.push(obj);
         return obj;
       }),
-      text: vi.fn((_x: number, _y: number, text = "") => {
+      text: vi.fn((x: number, y: number, text = "", style: Record<string, unknown> = {}) => {
         const obj = createGameObject();
+        obj.x = Number(x);
+        obj.y = Number(y);
         obj.text = String(text);
+        obj.style = style;
         texts.push(obj);
         return obj;
       }),
@@ -109,8 +117,10 @@ function createMockSceneSurface() {
         circles.push(obj);
         return obj;
       }),
-      container: vi.fn(() => {
+      container: vi.fn((x = 0, y = 0) => {
         const obj = createGameObject();
+        obj.x = Number(x);
+        obj.y = Number(y);
         containers.push(obj);
         return obj;
       }),
@@ -333,12 +343,16 @@ describe("touch input scene wiring", () => {
   it("clears all touch queues when HUD touch controls become hidden", () => {
     const scene = new HUDScene() as unknown as AnyScene;
     const container = createGameObject();
+    const knob = createGameObject();
     const gameScene = { cinematicActive: false, clearTouchInputState: vi.fn(), isPaused: true };
 
     Object.assign(scene, {
       dialogue: { isActive: false },
       touchControlsContainer: container,
       touchMovementIntent: { ...EMPTY_MOVEMENT_INTENT, left: true, run: true },
+      touchStickKnob: knob,
+      touchStickOriginX: 72,
+      touchStickOriginY: 552,
       touchRunActive: true,
       touchStickPointerId: 7,
     });
@@ -349,7 +363,92 @@ describe("touch input scene wiring", () => {
     expect(scene["touchRunActive"]).toBe(false);
     expect(scene["touchMovementIntent"]).toEqual(EMPTY_MOVEMENT_INTENT);
     expect(gameScene.clearTouchInputState).toHaveBeenCalledWith(true);
+    expect(knob.setPosition).toHaveBeenCalledWith(72, 552);
     expect(container.setVisible).toHaveBeenCalledWith(false);
+  });
+
+  it("renders lower-right touch buttons large enough for touch targets and readable labels", () => {
+    const scene = new HUDScene() as unknown as AnyScene;
+    scene.scene.get.mockImplementation((key: unknown) =>
+      key === "GameScene"
+        ? {
+            beginTouchCrouch: vi.fn(),
+            beginTouchRest: vi.fn(),
+            clearTouchInputState: vi.fn(),
+            endTouchCrouch: vi.fn(),
+            endTouchRest: vi.fn(),
+            queueTouchInteract: vi.fn(),
+            queueTouchJournal: vi.fn(),
+            queueTouchPause: vi.fn(),
+            queueTouchPeek: vi.fn(),
+            setTouchRun: vi.fn(),
+          }
+        : undefined,
+    );
+
+    scene["buildTouchControls"](816, 624);
+    const surface = latestSurface();
+    const buttonBackgrounds = surface.rectangles.slice(0, 7);
+    const labels = surface.texts.slice(0, 7);
+
+    expect(buttonBackgrounds).toHaveLength(7);
+    for (const button of buttonBackgrounds) {
+      expect(button.width).toBeGreaterThanOrEqual(64);
+      expect(button.height).toBeGreaterThanOrEqual(64);
+    }
+    for (const label of labels) {
+      expect(Number.parseInt(String(label.style.fontSize), 10)).toBeGreaterThanOrEqual(12);
+    }
+  });
+
+  it("lays lower-right touch buttons out as a two-column reserved safe-zone stack", () => {
+    const scene = new HUDScene() as unknown as AnyScene;
+    scene.scene.get.mockImplementation((key: unknown) =>
+      key === "GameScene"
+        ? {
+            beginTouchCrouch: vi.fn(),
+            beginTouchRest: vi.fn(),
+            clearTouchInputState: vi.fn(),
+            endTouchCrouch: vi.fn(),
+            endTouchRest: vi.fn(),
+            queueTouchInteract: vi.fn(),
+            queueTouchJournal: vi.fn(),
+            queueTouchPause: vi.fn(),
+            queueTouchPeek: vi.fn(),
+            setTouchRun: vi.fn(),
+          }
+        : undefined,
+    );
+
+    scene["buildTouchControls"](816, 624);
+    const surface = latestSurface();
+    const labelToButton = new Map(
+      surface.texts.slice(0, 7).map((label, index) => [label.text, surface.containers[index + 1]!]),
+    );
+
+    expect(labelToButton.get("Run")).toMatchObject({ x: 688, y: 568 });
+    expect(labelToButton.get("Act")).toMatchObject({ x: 760, y: 568 });
+    expect(labelToButton.get("Rest")).toMatchObject({ x: 688, y: 496 });
+    expect(labelToButton.get("Crouch")).toMatchObject({ x: 688, y: 424 });
+    expect(labelToButton.get("Look")).toMatchObject({ x: 760, y: 496 });
+    expect(labelToButton.get("Journal")).toMatchObject({ x: 760, y: 424 });
+    expect(labelToButton.get("Pause")).toMatchObject({ x: 760, y: 352 });
+  });
+
+  it("keeps touch controls anchored when dialogue opens", () => {
+    const scene = new HUDScene() as unknown as AnyScene;
+    const container = createGameObject();
+    const gameScene = { cinematicActive: false, clearTouchInputState: vi.fn(), isPaused: false };
+
+    Object.assign(scene, {
+      dialogue: { isActive: true },
+      touchControlsContainer: container,
+    });
+
+    scene["updateTouchControlsVisibility"](gameScene);
+
+    expect(container.setY).toHaveBeenCalledWith(0);
+    expect(container.setVisible).toHaveBeenCalledWith(true);
   });
 
   it("clears active touch controls on game blur", () => {
@@ -379,6 +478,64 @@ describe("touch input scene wiring", () => {
     expect(scene["touchRunActive"]).toBe(false);
     expect(scene["touchMovementIntent"]).toEqual(EMPTY_MOVEMENT_INTENT);
     expect(gameScene.clearTouchInputState).toHaveBeenCalledOnce();
+  });
+
+  it("accepts new touch button presses after game blur resets active controls", () => {
+    const scene = new HUDScene() as unknown as AnyScene;
+    const gameScene = {
+      beginTouchCrouch: vi.fn(),
+      clearTouchInputState: vi.fn(),
+      endTouchCrouch: vi.fn(),
+      queueTouchInteract: vi.fn(),
+      queueTouchJournal: vi.fn(),
+      queueTouchPause: vi.fn(),
+      queueTouchPeek: vi.fn(),
+      setTouchRun: vi.fn(),
+    };
+    scene.scene.get.mockImplementation((key: unknown) => (key === "GameScene" ? gameScene : undefined));
+
+    scene["buildTouchControls"](816, 624);
+    const surface = latestSurface();
+    const runButtonBackground = surface.rectangles[1]!;
+    const event = { stopPropagation: vi.fn() };
+
+    runButtonBackground.emit("pointerdown", { id: 22 }, 0, 0, event);
+    scene.game.events.emit("blur");
+    runButtonBackground.emit("pointerdown", { id: 23 }, 0, 0, event);
+
+    expect(gameScene.setTouchRun).toHaveBeenNthCalledWith(1, true);
+    expect(gameScene.setTouchRun).toHaveBeenNthCalledWith(2, true);
+  });
+
+  it("accepts new touch button presses after controls hide and reappear", () => {
+    const scene = new HUDScene() as unknown as AnyScene;
+    const gameScene = {
+      beginTouchCrouch: vi.fn(),
+      clearTouchInputState: vi.fn(),
+      endTouchCrouch: vi.fn(),
+      isPaused: false,
+      queueTouchInteract: vi.fn(),
+      queueTouchJournal: vi.fn(),
+      queueTouchPause: vi.fn(),
+      queueTouchPeek: vi.fn(),
+      setTouchRun: vi.fn(),
+    };
+    scene.scene.get.mockImplementation((key: unknown) => (key === "GameScene" ? gameScene : undefined));
+
+    scene["buildTouchControls"](816, 624);
+    const surface = latestSurface();
+    const runButtonBackground = surface.rectangles[1]!;
+    const event = { stopPropagation: vi.fn() };
+
+    runButtonBackground.emit("pointerdown", { id: 22 }, 0, 0, event);
+    gameScene.isPaused = true;
+    scene["updateTouchControlsVisibility"](gameScene);
+    gameScene.isPaused = false;
+    scene["updateTouchControlsVisibility"](gameScene);
+    runButtonBackground.emit("pointerdown", { id: 23 }, 0, 0, event);
+
+    expect(gameScene.setTouchRun).toHaveBeenNthCalledWith(1, true);
+    expect(gameScene.setTouchRun).toHaveBeenNthCalledWith(2, true);
   });
 
   it("clears HUD-local touch state on scene shutdown", () => {
@@ -434,6 +591,125 @@ describe("touch input scene wiring", () => {
 
     expect(gameScene.setTouchRun).toHaveBeenNthCalledWith(1, true);
     expect(gameScene.setTouchRun).toHaveBeenNthCalledWith(2, false);
+  });
+
+  it("keeps touch Run active until the owning touch ends", () => {
+    const scene = new HUDScene() as unknown as AnyScene;
+    const gameScene = {
+      beginTouchCrouch: vi.fn(),
+      clearTouchInputState: vi.fn(),
+      endTouchCrouch: vi.fn(),
+      queueTouchInteract: vi.fn(),
+      queueTouchJournal: vi.fn(),
+      queueTouchPause: vi.fn(),
+      queueTouchPeek: vi.fn(),
+      setTouchRun: vi.fn(),
+    };
+    scene.scene.get.mockImplementation((key: unknown) => (key === "GameScene" ? gameScene : undefined));
+
+    scene["buildTouchControls"](816, 624);
+    const surface = latestSurface();
+    const runButtonBackground = surface.rectangles[1]!;
+    const event = { stopPropagation: vi.fn() };
+    const runPointer = { id: 22 };
+
+    runButtonBackground.emit("pointerdown", runPointer, 0, 0, event);
+    runButtonBackground.emit("pointerout", runPointer);
+    expect(gameScene.setTouchRun).toHaveBeenCalledOnce();
+    expect(gameScene.setTouchRun).toHaveBeenLastCalledWith(true);
+
+    runButtonBackground.emit("pointerupoutside", runPointer);
+
+    expect(gameScene.setTouchRun).toHaveBeenNthCalledWith(1, true);
+    expect(gameScene.setTouchRun).toHaveBeenNthCalledWith(2, false);
+  });
+
+  it("keeps touch Run held while a separate joystick touch moves and releases", () => {
+    const scene = new HUDScene() as unknown as AnyScene;
+    const gameScene = {
+      beginTouchCrouch: vi.fn(),
+      clearTouchInputState: vi.fn(),
+      endTouchCrouch: vi.fn(),
+      queueTouchInteract: vi.fn(),
+      queueTouchJournal: vi.fn(),
+      queueTouchPause: vi.fn(),
+      queueTouchPeek: vi.fn(),
+      setTouchMovementIntent: vi.fn(),
+      setTouchRun: vi.fn(),
+    };
+    scene.scene.get.mockImplementation((key: unknown) => (key === "GameScene" ? gameScene : undefined));
+
+    scene["buildTouchControls"](816, 624);
+    const surface = latestSurface();
+    const stickBase = surface.circles[0]!;
+    const runButtonBackground = surface.rectangles[1]!;
+    const event = { stopPropagation: vi.fn() };
+
+    runButtonBackground.emit("pointerdown", { id: 21 }, 0, 0, event);
+    stickBase.emit("pointerdown", { id: 11, x: 102, y: 552 }, 0, 0, event);
+    scene.input.emit("pointermove", { id: 11, x: 110, y: 556 });
+    scene.input.emit("pointerup", { id: 11 });
+
+    expect(gameScene.setTouchRun).toHaveBeenCalledOnce();
+    expect(gameScene.setTouchRun).toHaveBeenLastCalledWith(true);
+
+    runButtonBackground.emit("pointerupoutside", { id: 21 });
+    expect(gameScene.setTouchRun).toHaveBeenNthCalledWith(2, false);
+  });
+
+  it("uses queued touch Act to advance active dialogue like Space", () => {
+    const scene = makeFrozenUpdateScene();
+    const dialogue = {
+      dismiss: vi.fn(),
+      isActive: true,
+      show: vi.fn(),
+      advance: vi.fn(),
+    };
+    scene.scene.get.mockImplementation((key: unknown) =>
+      key === "HUDScene" ? { dialogue } : undefined,
+    );
+    Object.assign(scene, {
+      dialogueRequestInFlight: false,
+      isPaused: false,
+      journalKey: { isDown: false },
+      playerInputFrozen: false,
+      tryPrimaryInteract: vi.fn(),
+    });
+
+    scene.queueTouchInteract();
+    scene.update(0, 16);
+
+    expect(dialogue.advance).toHaveBeenCalledOnce();
+    expect(scene["tryPrimaryInteract"]).not.toHaveBeenCalled();
+  });
+
+  it("does not interact in the same frame that touch Act closes dialogue", () => {
+    const scene = makeFrozenUpdateScene();
+    const dialogue = {
+      dismiss: vi.fn(),
+      isActive: true,
+      show: vi.fn(),
+      advance: vi.fn(() => {
+        dialogue.isActive = false;
+      }),
+    };
+    scene.scene.get.mockImplementation((key: unknown) =>
+      key === "HUDScene" ? { dialogue } : undefined,
+    );
+    Object.assign(scene, {
+      dialogueRequestInFlight: false,
+      isPaused: false,
+      journalKey: { isDown: false },
+      playerInputFrozen: false,
+      spaceKey: { justDown: true },
+      tryPrimaryInteract: vi.fn(),
+    });
+
+    scene.queueTouchInteract();
+    scene.update(0, 16);
+
+    expect(dialogue.advance).toHaveBeenCalledOnce();
+    expect(scene["tryPrimaryInteract"]).not.toHaveBeenCalled();
   });
 
   it("ignores pause and peek inputs while preserving a frozen update frame", () => {

@@ -26,6 +26,11 @@ const BAR_H = 10;
 const BAR_GAP = 6;
 const BAR_LABEL_W = 50;
 const FONT_FAMILY = "Arial, Helvetica, sans-serif";
+const TOUCH_BUTTON_FONT_SIZE = "14px";
+const TOUCH_BUTTON_COMPACT_FONT_SIZE = "12px";
+const TOUCH_EDGE_MARGIN_PX = 24;
+const TOUCH_DIALOGUE_GAP_PX = 16;
+const TOUCH_ACTION_COLUMNS = 2;
 
 interface BarDef {
   stat: "hunger" | "thirst" | "energy";
@@ -78,6 +83,7 @@ export class HUDScene extends Phaser.Scene {
   private touchPointerMoveHandler: ((pointer: Phaser.Input.Pointer) => void) | null = null;
   private touchPointerUpHandler: ((pointer: Phaser.Input.Pointer) => void) | null = null;
   private touchCancelHandler: (() => void) | null = null;
+  private touchButtonResetHandlers: Array<() => void> = [];
 
   private narrationText!: Phaser.GameObjects.Text;
   private narrationTween: Phaser.Tweens.Tween | null = null;
@@ -243,7 +249,20 @@ export class HUDScene extends Phaser.Scene {
     this.edgePulseGraphics = this.add.graphics().setDepth(80).setAlpha(0);
 
     // ──── Dialogue ────
-    this.dialogue = new DialogueSystem(this);
+    const touchControlsVisible = this.shouldShowTouchControls();
+    this.dialogue = new DialogueSystem(
+      this,
+      touchControlsVisible
+        ? {
+            reservedLeftPx: TOUCH_EDGE_MARGIN_PX + TOUCH_STICK_RADIUS_PX * 2,
+            reservedRightPx:
+              TOUCH_EDGE_MARGIN_PX +
+              TOUCH_ACTION_COLUMNS * TOUCH_BUTTON_SIZE_PX +
+              (TOUCH_ACTION_COLUMNS - 1) * TOUCH_BUTTON_GAP_PX,
+            horizontalGapPx: TOUCH_DIALOGUE_GAP_PX,
+          }
+        : undefined,
+    );
 
     // ──── Pause menu ────
     this.pauseContainer = this.createPauseMenu(width, height);
@@ -322,9 +341,10 @@ export class HUDScene extends Phaser.Scene {
   private buildTouchControls(width: number, height: number): void {
     this.touchControlsContainer = this.add.container(0, 0).setDepth(101);
     this.touchControlsContainer.setVisible(this.shouldShowTouchControls());
+    this.touchButtonResetHandlers = [];
 
-    const stickX = TOUCH_STICK_RADIUS_PX + 24;
-    const stickY = height - TOUCH_STICK_RADIUS_PX - 24;
+    const stickX = TOUCH_STICK_RADIUS_PX + TOUCH_EDGE_MARGIN_PX;
+    const stickY = height - TOUCH_STICK_RADIUS_PX - TOUCH_EDGE_MARGIN_PX;
     this.touchStickOriginX = stickX;
     this.touchStickOriginY = stickY;
 
@@ -369,16 +389,17 @@ export class HUDScene extends Phaser.Scene {
     this.touchCancelHandler = () => this.cancelActiveTouchControls();
     this.game.events.on("blur", this.touchCancelHandler);
 
-    const right = width - 24 - TOUCH_BUTTON_SIZE_PX / 2;
-    const bottom = height - 24 - TOUCH_BUTTON_SIZE_PX / 2;
+    const right = width - TOUCH_EDGE_MARGIN_PX - TOUCH_BUTTON_SIZE_PX / 2;
+    const bottom = height - TOUCH_EDGE_MARGIN_PX - TOUCH_BUTTON_SIZE_PX / 2;
     const step = TOUCH_BUTTON_SIZE_PX + TOUCH_BUTTON_GAP_PX;
+    const left = right - step;
     const gameScene = this.scene.get("GameScene") as GameScene;
 
     const buttons = [
       this.createTouchButton(right, bottom, "Act", {
         down: () => gameScene.queueTouchInteract(),
       }),
-      this.createTouchButton(right - step, bottom, "Run", {
+      this.createTouchButton(left, bottom, "Run", {
         down: () => {
           this.touchRunActive = true;
           gameScene.setTouchRun(this.touchRunActive);
@@ -388,21 +409,21 @@ export class HUDScene extends Phaser.Scene {
           gameScene.setTouchRun(this.touchRunActive);
         },
       }),
-      this.createTouchButton(right, bottom - step, "Crouch", {
-        down: () => gameScene.beginTouchCrouch(),
-        up: () => gameScene.endTouchCrouch(),
-      }),
-      this.createTouchButton(right - step, bottom - step, "Rest", {
+      this.createTouchButton(left, bottom - step, "Rest", {
         down: () => gameScene.beginTouchRest(),
         up: () => gameScene.endTouchRest(),
       }),
-      this.createTouchButton(right - step * 2, bottom, "Look", {
+      this.createTouchButton(right, bottom - step, "Look", {
         down: () => gameScene.queueTouchPeek(),
       }),
-      this.createTouchButton(right - step * 2, bottom - step, "Journal", {
+      this.createTouchButton(left, bottom - step * 2, "Crouch", {
+        down: () => gameScene.beginTouchCrouch(),
+        up: () => gameScene.endTouchCrouch(),
+      }),
+      this.createTouchButton(right, bottom - step * 2, "Journal", {
         down: () => gameScene.queueTouchJournal(),
       }),
-      this.createTouchButton(right, bottom - step * 2, "Pause", {
+      this.createTouchButton(right, bottom - step * 3, "Pause", {
         down: () => gameScene.queueTouchPause(),
       }),
     ];
@@ -413,6 +434,8 @@ export class HUDScene extends Phaser.Scene {
       this.touchStickPointerId = null;
       this.touchRunActive = false;
       this.touchMovementIntent = { ...EMPTY_MOVEMENT_INTENT };
+      this.resetActiveTouchButtons();
+      this.touchButtonResetHandlers = [];
       if (this.touchPointerMoveHandler) {
         this.input.off("pointermove", this.touchPointerMoveHandler);
         this.touchPointerMoveHandler = null;
@@ -457,6 +480,7 @@ export class HUDScene extends Phaser.Scene {
     label: string,
     handlers: { down?: () => void; up?: () => void },
   ): Phaser.GameObjects.Container {
+    let activePointerId: number | null = null;
     const bg = this.add
       .rectangle(0, 0, TOUCH_BUTTON_SIZE_PX, TOUCH_BUTTON_SIZE_PX, 0x000000, 0.45)
       .setStrokeStyle(1, 0xffffff, 0.45)
@@ -464,40 +488,55 @@ export class HUDScene extends Phaser.Scene {
     const text = this.add
       .text(0, 0, label, {
         fontFamily: FONT_FAMILY,
-        fontSize: label.length > 5 ? "8px" : "10px",
+        fontSize: label.length > 5 ? TOUCH_BUTTON_COMPACT_FONT_SIZE : TOUCH_BUTTON_FONT_SIZE,
         color: "#ffffff",
         align: "center",
-        wordWrap: { width: TOUCH_BUTTON_SIZE_PX - 6 },
+        wordWrap: { width: TOUCH_BUTTON_SIZE_PX - 8 },
       })
       .setOrigin(0.5);
     const button = this.add.container(x, y, [bg, text]);
 
+    const resetButton = () => {
+      activePointerId = null;
+      bg.setAlpha(1);
+    };
+    this.touchButtonResetHandlers.push(resetButton);
+
+    const releasePointer = (
+      pointer: Phaser.Input.Pointer,
+      _localX?: number,
+      _localY?: number,
+      event?: Phaser.Types.Input.EventData,
+    ) => {
+      if (activePointerId !== pointer.id) return;
+      event?.stopPropagation();
+      activePointerId = null;
+      bg.setAlpha(1);
+      handlers.up?.();
+    };
+
     bg.on("pointerdown", (
-      _pointer: Phaser.Input.Pointer,
+      pointer: Phaser.Input.Pointer,
       _localX: number,
       _localY: number,
       event?: Phaser.Types.Input.EventData,
     ) => {
       event?.stopPropagation();
+      if (activePointerId !== null) return;
+      activePointerId = pointer.id;
       bg.setAlpha(0.7);
       handlers.down?.();
     });
-    bg.on("pointerup", (
-      _pointer: Phaser.Input.Pointer,
-      _localX: number,
-      _localY: number,
-      event?: Phaser.Types.Input.EventData,
-    ) => {
-      event?.stopPropagation();
-      bg.setAlpha(1);
-      handlers.up?.();
-    });
-    bg.on("pointerout", () => {
-      bg.setAlpha(1);
-      handlers.up?.();
-    });
+    bg.on("pointerup", releasePointer);
+    bg.on("pointerupoutside", releasePointer);
 
     return button;
+  }
+
+  private resetActiveTouchButtons(): void {
+    for (const resetButton of this.touchButtonResetHandlers) {
+      resetButton();
+    }
   }
 
   private updateTouchControlsVisibility(gameScene: GameScene): void {
@@ -511,10 +550,12 @@ export class HUDScene extends Phaser.Scene {
       this.touchStickPointerId = null;
       this.touchRunActive = false;
       this.touchMovementIntent = { ...EMPTY_MOVEMENT_INTENT };
+      this.touchStickKnob?.setPosition(this.touchStickOriginX, this.touchStickOriginY);
+      this.resetActiveTouchButtons();
       gameScene.clearTouchInputState(true);
     }
 
-    this.touchControlsContainer.setY(this.dialogue.isActive ? -120 : 0);
+    this.touchControlsContainer.setY(0);
     this.touchControlsContainer.setVisible(visible);
   }
 
@@ -523,6 +564,7 @@ export class HUDScene extends Phaser.Scene {
     this.touchRunActive = false;
     this.touchMovementIntent = { ...EMPTY_MOVEMENT_INTENT };
     this.touchStickKnob?.setPosition(this.touchStickOriginX, this.touchStickOriginY);
+    this.resetActiveTouchButtons();
     const gameScene = this.scene.get("GameScene") as GameScene | undefined;
     gameScene?.clearTouchInputState();
   }

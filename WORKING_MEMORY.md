@@ -1,8 +1,8 @@
 # WORKING_MEMORY
 
 > Persistent memory layer for AI-assisted development sessions.
-> Last Updated: 2026-04-18
-> Version: 0.3.3
+> Last Updated: 2026-04-30
+> Version: 0.3.7
 
 ---
 
@@ -411,6 +411,7 @@ SmallDog.png, WhiteDog.png, BrownDog.png — randomly assigned to dog walkers
 - **No audio:** Planned for Phase 5b / polish.
 - **Tilemap POI names are hardcoded:** Spawn points, food sources, shelter POIs use string names matched between Tiled JSON and GameScene. No validation that map contains expected POIs.
 - **GameScene is ~3400 lines (growing):** Camille encounters, snatchers, colony dynamics, ambient-bubble throttling, and territory should be extracted into dedicated systems; `SnatcherSystem.ts` is a thin re-export for spawn policy only. Beat data moved out in 5.1a (`src/data/camille-encounter-beats.ts`) as a first step.
+- **Dialogue/narrative UI is fragmented:** There are currently three presentation surfaces: `DialogueSystem` bottom drawer for modal dialogue, `GameScene.renderHumanBubble` / `renderGreetingBubble` for character-spoken bubbles, and `HUDScene.showNarration` top-of-screen narrative text. This creates competing placement/input rules, especially on touch. Follow-up should consolidate to one dialogue surface and one narrative surface with explicit ownership rules for spoken lines vs narrator/perception text.
 - **Colony cat random positions:** Not tied to map POIs; positions are hardcoded zone coordinates with random offsets. May clip into objects.
 - **Disposition type `"wary"` added in Phase 3:** Not yet used in NPC AI behavior weights (only affects emotes/narration/indicators).
 - **Camille/Manu/Kish use generic HumanNPC:** No dedicated sprites yet. They use the feeder profile/sprite. Custom sprites needed for visual distinction.

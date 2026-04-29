@@ -325,11 +325,12 @@ export class GameScene extends Phaser.Scene {
       onComplete?: () => void,
       hooks?: DialogueHooks,
     ) => void;
+    advance: () => void;
     dismiss: () => void;
   } {
     const hud = this.scene.get("HUDScene") as HUDScene | undefined;
     if (hud?.dialogue) return hud.dialogue;
-    return { isActive: false, show: () => {}, dismiss: () => {} };
+    return { isActive: false, show: () => {}, advance: () => {}, dismiss: () => {} };
   }
 
   constructor() {
@@ -1262,6 +1263,7 @@ export class GameScene extends Phaser.Scene {
 
     // ──── Interact (Space tap) ────
     const touchInteract = this.consumeTouchInteractQueue();
+    const dialogueWasActiveForTouch = touchInteract && this.dialogue.isActive;
     const spaceJust = this.spaceKey && Phaser.Input.Keyboard.JustDown(this.spaceKey);
     if (spaceJust && (this.dialogue.isActive || this.playerInputFrozen) && import.meta.env.DEV) {
       // console.log (not .debug) so the diagnostic shows at Chrome's
@@ -1275,7 +1277,17 @@ export class GameScene extends Phaser.Scene {
         frozen: this.playerInputFrozen,
       });
     }
-    if ((spaceJust || touchInteract) && !this.dialogue.isActive && !this.playerInputFrozen) {
+    let dialogueAdvanced = false;
+    if (dialogueWasActiveForTouch) {
+      this.dialogue.advance();
+      dialogueAdvanced = true;
+    }
+    if (
+      (spaceJust || (touchInteract && !dialogueWasActiveForTouch)) &&
+      !dialogueAdvanced &&
+      !this.dialogue.isActive &&
+      !this.playerInputFrozen
+    ) {
       this.tryPrimaryInteract(time);
     }
 
