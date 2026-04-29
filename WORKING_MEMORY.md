@@ -169,6 +169,7 @@ SmallDog.png, WhiteDog.png, BrownDog.png — randomly assigned to dog walkers
 - **Crouch tap-vs-hold pattern:** Track `keyDownTime` on keydown event. On keyup, if held < threshold, toggle latch; if held >= threshold, release temporary crouch. Reset latch on `enterRest()`.
 - **Pause early-return ordering:** Escape key check must come BEFORE the `if (isPaused) return` gate, otherwise the player cannot unpause.
 - **Scene-level input guards must reset on lifecycle entry.** Phaser can reuse scene instances across `scene.start()` cycles, so one-shot flags such as "restart in progress" should reset in `init()` or `create()`, not only at field initialization.
+- **Mobile touch controls need both browser and Phaser setup.** For iPad/Safari joystick controls, the game surface must suppress browser gestures (`touch-action: none`, no selection/callout) so cardinal swipes reach Phaser, and `GameConfig.input.activePointers` must allow at least two touch pointers so the joystick and Run button can be held together.
 
 ### Animation
 

@@ -13,6 +13,10 @@ export const gameConfig: Phaser.Types.Core.GameConfig = {
   width: 816,
   height: 624,
   pixelArt: true,
+  input: {
+    // Touch controls need one pointer for the joystick and one for action buttons.
+    activePointers: 2,
+  },
   physics: {
     default: 'arcade',
     arcade: {
