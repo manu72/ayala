@@ -457,6 +457,7 @@ export class HUDScene extends Phaser.Scene {
     label: string,
     handlers: { down?: () => void; up?: () => void },
   ): Phaser.GameObjects.Container {
+    let activePointerId: number | null = null;
     const bg = this.add
       .rectangle(0, 0, TOUCH_BUTTON_SIZE_PX, TOUCH_BUTTON_SIZE_PX, 0x000000, 0.45)
       .setStrokeStyle(1, 0xffffff, 0.45)
@@ -472,30 +473,33 @@ export class HUDScene extends Phaser.Scene {
       .setOrigin(0.5);
     const button = this.add.container(x, y, [bg, text]);
 
+    const releasePointer = (
+      pointer: Phaser.Input.Pointer,
+      _localX?: number,
+      _localY?: number,
+      event?: Phaser.Types.Input.EventData,
+    ) => {
+      if (activePointerId !== pointer.id) return;
+      event?.stopPropagation();
+      activePointerId = null;
+      bg.setAlpha(1);
+      handlers.up?.();
+    };
+
     bg.on("pointerdown", (
-      _pointer: Phaser.Input.Pointer,
+      pointer: Phaser.Input.Pointer,
       _localX: number,
       _localY: number,
       event?: Phaser.Types.Input.EventData,
     ) => {
       event?.stopPropagation();
+      if (activePointerId !== null) return;
+      activePointerId = pointer.id;
       bg.setAlpha(0.7);
       handlers.down?.();
     });
-    bg.on("pointerup", (
-      _pointer: Phaser.Input.Pointer,
-      _localX: number,
-      _localY: number,
-      event?: Phaser.Types.Input.EventData,
-    ) => {
-      event?.stopPropagation();
-      bg.setAlpha(1);
-      handlers.up?.();
-    });
-    bg.on("pointerout", () => {
-      bg.setAlpha(1);
-      handlers.up?.();
-    });
+    bg.on("pointerup", releasePointer);
+    bg.on("pointerupoutside", releasePointer);
 
     return button;
   }
@@ -511,6 +515,7 @@ export class HUDScene extends Phaser.Scene {
       this.touchStickPointerId = null;
       this.touchRunActive = false;
       this.touchMovementIntent = { ...EMPTY_MOVEMENT_INTENT };
+      this.touchStickKnob?.setPosition(this.touchStickOriginX, this.touchStickOriginY);
       gameScene.clearTouchInputState(true);
     }
 

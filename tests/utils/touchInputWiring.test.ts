@@ -333,12 +333,16 @@ describe("touch input scene wiring", () => {
   it("clears all touch queues when HUD touch controls become hidden", () => {
     const scene = new HUDScene() as unknown as AnyScene;
     const container = createGameObject();
+    const knob = createGameObject();
     const gameScene = { cinematicActive: false, clearTouchInputState: vi.fn(), isPaused: true };
 
     Object.assign(scene, {
       dialogue: { isActive: false },
       touchControlsContainer: container,
       touchMovementIntent: { ...EMPTY_MOVEMENT_INTENT, left: true, run: true },
+      touchStickKnob: knob,
+      touchStickOriginX: 72,
+      touchStickOriginY: 552,
       touchRunActive: true,
       touchStickPointerId: 7,
     });
@@ -349,6 +353,7 @@ describe("touch input scene wiring", () => {
     expect(scene["touchRunActive"]).toBe(false);
     expect(scene["touchMovementIntent"]).toEqual(EMPTY_MOVEMENT_INTENT);
     expect(gameScene.clearTouchInputState).toHaveBeenCalledWith(true);
+    expect(knob.setPosition).toHaveBeenCalledWith(72, 552);
     expect(container.setVisible).toHaveBeenCalledWith(false);
   });
 
@@ -433,6 +438,70 @@ describe("touch input scene wiring", () => {
     runButtonBackground.emit("pointerup", {}, 0, 0, event);
 
     expect(gameScene.setTouchRun).toHaveBeenNthCalledWith(1, true);
+    expect(gameScene.setTouchRun).toHaveBeenNthCalledWith(2, false);
+  });
+
+  it("keeps touch Run active until the owning touch ends", () => {
+    const scene = new HUDScene() as unknown as AnyScene;
+    const gameScene = {
+      beginTouchCrouch: vi.fn(),
+      clearTouchInputState: vi.fn(),
+      endTouchCrouch: vi.fn(),
+      queueTouchInteract: vi.fn(),
+      queueTouchJournal: vi.fn(),
+      queueTouchPause: vi.fn(),
+      queueTouchPeek: vi.fn(),
+      setTouchRun: vi.fn(),
+    };
+    scene.scene.get.mockImplementation((key: unknown) => (key === "GameScene" ? gameScene : undefined));
+
+    scene["buildTouchControls"](816, 624);
+    const surface = latestSurface();
+    const runButtonBackground = surface.rectangles[1]!;
+    const event = { stopPropagation: vi.fn() };
+    const runPointer = { id: 22 };
+
+    runButtonBackground.emit("pointerdown", runPointer, 0, 0, event);
+    runButtonBackground.emit("pointerout", runPointer);
+    expect(gameScene.setTouchRun).toHaveBeenCalledOnce();
+    expect(gameScene.setTouchRun).toHaveBeenLastCalledWith(true);
+
+    runButtonBackground.emit("pointerupoutside", runPointer);
+
+    expect(gameScene.setTouchRun).toHaveBeenNthCalledWith(1, true);
+    expect(gameScene.setTouchRun).toHaveBeenNthCalledWith(2, false);
+  });
+
+  it("keeps touch Run held while a separate joystick touch moves and releases", () => {
+    const scene = new HUDScene() as unknown as AnyScene;
+    const gameScene = {
+      beginTouchCrouch: vi.fn(),
+      clearTouchInputState: vi.fn(),
+      endTouchCrouch: vi.fn(),
+      queueTouchInteract: vi.fn(),
+      queueTouchJournal: vi.fn(),
+      queueTouchPause: vi.fn(),
+      queueTouchPeek: vi.fn(),
+      setTouchMovementIntent: vi.fn(),
+      setTouchRun: vi.fn(),
+    };
+    scene.scene.get.mockImplementation((key: unknown) => (key === "GameScene" ? gameScene : undefined));
+
+    scene["buildTouchControls"](816, 624);
+    const surface = latestSurface();
+    const stickBase = surface.circles[0]!;
+    const runButtonBackground = surface.rectangles[1]!;
+    const event = { stopPropagation: vi.fn() };
+
+    runButtonBackground.emit("pointerdown", { id: 21 }, 0, 0, event);
+    stickBase.emit("pointerdown", { id: 11, x: 102, y: 552 }, 0, 0, event);
+    scene.input.emit("pointermove", { id: 11, x: 110, y: 556 });
+    scene.input.emit("pointerup", { id: 11 });
+
+    expect(gameScene.setTouchRun).toHaveBeenCalledOnce();
+    expect(gameScene.setTouchRun).toHaveBeenLastCalledWith(true);
+
+    runButtonBackground.emit("pointerupoutside", { id: 21 });
     expect(gameScene.setTouchRun).toHaveBeenNthCalledWith(2, false);
   });
 
