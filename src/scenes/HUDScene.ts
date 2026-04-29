@@ -83,6 +83,7 @@ export class HUDScene extends Phaser.Scene {
   private touchPointerMoveHandler: ((pointer: Phaser.Input.Pointer) => void) | null = null;
   private touchPointerUpHandler: ((pointer: Phaser.Input.Pointer) => void) | null = null;
   private touchCancelHandler: (() => void) | null = null;
+  private touchButtonResetHandlers: Array<() => void> = [];
 
   private narrationText!: Phaser.GameObjects.Text;
   private narrationTween: Phaser.Tweens.Tween | null = null;
@@ -340,6 +341,7 @@ export class HUDScene extends Phaser.Scene {
   private buildTouchControls(width: number, height: number): void {
     this.touchControlsContainer = this.add.container(0, 0).setDepth(101);
     this.touchControlsContainer.setVisible(this.shouldShowTouchControls());
+    this.touchButtonResetHandlers = [];
 
     const stickX = TOUCH_STICK_RADIUS_PX + TOUCH_EDGE_MARGIN_PX;
     const stickY = height - TOUCH_STICK_RADIUS_PX - TOUCH_EDGE_MARGIN_PX;
@@ -432,6 +434,8 @@ export class HUDScene extends Phaser.Scene {
       this.touchStickPointerId = null;
       this.touchRunActive = false;
       this.touchMovementIntent = { ...EMPTY_MOVEMENT_INTENT };
+      this.resetActiveTouchButtons();
+      this.touchButtonResetHandlers = [];
       if (this.touchPointerMoveHandler) {
         this.input.off("pointermove", this.touchPointerMoveHandler);
         this.touchPointerMoveHandler = null;
@@ -492,6 +496,12 @@ export class HUDScene extends Phaser.Scene {
       .setOrigin(0.5);
     const button = this.add.container(x, y, [bg, text]);
 
+    const resetButton = () => {
+      activePointerId = null;
+      bg.setAlpha(1);
+    };
+    this.touchButtonResetHandlers.push(resetButton);
+
     const releasePointer = (
       pointer: Phaser.Input.Pointer,
       _localX?: number,
@@ -523,6 +533,12 @@ export class HUDScene extends Phaser.Scene {
     return button;
   }
 
+  private resetActiveTouchButtons(): void {
+    for (const resetButton of this.touchButtonResetHandlers) {
+      resetButton();
+    }
+  }
+
   private updateTouchControlsVisibility(gameScene: GameScene): void {
     const visible =
       this.shouldShowTouchControls() &&
@@ -535,6 +551,7 @@ export class HUDScene extends Phaser.Scene {
       this.touchRunActive = false;
       this.touchMovementIntent = { ...EMPTY_MOVEMENT_INTENT };
       this.touchStickKnob?.setPosition(this.touchStickOriginX, this.touchStickOriginY);
+      this.resetActiveTouchButtons();
       gameScene.clearTouchInputState(true);
     }
 
@@ -547,6 +564,7 @@ export class HUDScene extends Phaser.Scene {
     this.touchRunActive = false;
     this.touchMovementIntent = { ...EMPTY_MOVEMENT_INTENT };
     this.touchStickKnob?.setPosition(this.touchStickOriginX, this.touchStickOriginY);
+    this.resetActiveTouchButtons();
     const gameScene = this.scene.get("GameScene") as GameScene | undefined;
     gameScene?.clearTouchInputState();
   }

@@ -480,6 +480,64 @@ describe("touch input scene wiring", () => {
     expect(gameScene.clearTouchInputState).toHaveBeenCalledOnce();
   });
 
+  it("accepts new touch button presses after game blur resets active controls", () => {
+    const scene = new HUDScene() as unknown as AnyScene;
+    const gameScene = {
+      beginTouchCrouch: vi.fn(),
+      clearTouchInputState: vi.fn(),
+      endTouchCrouch: vi.fn(),
+      queueTouchInteract: vi.fn(),
+      queueTouchJournal: vi.fn(),
+      queueTouchPause: vi.fn(),
+      queueTouchPeek: vi.fn(),
+      setTouchRun: vi.fn(),
+    };
+    scene.scene.get.mockImplementation((key: unknown) => (key === "GameScene" ? gameScene : undefined));
+
+    scene["buildTouchControls"](816, 624);
+    const surface = latestSurface();
+    const runButtonBackground = surface.rectangles[1]!;
+    const event = { stopPropagation: vi.fn() };
+
+    runButtonBackground.emit("pointerdown", { id: 22 }, 0, 0, event);
+    scene.game.events.emit("blur");
+    runButtonBackground.emit("pointerdown", { id: 23 }, 0, 0, event);
+
+    expect(gameScene.setTouchRun).toHaveBeenNthCalledWith(1, true);
+    expect(gameScene.setTouchRun).toHaveBeenNthCalledWith(2, true);
+  });
+
+  it("accepts new touch button presses after controls hide and reappear", () => {
+    const scene = new HUDScene() as unknown as AnyScene;
+    const gameScene = {
+      beginTouchCrouch: vi.fn(),
+      clearTouchInputState: vi.fn(),
+      endTouchCrouch: vi.fn(),
+      isPaused: false,
+      queueTouchInteract: vi.fn(),
+      queueTouchJournal: vi.fn(),
+      queueTouchPause: vi.fn(),
+      queueTouchPeek: vi.fn(),
+      setTouchRun: vi.fn(),
+    };
+    scene.scene.get.mockImplementation((key: unknown) => (key === "GameScene" ? gameScene : undefined));
+
+    scene["buildTouchControls"](816, 624);
+    const surface = latestSurface();
+    const runButtonBackground = surface.rectangles[1]!;
+    const event = { stopPropagation: vi.fn() };
+
+    runButtonBackground.emit("pointerdown", { id: 22 }, 0, 0, event);
+    gameScene.isPaused = true;
+    scene["updateTouchControlsVisibility"](gameScene);
+    gameScene.isPaused = false;
+    scene["updateTouchControlsVisibility"](gameScene);
+    runButtonBackground.emit("pointerdown", { id: 23 }, 0, 0, event);
+
+    expect(gameScene.setTouchRun).toHaveBeenNthCalledWith(1, true);
+    expect(gameScene.setTouchRun).toHaveBeenNthCalledWith(2, true);
+  });
+
   it("clears HUD-local touch state on scene shutdown", () => {
     const scene = new HUDScene() as unknown as AnyScene;
     const gameScene = {
