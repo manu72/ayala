@@ -52,6 +52,30 @@ describe("static world props", () => {
     expect(gameSceneSource).not.toContain("car_closed");
     expect(gameSceneSource).not.toContain("car_open");
     expect(introSource).toContain("this.addDropoffVehicle(carOffscreenX, roadY)");
-    expect(dumpingSource).toContain("this.addDropoffVehicle(carStartX, roadY)");
+    expect(dumpingSource).toContain("this.addDropoffVehicle(carStartX, roadY, this.tintForDumpingEvent(eventNum))");
+  });
+
+  it("cycles SUV tints for dumping events while leaving the intro SUV untinted", () => {
+    const helperStart = gameSceneSource.indexOf("private tintForDumpingEvent(");
+    const helperEnd = gameSceneSource.indexOf("\n  private ", helperStart + 1);
+    const helperSource = gameSceneSource.slice(helperStart, helperEnd);
+    const introStart = gameSceneSource.indexOf("private startIntroCinematic(");
+    const introEnd = gameSceneSource.indexOf("\n  private ", introStart + 1);
+    const introSource = gameSceneSource.slice(introStart, introEnd);
+    const dumpingStart = gameSceneSource.indexOf("private playDumpingSequence(");
+    const dumpingEnd = gameSceneSource.indexOf("\n  private ", dumpingStart + 1);
+    const dumpingSource = gameSceneSource.slice(dumpingStart, dumpingEnd);
+
+    expect(helperStart).toBeGreaterThanOrEqual(0);
+    expect(gameSceneSource).toContain("const DROPOFF_SUV_TINT_CYCLE: ReadonlyArray<number | null> = [");
+    expect(gameSceneSource).toContain("0x111111");
+    expect(gameSceneSource).toContain("0xffd43b");
+    expect(gameSceneSource).toContain("0x2f9e44");
+    expect(gameSceneSource).toContain("0xd9480f");
+    expect(gameSceneSource).toContain("0x1c7ed6");
+    expect(helperSource).toContain("DROPOFF_SUV_TINT_CYCLE[(eventNum - 1) % DROPOFF_SUV_TINT_CYCLE.length]");
+    expect(introSource).toContain("this.addDropoffVehicle(carOffscreenX, roadY)");
+    expect(introSource).not.toContain("tintForDumpingEvent");
+    expect(dumpingSource).toContain("this.addDropoffVehicle(carStartX, roadY, this.tintForDumpingEvent(eventNum))");
   });
 });

@@ -107,6 +107,14 @@ const DUMPED_COMFORT_WINDOW_MS = 5_000;
 const DROPOFF_SUV_TEXTURE = "suv_small";
 const DROPOFF_SUV_DISPLAY_WIDTH = 72;
 const DROPOFF_SUV_DISPLAY_HEIGHT = 28;
+const DROPOFF_SUV_TINT_CYCLE: ReadonlyArray<number | null> = [
+  0x111111,
+  0xffd43b,
+  0x2f9e44,
+  0xd9480f,
+  0x1c7ed6,
+  null,
+];
 
 interface CatDialoguePersistenceSnapshot {
   timestamp: number;
@@ -801,11 +809,21 @@ export class GameScene extends Phaser.Scene {
     this.add.image(hornbillX, hornbillY, "hornbill_small").setOrigin(0.5, 1).setScale(0.3).setDepth(4);
   }
 
-  private addDropoffVehicle(x: number, y: number): Phaser.GameObjects.Image {
-    return this.add
+  private tintForDumpingEvent(eventNum: number): number | null {
+    return DROPOFF_SUV_TINT_CYCLE[(eventNum - 1) % DROPOFF_SUV_TINT_CYCLE.length] ?? null;
+  }
+
+  private addDropoffVehicle(x: number, y: number, tint: number | null = null): Phaser.GameObjects.Image {
+    const vehicle = this.add
       .image(x, y, DROPOFF_SUV_TEXTURE)
       .setDisplaySize(DROPOFF_SUV_DISPLAY_WIDTH, DROPOFF_SUV_DISPLAY_HEIGHT)
       .setDepth(4);
+
+    if (tint !== null) {
+      vehicle.setTint(tint);
+    }
+
+    return vehicle;
   }
 
   // ──────────── Intro Cinematic ────────────
@@ -4429,7 +4447,7 @@ export class GameScene extends Phaser.Scene {
     const roadY = Math.min(Math.max(this.player.y, 400), 1900);
     const carStartX = roadX + 400;
 
-    const car = this.addDropoffVehicle(carStartX, roadY);
+    const car = this.addDropoffVehicle(carStartX, roadY, this.tintForDumpingEvent(eventNum));
 
     this.tweens.add({
       targets: car,
