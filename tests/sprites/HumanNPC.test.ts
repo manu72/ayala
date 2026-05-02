@@ -236,6 +236,7 @@ function makeHuman(overrides: Partial<HumanConfig> & { type: HumanConfig['type']
     onExitParkComplete: overrides.onExitParkComplete,
     loopPauseSec: overrides.loopPauseSec,
     identityName: overrides.identityName,
+    routeToExit: overrides.routeToExit,
   }
   const npc = new HumanNPC(harness.scene, cfg)
   return { npc, ...harness }
@@ -542,6 +543,30 @@ describe('HumanNPC.setPhase — activation / exit transitions', () => {
     for (let i = 0; i < 2000 && npc.active; i++) {
       simulatePhysics(npc, 200)
     }
+    expect(npc.active).toBe(false)
+    expect(npc.visible).toBe(false)
+  })
+
+  it('uses routeToExit when provided instead of direct-line exit walking', () => {
+    const routeToExit = vi.fn(() => [
+      { x: 0, y: 0 },
+      { x: 0, y: 60 },
+      { x: 60, y: 60 },
+    ])
+    const { npc } = makeHuman({
+      type: 'jogger',
+      speed: 100,
+      activePhases: ['day'],
+      routeToExit,
+    })
+    npc.setPhase('day')
+    npc.setPhase('night')
+
+    expect(routeToExit).toHaveBeenCalled()
+    for (let i = 0; i < 2000 && npc.active; i++) {
+      simulatePhysics(npc, 100)
+    }
+
     expect(npc.active).toBe(false)
     expect(npc.visible).toBe(false)
   })

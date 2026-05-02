@@ -66,6 +66,7 @@ import { shouldUseHumanAiBubble } from "../utils/humanAiBubbleEligibility";
 import { getEffectiveHumanPhase } from "../utils/humanSpawnPolicy";
 import { buildCamilleEraCareRoutes } from "../utils/camilleCareRoute";
 import { buildDialogueRecencyContext } from "../utils/dialogueRecency";
+import { createNavigationGrid, routeHumanPath, type NavigationGrid } from "../utils/humanRoutePath";
 import { computeReachableCells, getCellKey } from "../utils/mapExploration";
 import { applyLifeLoss, MAX_LIVES } from "../utils/lifeFlow";
 import { markGameOver } from "../utils/gameOverState";
@@ -1710,6 +1711,7 @@ export class GameScene extends Phaser.Scene {
     this.camilleEraParkExitTarget = 1 + (includeManu ? 1 : 0) + (includeKish ? 1 : 0);
     this.kishCamilleSlowDownShown = false;
     const routes = buildCamilleEraCareRoutes((name) => this.map.findObject("spawns", (o) => o.name === name));
+    const navigationGrid = this.createHumanNavigationGrid();
     const routeBase: Pick<
       HumanConfig,
       "activePhases" | "sustainAcrossInactivePhases" | "exitAfterRoute" | "onExitParkComplete" | "lingerWaypointIndex"
@@ -1729,7 +1731,7 @@ export class GameScene extends Phaser.Scene {
       waypointPauseMs: routes.camille.map((w) => w.pauseMs),
       ...routeBase,
     };
-    const camille = new HumanNPC(this, camilleConfig);
+    const camille = new HumanNPC(this, this.routeHumanConfig(camilleConfig, navigationGrid));
     this.camilleNPC = camille;
     this.manuNPC = null;
     this.kishNPC = null;
@@ -1743,7 +1745,7 @@ export class GameScene extends Phaser.Scene {
         waypointPauseMs: routes.manu.map((w) => w.pauseMs),
         ...routeBase,
       };
-      const manu = new HumanNPC(this, manuConfig);
+      const manu = new HumanNPC(this, this.routeHumanConfig(manuConfig, navigationGrid));
       this.manuNPC = manu;
       toRegister.push(manu);
     }
@@ -1755,7 +1757,7 @@ export class GameScene extends Phaser.Scene {
         waypointPauseMs: routes.kish.map((w) => w.pauseMs),
         ...routeBase,
       };
-      const kish = new HumanNPC(this, kishConfig);
+      const kish = new HumanNPC(this, this.routeHumanConfig(kishConfig, navigationGrid));
       this.kishNPC = kish;
       toRegister.push(kish);
     }
@@ -2547,6 +2549,57 @@ export class GameScene extends Phaser.Scene {
     return Boolean(groundTile?.collides || objectTile?.collides);
   }
 
+  private createHumanNavigationGrid(): NavigationGrid {
+    return createNavigationGrid({
+      width: this.map.width,
+      height: this.map.height,
+      tileSize: TILE_SIZE,
+      isBlocked: (tileX, tileY) => this.isExplorationCellBlocked(tileX, tileY),
+    });
+  }
+
+  private routeHumanConfig(config: HumanConfig, navigationGrid: NavigationGrid): HumanConfig {
+    const shouldRoutePath = config.routePath !== false;
+    const routed = shouldRoutePath
+      ? routeHumanPath(config.path, navigationGrid, {
+          waypointPauseMs: config.waypointPauseMs,
+          lingerWaypointIndex: config.lingerWaypointIndex,
+        })
+      : null;
+
+    return {
+      ...config,
+      path: routed?.path ?? config.path,
+      waypointPauseMs: routed?.waypointPauseMs ?? config.waypointPauseMs,
+      lingerWaypointIndex: routed?.lingerWaypointIndex ?? config.lingerWaypointIndex,
+      routeToExit: (from, exits) => {
+        const nearest = this.nearestExitPoint(from, exits);
+        if (!nearest) return [from];
+        return [from, ...routeHumanPath([from, nearest], navigationGrid).path];
+      },
+    };
+  }
+
+  private nearestExitPoint(
+    from: { x: number; y: number },
+    exits: ReadonlyArray<{ x: number; y: number }>,
+  ): { x: number; y: number } | null {
+    let nearest = exits[0];
+    if (!nearest) return null;
+    let bestDist = Phaser.Math.Distance.Between(from.x, from.y, nearest.x, nearest.y);
+
+    for (let i = 1; i < exits.length; i += 1) {
+      const exit = exits[i]!;
+      const dist = Phaser.Math.Distance.Between(from.x, from.y, exit.x, exit.y);
+      if (dist < bestDist) {
+        nearest = exit;
+        bestDist = dist;
+      }
+    }
+
+    return nearest;
+  }
+
   private recordPlayerMovementAndTerritory(): void {
     const distance = Phaser.Math.Distance.Between(
       this.previousPlayerX,
@@ -3001,6 +3054,7 @@ export class GameScene extends Phaser.Scene {
         activePhases: ["dawn", "evening"],
         avoidanceRadius: 30,
         loopPauseSec: 5,
+        routePath: false,
         path: [
           { x: 16, y: 1392 }, // tile (0,43)  — SW spawn on diagonal sidewalk
           { x: 1008, y: 432 }, // tile (31,13) — NE turn onto main N walkway
@@ -3041,9 +3095,11 @@ export class GameScene extends Phaser.Scene {
 
     const walkerDogKeys = Phaser.Utils.Array.Shuffle(["SmallDog", "BrownDog", "WhiteDog"]);
     let walkerDogIdx = 0;
+    const navigationGrid = this.createHumanNavigationGrid();
 
     for (const config of configs) {
-      const human = new HumanNPC(this, config);
+      const routedConfig = this.routeHumanConfig(config, navigationGrid);
+      const human = new HumanNPC(this, routedConfig);
       if (this.groundLayer) {
         this.physics.add.collider(human, this.groundLayer);
       }
@@ -3052,7 +3108,7 @@ export class GameScene extends Phaser.Scene {
       }
       this.humans.push(human);
 
-      if (config.type === "dogwalker") {
+      if (routedConfig.type === "dogwalker") {
         const dogKey = walkerDogKeys[walkerDogIdx % walkerDogKeys.length]!;
         this.dogs.push(new DogNPC(this, human, dogKey));
         walkerDogIdx++;
@@ -4122,8 +4178,9 @@ export class GameScene extends Phaser.Scene {
     this.snatcherSpawnChecked = true;
     if (Math.random() > 0.4) return;
     const snatcherCount = 1 + (Math.random() > 0.5 ? 1 : 0);
+    const navigationGrid = this.createHumanNavigationGrid();
     for (let i = 0; i < snatcherCount; i++) {
-      this.spawnSnatcher(i);
+      this.spawnSnatcher(i, false, navigationGrid);
     }
   }
 
@@ -4185,7 +4242,7 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  private spawnSnatcher(index: number, silent = false): void {
+  private spawnSnatcher(index: number, silent = false, navigationGrid = this.createHumanNavigationGrid()): void {
     // Snatchers patrol garden paths
     const patrolPaths = [
       [
@@ -4212,7 +4269,7 @@ export class GameScene extends Phaser.Scene {
       activePhases: ["night"],
       path,
     };
-    const snatcher = new HumanNPC(this, config);
+    const snatcher = new HumanNPC(this, this.routeHumanConfig(config, navigationGrid));
     snatcher.setTint(0x000000);
     if (this.groundLayer) this.physics.add.collider(snatcher, this.groundLayer);
     if (this.objectsLayer) this.physics.add.collider(snatcher, this.objectsLayer);
