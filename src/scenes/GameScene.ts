@@ -1651,6 +1651,8 @@ export class GameScene extends Phaser.Scene {
     const last = (this.registry.get(StoryKeys.CAMILLE_AMBIENT_DAWN_DAY) as number) ?? 0;
     if (last >= this.dayNight.dayCount) return;
     const completedEnc = (this.registry.get(StoryKeys.CAMILLE_ENCOUNTER) as number) ?? 0;
+    const encounter5Complete = this.registry.get(StoryKeys.ENCOUNTER_5_COMPLETE) === true;
+    if (completedEnc >= 5 && !encounter5Complete) return;
     this.spawnCamilleEraCareRouteNPCs({
       includeManu: completedEnc >= 1,
       includeKish: completedEnc >= 2,

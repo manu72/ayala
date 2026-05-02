@@ -102,6 +102,7 @@ vi.mock('phaser', () => {
     _vx = 0
     _vy = 0
     setVelocity(x = 0, y = 0): this {
+      if (!this.body) throw new TypeError('Cannot set velocity after destroy')
       this._vx = x
       this._vy = y
       return this
@@ -117,6 +118,11 @@ vi.mock('phaser', () => {
     setAlpha(a: number): this {
       this.alpha = a
       return this
+    }
+    destroy(): void {
+      this.body = null
+      this.active = false
+      this.visible = false
     }
   }
 
@@ -612,6 +618,38 @@ describe('HumanNPC — care route (waypointPause / sustain / exitAfterRoute)', (
     }
     expect(npc.active).toBe(false)
     expect(exits).toBe(1)
+  })
+
+  it('deactivates before onExitParkComplete so callbacks may destroy the current NPC', () => {
+    let npc!: HumanNPC
+    let exits = 0
+    ;({ npc } = makeHuman({
+      type: 'camille',
+      lingerWaypointIndex: 0,
+      path: [
+        { x: 0, y: 0 },
+        { x: 18, y: 0 },
+      ],
+      waypointPauseMs: [0, 0],
+      activePhases: ['dawn'],
+      exitAfterRoute: true,
+      onExitParkComplete: () => {
+        exits += 1
+        npc.destroy()
+      },
+    }))
+    npc.setPhase('dawn')
+
+    expect(() => {
+      for (let i = 0; i < 80; i++) {
+        simulatePhysics(npc, 50)
+      }
+      for (let i = 0; i < 4000 && npc.active; i++) {
+        simulatePhysics(npc, 200)
+      }
+    }).not.toThrow()
+    expect(exits).toBe(1)
+    expect(npc.body).toBeNull()
   })
 
   it('encounter pause blocks waypoint pause timer until resumeFromEncounter', () => {

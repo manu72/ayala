@@ -581,8 +581,8 @@ export class HumanNPC extends BaseNPC {
 
     const dist = Phaser.Math.Distance.Between(this.x, this.y, this.exitTarget.x, this.exitTarget.y);
     if (dist < 24) {
-      this.config.onExitParkComplete?.();
       this.deactivate();
+      this.config.onExitParkComplete?.();
       return;
     }
 
