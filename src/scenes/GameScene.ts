@@ -1200,6 +1200,7 @@ export class GameScene extends Phaser.Scene {
 
     const deltaSec = delta / 1000;
     this.dayNight.update(delta);
+    this.trySpawnCamilleAmbientDawnVisit();
 
     this.player.speedMultiplier = this.stats.speedMultiplier;
 
@@ -1396,7 +1397,6 @@ export class GameScene extends Phaser.Scene {
     this.guardIndicator.update();
     this.updateNPCs(delta);
     this.updateHumans(delta);
-    this.trySpawnCamilleAmbientDawnVisit();
 
     // Check chapter progression every 5 seconds
     this.chapterCheckTimer += delta;
@@ -1685,9 +1685,13 @@ export class GameScene extends Phaser.Scene {
    * Manu appears from story encounter 2 onward (after encounter 1); Kish from encounter 3 onward (after encounter 2).
    * Ambient callers pass flags from completed {@link StoryKeys.CAMILLE_ENCOUNTER}.
    */
-  private spawnCamilleEraCareRouteNPCs(opts: { includeManu: boolean; includeKish: boolean }): void {
+  private spawnCamilleEraCareRouteNPCs(opts: {
+    includeManu: boolean;
+    includeKish: boolean;
+    sustainAcrossInactivePhases?: boolean;
+  }): void {
     if (!this.map) return;
-    const { includeManu, includeKish } = opts;
+    const { includeManu, includeKish, sustainAcrossInactivePhases = true } = opts;
     this.camilleEraParkExitCount = 0;
     this.camilleEraParkExitTarget = 1 + (includeManu ? 1 : 0) + (includeKish ? 1 : 0);
     this.kishCamilleSlowDownShown = false;
@@ -1703,7 +1707,7 @@ export class GameScene extends Phaser.Scene {
       | "lingerWaypointIndex"
     > = {
       activePhases: ["dawn", "evening"],
-      sustainAcrossInactivePhases: true,
+      sustainAcrossInactivePhases,
       exitAfterRoute: true,
       /** Start pathing at waypoint 0 so the underpass entry pause runs (see HumanNPC.activate). */
       lingerWaypointIndex: 0,
@@ -1787,6 +1791,7 @@ export class GameScene extends Phaser.Scene {
    */
   private checkCamilleProximity(): void {
     if (this.pendingCamilleEncounter === 0) return;
+    if (this.dayNight.currentPhase !== "evening") return;
     if (!this.camilleNPC?.visible) return;
     if (this.dialogue.isActive) return;
 
@@ -1844,6 +1849,7 @@ export class GameScene extends Phaser.Scene {
     this.spawnCamilleEraCareRouteNPCs({
       includeManu: encounterNum >= 2,
       includeKish: encounterNum >= 3,
+      sustainAcrossInactivePhases: false,
     });
     this.registry.set(StoryKeys.CAMILLE_AMBIENT_EVENING_DAY, this.dayNight.dayCount);
     this.pendingCamilleEncounter = encounterNum;
