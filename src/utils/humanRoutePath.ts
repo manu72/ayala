@@ -187,9 +187,11 @@ function simplifySegmentGreedyVisible(
 
 /**
  * Supercover line in tile indices: every cell the segment from (x0,y0) to
- * (x1,y1) touches, inclusive. On a diagonal/tie step (both axes advance), also
- * includes the two axial neighbours sharing that corner so walkability checks
- * cannot approve lines that graze blocked corners.
+ * (x1,y1) touches, inclusive. When a Bresenham step advances both axes **and**
+ * the error is exactly balanced (`e2 === 0`, i.e. `2 * err === 0`), the segment
+ * passes through a grid corner — also include the two axial neighbours so
+ * walkability checks cannot approve lines that graze blocked corners. Ordinary
+ * shallow diagonals (`movX && movY` but `e2 !== 0`) do not add those cells.
  */
 function supercoverLineCells(x0: number, y0: number, x1: number, y1: number): Array<{ x: number; y: number }> {
   const cells: Array<{ x: number; y: number }> = [];
@@ -215,7 +217,8 @@ function supercoverLineCells(x0: number, y0: number, x1: number, y1: number): Ar
     const e2 = 2 * err;
     const movX = e2 >= dy;
     const movY = e2 <= dx;
-    if (movX && movY) {
+    const cornerTie = movX && movY && e2 === 0;
+    if (cornerTie) {
       push(x + sx, y);
       push(x, y + sy);
     }
