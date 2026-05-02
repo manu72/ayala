@@ -8,7 +8,7 @@
 
 ## Backstory
 
-Pedigree remembers a bed that was hers and a door that closed forever. She haunts the edges of the park where the world still looks like a neighbourhood.
+Pedigree was dumped at the gardens along with her best friend, an old sick cat who has been taken away by a mystery human. She remembers a bed that was hers, a home she shared with her best friend, and a door that closed forever. She haunts the edges of the park where the world still looks like a neighbourhood. She still hopes her friend will return but fears the worst.
 
 ## Personality
 

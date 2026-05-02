@@ -64,6 +64,7 @@ import { AudioSystem } from "../systems/AudioSystem";
 import { hasLineOfSightTiles } from "../utils/lineOfSight";
 import { shouldUseHumanAiBubble } from "../utils/humanAiBubbleEligibility";
 import { getEffectiveHumanPhase } from "../utils/humanSpawnPolicy";
+import { buildCamilleEraCareRoutes } from "../utils/camilleCareRoute";
 import { buildDialogueRecencyContext } from "../utils/dialogueRecency";
 import { computeReachableCells, getCellKey } from "../utils/mapExploration";
 import { applyLifeLoss, MAX_LIVES } from "../utils/lifeFlow";
@@ -208,6 +209,12 @@ export class GameScene extends Phaser.Scene {
   private kishNPC: HumanNPC | null = null;
   private camilleEncounterActive = false;
   private camilleRollDay = 0;
+  /** Counts Camille-era humans that reached the park perimeter after a care route. */
+  private camilleEraParkExitCount = 0;
+  /** How many spawned humans must exit before {@link onCamilleEraParkExit} tears down (1–3). */
+  private camilleEraParkExitTarget = 1;
+  /** Defers care-route removal until after updateHumans finishes iterating. */
+  private camilleEraTeardownPending = false;
 
   /** NPC currently locked in dialogue with the player. */
   private engagedDialogueNPC: NPCCat | null = null;
@@ -552,6 +559,8 @@ export class GameScene extends Phaser.Scene {
       StoryKeys.SNATCHED_THIS_NIGHT,
       StoryKeys.CAMILLE_ENCOUNTER,
       StoryKeys.CAMILLE_ENCOUNTER_DAY,
+      StoryKeys.CAMILLE_AMBIENT_DAWN_DAY,
+      StoryKeys.CAMILLE_AMBIENT_EVENING_DAY,
       StoryKeys.ENCOUNTER_5_COMPLETE,
       StoryKeys.DUMPING_EVENTS_SEEN,
       StoryKeys.GAME_COMPLETED,
@@ -1191,6 +1200,7 @@ export class GameScene extends Phaser.Scene {
 
     const deltaSec = delta / 1000;
     this.dayNight.update(delta);
+    this.trySpawnCamilleAmbientDawnVisit();
 
     this.player.speedMultiplier = this.stats.speedMultiplier;
 
@@ -1595,7 +1605,7 @@ export class GameScene extends Phaser.Scene {
    * Called during phase transitions or periodic checks.
    */
   private checkCamilleEncounter(): void {
-    if (this.chapters.chapter < 5) return;
+    if (!this.map || !this.dayNight || !this.chapters || this.chapters.chapter < 5) return;
     if (this.dayNight.currentPhase !== "evening") {
       this.camilleEncounterActive = false;
       return;
@@ -1603,20 +1613,176 @@ export class GameScene extends Phaser.Scene {
     if (this.camilleEncounterActive) return;
 
     const currentEncounter = (this.registry.get(StoryKeys.CAMILLE_ENCOUNTER) as number) ?? 0;
-    if (currentEncounter >= 5) return;
+    const encounter5Complete = this.registry.get(StoryKeys.ENCOUNTER_5_COMPLETE) === true;
+    const awaitingEncounter5Completion = currentEncounter >= 5 && !encounter5Complete;
+    if (currentEncounter >= 5) {
+      if (encounter5Complete) {
+        this.trySpawnCamilleAmbientEveningVisit();
+        return;
+      }
+    }
 
     // One encounter per game day — check if we've already done one today
     const lastDay = (this.registry.get(StoryKeys.CAMILLE_ENCOUNTER_DAY) as number) ?? 0;
     if (lastDay >= this.dayNight.dayCount) return;
 
     // Roll once per evening, not every periodic check
-    if (this.camilleRollDay >= this.dayNight.dayCount) return;
+    if (this.camilleRollDay >= this.dayNight.dayCount) {
+      if (!awaitingEncounter5Completion) this.trySpawnCamilleAmbientEveningVisit();
+      return;
+    }
     this.camilleRollDay = this.dayNight.dayCount;
 
     // 60% chance per eligible evening (100% for first encounter)
-    if (currentEncounter > 0 && Math.random() > 0.6) return;
+    if (currentEncounter > 0 && Math.random() > 0.6) {
+      if (!awaitingEncounter5Completion) this.trySpawnCamilleAmbientEveningVisit();
+      return;
+    }
 
-    this.startCamilleEncounter(currentEncounter + 1);
+    this.startCamilleEncounter(Math.min(currentEncounter + 1, 5));
+  }
+
+  /**
+   * Ambient dawn care visit: Chapter 5+ only, once per game day, no story
+   * encounter pending (evening encounters stay evening-only).
+   */
+  private trySpawnCamilleAmbientDawnVisit(): void {
+    if (!this.map || !this.dayNight || !this.chapters || this.chapters.chapter < 5) return;
+    if (this.dayNight.currentPhase !== "dawn") return;
+    if (this.camilleNPC) return;
+    const last = (this.registry.get(StoryKeys.CAMILLE_AMBIENT_DAWN_DAY) as number) ?? 0;
+    if (last >= this.dayNight.dayCount) return;
+    const completedEnc = (this.registry.get(StoryKeys.CAMILLE_ENCOUNTER) as number) ?? 0;
+    const encounter5Complete = this.registry.get(StoryKeys.ENCOUNTER_5_COMPLETE) === true;
+    if (completedEnc >= 5 && !encounter5Complete) return;
+    this.spawnCamilleEraCareRouteNPCs({
+      includeManu: completedEnc >= 1,
+      includeKish: completedEnc >= 2,
+    });
+    this.registry.set(StoryKeys.CAMILLE_AMBIENT_DAWN_DAY, this.dayNight.dayCount);
+  }
+
+  /**
+   * Ambient evening care visit when no story encounter rolled/spawned this
+   * evening — still at most one evening visit per day via registry.
+   */
+  private trySpawnCamilleAmbientEveningVisit(): void {
+    if (!this.map || !this.dayNight || !this.chapters || this.chapters.chapter < 5) return;
+    if (this.dayNight.currentPhase !== "evening") return;
+    if (this.camilleNPC) return;
+    const last = (this.registry.get(StoryKeys.CAMILLE_AMBIENT_EVENING_DAY) as number) ?? 0;
+    if (last >= this.dayNight.dayCount) return;
+    const completedEnc = (this.registry.get(StoryKeys.CAMILLE_ENCOUNTER) as number) ?? 0;
+    this.spawnCamilleEraCareRouteNPCs({
+      includeManu: completedEnc >= 1,
+      includeKish: completedEnc >= 2,
+    });
+    this.registry.set(StoryKeys.CAMILLE_AMBIENT_EVENING_DAY, this.dayNight.dayCount);
+  }
+
+  /**
+   * Spawn Camille-era humans on the Chapter 5+ care route.
+   * Manu appears from story encounter 2 onward (after encounter 1); Kish from encounter 3 onward (after encounter 2).
+   * Ambient callers pass flags from completed {@link StoryKeys.CAMILLE_ENCOUNTER}.
+   */
+  private spawnCamilleEraCareRouteNPCs(opts: {
+    includeManu: boolean;
+    includeKish: boolean;
+    sustainAcrossInactivePhases?: boolean;
+  }): void {
+    if (!this.map) return;
+    const { includeManu, includeKish, sustainAcrossInactivePhases = true } = opts;
+    this.camilleEraParkExitCount = 0;
+    this.camilleEraParkExitTarget = 1 + (includeManu ? 1 : 0) + (includeKish ? 1 : 0);
+    this.kishCamilleSlowDownShown = false;
+    const routes = buildCamilleEraCareRoutes((name) =>
+      this.map.findObject("spawns", (o) => o.name === name),
+    );
+    const routeBase: Pick<
+      HumanConfig,
+      | "activePhases"
+      | "sustainAcrossInactivePhases"
+      | "exitAfterRoute"
+      | "onExitParkComplete"
+      | "lingerWaypointIndex"
+    > = {
+      activePhases: ["dawn", "evening"],
+      sustainAcrossInactivePhases,
+      exitAfterRoute: true,
+      /** Start pathing at waypoint 0 so the underpass entry pause runs (see HumanNPC.activate). */
+      lingerWaypointIndex: 0,
+      onExitParkComplete: () => this.onCamilleEraParkExit(),
+    };
+
+    const camilleConfig: HumanConfig = {
+      type: "camille",
+      speed: 35,
+      path: routes.camille.map((w) => ({ x: w.x, y: w.y })),
+      waypointPauseMs: routes.camille.map((w) => w.pauseMs),
+      ...routeBase,
+    };
+    const camille = new HumanNPC(this, camilleConfig);
+    this.camilleNPC = camille;
+    this.manuNPC = null;
+    this.kishNPC = null;
+    const toRegister: HumanNPC[] = [camille];
+
+    if (includeManu) {
+      const manuConfig: HumanConfig = {
+        type: "manu",
+        speed: 35,
+        path: routes.manu.map((w) => ({ x: w.x, y: w.y })),
+        waypointPauseMs: routes.manu.map((w) => w.pauseMs),
+        ...routeBase,
+      };
+      const manu = new HumanNPC(this, manuConfig);
+      this.manuNPC = manu;
+      toRegister.push(manu);
+    }
+    if (includeKish) {
+      const kishConfig: HumanConfig = {
+        type: "kish",
+        speed: 50,
+        path: routes.kish.map((w) => ({ x: w.x, y: w.y })),
+        waypointPauseMs: routes.kish.map((w) => w.pauseMs),
+        ...routeBase,
+      };
+      const kish = new HumanNPC(this, kishConfig);
+      this.kishNPC = kish;
+      toRegister.push(kish);
+    }
+
+    for (const npc of toRegister) {
+      if (this.groundLayer) this.physics.add.collider(npc, this.groundLayer);
+      if (this.objectsLayer) this.physics.add.collider(npc, this.objectsLayer);
+      this.humans.push(npc);
+    }
+  }
+
+  /** After every spawned Camille-era human reaches the park exit, tear down refs. */
+  private onCamilleEraParkExit(): void {
+    this.camilleEraParkExitCount += 1;
+    if (this.camilleEraParkExitCount < this.camilleEraParkExitTarget) return;
+    this.camilleEraTeardownPending = true;
+    this.pendingCamilleEncounter = 0;
+    this.camilleEncounterActive = false;
+  }
+
+  /** Remove Camille-era route NPCs after the human update loop is no longer iterating. */
+  private flushCamilleEraTeardown(): void {
+    if (!this.camilleEraTeardownPending) return;
+    this.camilleEraTeardownPending = false;
+    this.camilleEraParkExitCount = 0;
+    this.camilleEraParkExitTarget = 1;
+    for (const npc of [this.camilleNPC, this.manuNPC, this.kishNPC]) {
+      if (!npc) continue;
+      const idx = this.humans.indexOf(npc);
+      if (idx !== -1) this.humans.splice(idx, 1);
+      npc.destroy();
+    }
+    this.camilleNPC = null;
+    this.manuNPC = null;
+    this.kishNPC = null;
   }
 
   /**
@@ -1625,6 +1791,7 @@ export class GameScene extends Phaser.Scene {
    */
   private checkCamilleProximity(): void {
     if (this.pendingCamilleEncounter === 0) return;
+    if (this.dayNight.currentPhase !== "evening") return;
     if (!this.camilleNPC?.visible) return;
     if (this.dialogue.isActive) return;
 
@@ -1638,6 +1805,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   private cleanupCamilleNPCs(): void {
+    this.camilleEraTeardownPending = false;
+    this.camilleEraParkExitCount = 0;
+    this.camilleEraParkExitTarget = 1;
     this.kishCamilleSlowDownShown = false;
     this.cancelBeat5Decision();
     this.beat5DecisionActive = false;
@@ -1676,70 +1846,12 @@ export class GameScene extends Phaser.Scene {
   private startCamilleEncounter(encounterNum: number): void {
     this.cleanupCamilleNPCs();
     this.camilleEncounterActive = true;
-
-    const poi = (name: string) => this.map.findObject("spawns", (o) => o.name === name);
-    const underpasses = poi("spawn_blacky");
-    const spawnX = (underpasses?.x ?? 411) - 50;
-    const spawnY = underpasses?.y ?? 1083;
-
-    const px = (obj: Phaser.Types.Tilemaps.TiledObject | null, fb: number) => obj?.x ?? fb;
-    const py = (obj: Phaser.Types.Tilemaps.TiledObject | null, fb: number) => obj?.y ?? fb;
-
-    const station1 = poi("poi_feeding_station_1");
-    const station2 = poi("poi_feeding_station_2");
-    const camilleCircuit: Array<{ x: number; y: number }> = [
-      { x: spawnX, y: spawnY },
-      { x: px(underpasses, 411), y: py(underpasses, 1083) },
-      { x: px(poi("spawn_ginger"), 774), y: py(poi("spawn_ginger"), 1378) },
-      { x: px(station1, 1000), y: py(station1, 900) },
-      { x: px(poi("spawn_tiger"), 1141), y: py(poi("spawn_tiger"), 632) },
-      { x: px(poi("spawn_jayco"), 1427), y: py(poi("spawn_jayco"), 484) },
-      { x: px(poi("spawn_fluffy"), 1500), y: py(poi("spawn_fluffy"), 900) },
-      { x: px(station2, 1600), y: py(station2, 1000) },
-      { x: px(poi("spawn_pedigree"), 2500), y: py(poi("spawn_pedigree"), 1700) },
-      { x: spawnX, y: spawnY },
-    ];
-
-    const camilleConfig: HumanConfig = {
-      type: "camille",
-      speed: 35,
-      activePhases: ["evening"],
-      path: camilleCircuit,
-    };
-
-    this.camilleNPC = new HumanNPC(this, camilleConfig);
-    if (this.groundLayer) this.physics.add.collider(this.camilleNPC, this.groundLayer);
-    if (this.objectsLayer) this.physics.add.collider(this.camilleNPC, this.objectsLayer);
-    this.humans.push(this.camilleNPC);
-
-    if (encounterNum >= 3) {
-      const manuCircuit = camilleCircuit.map((wp) => ({ x: wp.x + 30, y: wp.y + 20 }));
-      const manuConfig: HumanConfig = {
-        type: "manu",
-        speed: 35,
-        activePhases: ["evening"],
-        path: manuCircuit,
-      };
-      this.manuNPC = new HumanNPC(this, manuConfig);
-      if (this.groundLayer) this.physics.add.collider(this.manuNPC, this.groundLayer);
-      if (this.objectsLayer) this.physics.add.collider(this.manuNPC, this.objectsLayer);
-      this.humans.push(this.manuNPC);
-    }
-
-    if (encounterNum >= 4) {
-      const kishCircuit = camilleCircuit.map((wp) => ({ x: wp.x - 20, y: wp.y + 30 }));
-      const kishConfig: HumanConfig = {
-        type: "kish",
-        speed: 50,
-        activePhases: ["evening"],
-        path: kishCircuit,
-      };
-      this.kishNPC = new HumanNPC(this, kishConfig);
-      if (this.groundLayer) this.physics.add.collider(this.kishNPC, this.groundLayer);
-      if (this.objectsLayer) this.physics.add.collider(this.kishNPC, this.objectsLayer);
-      this.humans.push(this.kishNPC);
-    }
-
+    this.spawnCamilleEraCareRouteNPCs({
+      includeManu: encounterNum >= 2,
+      includeKish: encounterNum >= 3,
+      sustainAcrossInactivePhases: false,
+    });
+    this.registry.set(StoryKeys.CAMILLE_AMBIENT_EVENING_DAY, this.dayNight.dayCount);
     this.pendingCamilleEncounter = encounterNum;
   }
 
@@ -3178,6 +3290,8 @@ export class GameScene extends Phaser.Scene {
         human.applySteeringAvoidance(neighbours, avoidR);
       }
     }
+
+    this.flushCamilleEraTeardown();
 
     for (const dog of this.dogs) {
       dog.update(now, this.player, this.npcs, this.emotes, this);
