@@ -191,8 +191,8 @@ export class HumanNPC extends BaseNPC {
   private detourQueue: Array<{ x: number; y: number }> = [];
   private stuckTimerMs = 0;
   private noProgressTimerMs = 0;
-  private lastProgressSampleX = 0;
-  private lastProgressSampleY = 0;
+  /** Last sampled distance to the active move target; negative = re-seed on next stuck tick. */
+  private lastProgressSampleDistance = -1;
   private stuckDetourFailures = 0;
 
   constructor(scene: Phaser.Scene, config: HumanConfig) {
@@ -672,8 +672,7 @@ export class HumanNPC extends BaseNPC {
   private resetStuckProgressTracking(): void {
     this.stuckTimerMs = 0;
     this.noProgressTimerMs = 0;
-    this.lastProgressSampleX = this.x;
-    this.lastProgressSampleY = this.y;
+    this.lastProgressSampleDistance = -1;
     this.stuckDetourFailures = 0;
   }
 
@@ -694,16 +693,16 @@ export class HumanNPC extends BaseNPC {
     const vy = body.velocity.y;
     const speed = Math.hypot(vx, vy);
 
-    const moved = Phaser.Math.Distance.Between(
-      this.x,
-      this.y,
-      this.lastProgressSampleX,
-      this.lastProgressSampleY,
-    );
-    if (moved >= GP.HUMAN_STUCK_MIN_PROGRESS_PX) {
+    const currentDistance = Phaser.Math.Distance.Between(this.x, this.y, target.x, target.y);
+    if (this.lastProgressSampleDistance < 0) {
+      this.lastProgressSampleDistance = currentDistance;
+      return;
+    }
+    const towardTarget =
+      this.lastProgressSampleDistance - currentDistance >= GP.HUMAN_STUCK_MIN_PROGRESS_PX;
+    if (towardTarget) {
       this.noProgressTimerMs = 0;
-      this.lastProgressSampleX = this.x;
-      this.lastProgressSampleY = this.y;
+      this.lastProgressSampleDistance = currentDistance;
       this.stuckTimerMs = 0;
       this.stuckDetourFailures = 0;
       return;
@@ -728,8 +727,7 @@ export class HumanNPC extends BaseNPC {
 
     this.stuckTimerMs = 0;
     this.noProgressTimerMs = 0;
-    this.lastProgressSampleX = this.x;
-    this.lastProgressSampleY = this.y;
+    this.lastProgressSampleDistance = currentDistance;
 
     const detour = this.config.routeLocalDetour?.({ x: this.x, y: this.y }, target);
     if (detour && detour.length > 0) {
