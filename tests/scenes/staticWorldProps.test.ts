@@ -21,7 +21,7 @@ describe("static world props", () => {
     expect(placementSource).toContain("const hornbillX = carabaoX - TILE_SIZE * 3;");
     expect(placementSource).toContain("const hornbillY = carabaoY - TILE_SIZE * 3;");
     expect(placementSource).toContain('this.add.image(hornbillX, hornbillY, "hornbill_small")');
-    expect(placementSource).toContain(".setScale(0.4)");
+    expect(placementSource).toContain(".setScale(0.3)");
     expect(placementSource).not.toContain("physics.add.existing");
     expect(placementSource).not.toContain("physics.add.collider");
   });
