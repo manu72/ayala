@@ -69,11 +69,7 @@ import { buildDialogueRecencyContext } from "../utils/dialogueRecency";
 import { computeReachableCells, getCellKey } from "../utils/mapExploration";
 import { applyLifeLoss, MAX_LIVES } from "../utils/lifeFlow";
 import { markGameOver } from "../utils/gameOverState";
-import {
-  consumeSnatchedThisNight,
-  markSnatchedThisNight,
-  restoreSnatchedThisNight,
-} from "../utils/snatcherNightState";
+import { consumeSnatchedThisNight, markSnatchedThisNight, restoreSnatchedThisNight } from "../utils/snatcherNightState";
 import { EMPTY_MOVEMENT_INTENT, type MovementIntent } from "../input/playerIntent";
 
 const INTERACTION_DISTANCE = GP.INTERACTION_DIST;
@@ -87,10 +83,7 @@ const TILE_SIZE = GP.TILE_SIZE;
  * so the closing emote can never contradict the pose (e.g. "heart" after
  * a hostile hiss).
  */
-const POSE_TO_EMOTE: Record<
-  import("../services/DialogueService").SpeakerPose,
-  EmoteType
-> = {
+const POSE_TO_EMOTE: Record<import("../services/DialogueService").SpeakerPose, EmoteType> = {
   friendly: "heart",
   hostile: "hostile",
   wary: "alert",
@@ -327,11 +320,7 @@ export class GameScene extends Phaser.Scene {
   /** Dialogue lives in HUDScene (1x zoom) so it's always visible. */
   private get dialogue(): {
     isActive: boolean;
-    show: (
-      lines: string[],
-      onComplete?: () => void,
-      hooks?: DialogueHooks,
-    ) => void;
+    show: (lines: string[], onComplete?: () => void, hooks?: DialogueHooks) => void;
     advance: () => void;
     dismiss: () => void;
   } {
@@ -505,15 +494,10 @@ export class GameScene extends Phaser.Scene {
     this.narrationShown = new Set();
     const scripted = new ScriptedDialogueService(CAT_DIALOGUE_SCRIPTS);
     const proxyUrl = import.meta.env.VITE_AI_PROXY_URL;
-    const primary =
-      import.meta.env.VITE_AI_PRIMARY === "openai" ? ("openai" as const) : ("deepseek" as const);
+    const primary = import.meta.env.VITE_AI_PRIMARY === "openai" ? ("openai" as const) : ("deepseek" as const);
     const fb = import.meta.env.VITE_AI_FALLBACK;
     const secondary: "deepseek" | "openai" =
-      fb === "openai" || fb === "deepseek"
-        ? fb
-        : primary === "deepseek"
-          ? "openai"
-          : "deepseek";
+      fb === "openai" || fb === "deepseek" ? fb : primary === "deepseek" ? "openai" : "deepseek";
     this.dialogueService =
       typeof proxyUrl === "string" && proxyUrl.length > 0
         ? new FallbackDialogueService(
@@ -807,8 +791,11 @@ export class GameScene extends Phaser.Scene {
     const playgroundPoint = this.map.findObject("spawns", (obj) => obj.name === "poi_playground");
     const carabaoX = (playgroundPoint?.x ?? 22 * TILE_SIZE) + TILE_SIZE * 0.5;
     const carabaoY = (playgroundPoint?.y ?? 31 * TILE_SIZE) + TILE_SIZE * 4;
+    const hornbillX = carabaoX - TILE_SIZE * 3;
+    const hornbillY = carabaoY - TILE_SIZE * 3;
 
     this.add.image(carabaoX, carabaoY, "carabao_small").setOrigin(0.5, 1).setScale(0.5).setDepth(11);
+    this.add.image(hornbillX, hornbillY, "hornbill_small").setOrigin(0.5, 1).setScale(0.3).setDepth(11);
   }
 
   // ──────────── Intro Cinematic ────────────
@@ -1179,7 +1166,8 @@ export class GameScene extends Phaser.Scene {
 
     // Escape must be checked before the pause gate so it can unpause.
     // When the journal is open, ESC closes it (same pattern as J key).
-    const pauseRequested = (this.escapeKey && Phaser.Input.Keyboard.JustDown(this.escapeKey)) || this.consumeTouchPauseQueue();
+    const pauseRequested =
+      (this.escapeKey && Phaser.Input.Keyboard.JustDown(this.escapeKey)) || this.consumeTouchPauseQueue();
     if (pauseRequested) {
       if (!this.playerInputFrozen) {
         this.handlePauseInput();
@@ -1704,16 +1692,10 @@ export class GameScene extends Phaser.Scene {
     this.camilleEraParkExitCount = 0;
     this.camilleEraParkExitTarget = 1 + (includeManu ? 1 : 0) + (includeKish ? 1 : 0);
     this.kishCamilleSlowDownShown = false;
-    const routes = buildCamilleEraCareRoutes((name) =>
-      this.map.findObject("spawns", (o) => o.name === name),
-    );
+    const routes = buildCamilleEraCareRoutes((name) => this.map.findObject("spawns", (o) => o.name === name));
     const routeBase: Pick<
       HumanConfig,
-      | "activePhases"
-      | "sustainAcrossInactivePhases"
-      | "exitAfterRoute"
-      | "onExitParkComplete"
-      | "lingerWaypointIndex"
+      "activePhases" | "sustainAcrossInactivePhases" | "exitAfterRoute" | "onExitParkComplete" | "lingerWaypointIndex"
     > = {
       activePhases: ["dawn", "evening"],
       sustainAcrossInactivePhases,
@@ -2136,10 +2118,7 @@ export class GameScene extends Phaser.Scene {
    * future LLM calls, not a source of truth, and an IDB hiccup should
    * never break a Camille beat.
    */
-  private async persistCamilleBeatHistory(
-    n: 2 | 3 | 4,
-    spokenRendered: string[],
-  ): Promise<void> {
+  private async persistCamilleBeatHistory(n: 2 | 3 | 4, spokenRendered: string[]): Promise<void> {
     try {
       const snapshotTrust = this.trust.global;
       await storeConversation({
@@ -2190,11 +2169,7 @@ export class GameScene extends Phaser.Scene {
   private playCamilleBeat5Predecision(hud: HUDScene | undefined): void {
     void hud;
     this.camilleNPC?.playCrouchToward(this.player.x);
-    this.playPairedBeat(
-      this.camilleBeat5PredecisionSteps,
-      this.camilleNPC,
-      () => this.beginBeat5Decision(),
-    );
+    this.playPairedBeat(this.camilleBeat5PredecisionSteps, this.camilleNPC, () => this.beginBeat5Decision());
   }
 
   /**
@@ -2239,12 +2214,7 @@ export class GameScene extends Phaser.Scene {
   private tryAcceptBeat5Decision(): boolean {
     if (!this.beat5DecisionActive) return false;
     if (!this.camilleNPC || !this.camilleNPC.active || !this.camilleNPC.visible) return false;
-    const dist = Phaser.Math.Distance.Between(
-      this.player.x,
-      this.player.y,
-      this.camilleNPC.x,
-      this.camilleNPC.y,
-    );
+    const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, this.camilleNPC.x, this.camilleNPC.y);
     if (dist > GP.CAMILLE_BEAT5_TOUCH_DIST) return false;
     this.acceptBeat5();
     return true;
@@ -2363,14 +2333,7 @@ export class GameScene extends Phaser.Scene {
         const dx = exitTarget.x - speaker.x;
         const dy = exitTarget.y - speaker.y;
         const key = speaker.humanType;
-        const dir =
-          Math.abs(dx) > Math.abs(dy)
-            ? dx < 0
-              ? "left"
-              : "right"
-            : dy < 0
-              ? "up"
-              : "down";
+        const dir = Math.abs(dx) > Math.abs(dy) ? (dx < 0 ? "left" : "right") : dy < 0 ? "up" : "down";
         if (this.anims.exists(`${key}-walk-${dir}`)) {
           speaker.anims.play(`${key}-walk-${dir}`, true);
         }
@@ -2394,10 +2357,7 @@ export class GameScene extends Phaser.Scene {
    * than the raw AI payload (which may be reshaped or partially dropped
    * by the merge).
    */
-  private async requestCamilleEncounterLines(
-    n: 2 | 3 | 4,
-    objective: string,
-  ): Promise<string[] | null> {
+  private async requestCamilleEncounterLines(n: 2 | 3 | 4, objective: string): Promise<string[] | null> {
     if (!(this.dialogueService instanceof FallbackDialogueService)) {
       return null;
     }
@@ -2447,9 +2407,7 @@ export class GameScene extends Phaser.Scene {
         timeoutMs: 5000,
       });
 
-      const lines = response.lines
-        .map((l) => l.trim())
-        .filter((l) => l.length > 0);
+      const lines = response.lines.map((l) => l.trim()).filter((l) => l.length > 0);
       return lines.length === 0 ? null : lines;
     } catch {
       return null;
@@ -2629,8 +2587,7 @@ export class GameScene extends Phaser.Scene {
     // propagating forward (and then being persisted by the next autosave,
     // which reads `registry.get` directly without its own validation).
     const prior = this.registry.get(StoryKeys.COLLAPSE_COUNT);
-    const priorCount =
-      typeof prior === "number" && Number.isFinite(prior) && prior >= 0 ? Math.floor(prior) : 0;
+    const priorCount = typeof prior === "number" && Number.isFinite(prior) && prior >= 0 ? Math.floor(prior) : 0;
     this.registry.set(StoryKeys.COLLAPSE_COUNT, priorCount + 1);
   }
 
@@ -2687,8 +2644,7 @@ export class GameScene extends Phaser.Scene {
     const witnessStillHere =
       witness !== null &&
       witness.active &&
-      Phaser.Math.Distance.Between(this.player.x, this.player.y, witness.x, witness.y) <=
-        GP.NARRATION_WITNESS_DIST;
+      Phaser.Math.Distance.Between(this.player.x, this.player.y, witness.x, witness.y) <= GP.NARRATION_WITNESS_DIST;
 
     this.player.setPosition(safeX, safeY);
     this.previousPlayerX = safeX;
@@ -2958,11 +2914,7 @@ export class GameScene extends Phaser.Scene {
     // `COLONY_COUNT` drops below named+mamma+cap, the visible roster
     // shrinks in lockstep. Reads `this.colonyCount` which is kept in
     // lockstep with the registry by the seed/load/dumping/snatch paths.
-    const count = computeBackgroundSpawnCount(
-      this.colonyCount,
-      NAMED_AND_MAMMA_COUNT,
-      VISIBLE_BACKGROUND_CAP,
-    );
+    const count = computeBackgroundSpawnCount(this.colonyCount, NAMED_AND_MAMMA_COUNT, VISIBLE_BACKGROUND_CAP);
     for (let i = 0; i < count; i++) {
       const zone = zones[i % zones.length]!;
       const angle = Math.random() * Math.PI * 2;
@@ -3174,9 +3126,7 @@ export class GameScene extends Phaser.Scene {
   private updateHumans(delta: number): void {
     const now = this.time.now;
     for (const human of this.humans) {
-      human.setPhase(
-        getEffectiveHumanPhase(human.humanType, this.dayNight.currentPhase, this.dayNight.dayCount),
-      );
+      human.setPhase(getEffectiveHumanPhase(human.humanType, this.dayNight.currentPhase, this.dayNight.dayCount));
       human.update(delta);
 
       if (!human.visible) continue;
@@ -3196,10 +3146,7 @@ export class GameScene extends Phaser.Scene {
         // `updatePlayerStationaryAnchor`). The isGreeting cooldown (4-6s)
         // still prevents frame-spam during the N allowed attempts.
         const playerDist = Phaser.Math.Distance.Between(human.x, human.y, this.player.x, this.player.y);
-        if (
-          playerDist < GP.CAT_PERSON_PLAYER_GREET_DIST &&
-          human.stationaryGreetCount < STATIONARY_GREET_CAP
-        ) {
+        if (playerDist < GP.CAT_PERSON_PLAYER_GREET_DIST && human.stationaryGreetCount < STATIONARY_GREET_CAP) {
           let playerLine: string | undefined;
           if (human.humanType === "camille") {
             const enc = (this.registry.get(StoryKeys.CAMILLE_ENCOUNTER) as number) ?? 0;
@@ -3446,10 +3393,10 @@ export class GameScene extends Phaser.Scene {
         nearbyCat: nearNpcCat?.npcName,
       };
 
-      const response = await (this.dialogueService as FallbackDialogueService).getDialogue(
-        request,
-        { timeoutMs: GameScene.HUMAN_AI_BUBBLE_TIMEOUT_MS, signal: abort.signal },
-      );
+      const response = await (this.dialogueService as FallbackDialogueService).getDialogue(request, {
+        timeoutMs: GameScene.HUMAN_AI_BUBBLE_TIMEOUT_MS,
+        signal: abort.signal,
+      });
 
       if (abort.signal.aborted || !human.active || !human.visible || !this.isHumanCloseToMammaCat(human)) {
         return;
@@ -3512,8 +3459,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   private isHumanCloseToMammaCat(human: HumanNPC): boolean {
-    return Phaser.Math.Distance.Between(human.x, human.y, this.player.x, this.player.y) <=
-      GP.CAT_PERSON_PLAYER_GREET_DIST;
+    return (
+      Phaser.Math.Distance.Between(human.x, human.y, this.player.x, this.player.y) <= GP.CAT_PERSON_PLAYER_GREET_DIST
+    );
   }
 
   /**
@@ -3532,11 +3480,7 @@ export class GameScene extends Phaser.Scene {
    *    encounter beat step) and MUST `.destroy()` it when advancing
    *    or aborting. Used by the Camille encounter loop.
    */
-  private renderHumanBubble(
-    human: HumanNPC,
-    line: string,
-    opts?: { persistent?: boolean },
-  ): Phaser.GameObjects.Text {
+  private renderHumanBubble(human: HumanNPC, line: string, opts?: { persistent?: boolean }): Phaser.GameObjects.Text {
     const bubble = this.add
       .text(human.x, human.y - 30, line, {
         fontFamily: "Arial, Helvetica, sans-serif",
@@ -3817,9 +3761,7 @@ export class GameScene extends Phaser.Scene {
       isGreeting: this.player.isGreeting,
       lastPartner: this.lastDialoguePartner?.npcName ?? null,
       selected: selected ? { name: selected.cat.npcName, dist: Math.round(selectedDist) } : null,
-      nearestAny: rawNearest
-        ? { name: rawNearest.cat.npcName, dist: Math.round(rawNearestDist) }
-        : null,
+      nearestAny: rawNearest ? { name: rawNearest.cat.npcName, dist: Math.round(rawNearestDist) } : null,
       interactDist: INTERACTION_DISTANCE,
     });
   }
@@ -4107,9 +4049,7 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private isFirstConversationWithCat(
-    conversationCount: number,
-  ): boolean {
+  private isFirstConversationWithCat(conversationCount: number): boolean {
     return conversationCount === 0;
   }
 
@@ -4384,8 +4324,7 @@ export class GameScene extends Phaser.Scene {
    * "Follow-ups" block in WORKING_MEMORY.md.
    */
   private handleColonyCatSnatch(cat: NPCCat): void {
-    const near =
-      Phaser.Math.Distance.Between(this.player.x, this.player.y, cat.x, cat.y) <= GP.SNATCHER_WITNESS_DIST;
+    const near = Phaser.Math.Distance.Between(this.player.x, this.player.y, cat.x, cat.y) <= GP.SNATCHER_WITNESS_DIST;
     const los = near && this.hasLineOfSight(this.player.x, this.player.y, cat.x, cat.y);
 
     const idx = this.npcs.findIndex((entry) => entry.cat === cat);
@@ -4583,16 +4522,24 @@ export class GameScene extends Phaser.Scene {
 
     switch (eventNum) {
       case 1:
-        this.dialogue.show(["A car. A door. A cat.", "You remember."], () => {
-          hud?.showNarration("A new cat has appeared in the gardens.");
-        }, { onHide: armComfortWindow });
+        this.dialogue.show(
+          ["A car. A door. A cat.", "You remember."],
+          () => {
+            hud?.showNarration("A new cat has appeared in the gardens.");
+          },
+          { onHide: armComfortWindow },
+        );
         break;
       case 2:
-        this.dialogue.show([
-          "This one wasn't thrown away. This one was... left.",
-          "With love, and grief, and no choice.",
-          "You sit beside her. You don't speak. There's nothing to say.",
-        ], undefined, { onHide: armComfortWindow });
+        this.dialogue.show(
+          [
+            "This one wasn't thrown away. This one was... left.",
+            "With love, and grief, and no choice.",
+            "You sit beside her. You don't speak. There's nothing to say.",
+          ],
+          undefined,
+          { onHide: armComfortWindow },
+        );
         break;
       case 3:
         this.dialogue.show(["Another one. How many of us started this way?"], undefined, { onHide: armComfortWindow });
