@@ -27,7 +27,7 @@ Pedigree was dumped at the gardens along with her best friend, an old sick cat w
 
 ## Relationship to Mamma Cat
 
-- Recognises a shared story; opens if Mamma Cat proves she is still fighting
+- Recognises a shared story; opens if Mamma Cat proves she is still fighting. Pedigree will ask Mamma Cat if she has seen her friend - a very old sick cat who doesn't move very much.
 
 ## Rules of Engagement
 

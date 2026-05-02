@@ -22,6 +22,8 @@ export class BootScene extends Phaser.Scene {
     this.load.image("trees-pale", "assets/tilesets/trees-pale.png");
     this.load.image("plants", "assets/tilesets/plants.png");
     this.load.tilemapTiledJSON("atg", "assets/tilemaps/atg.json");
+    this.load.image("carabao_small", "assets/sprites/carabao_small.png");
+    this.load.image("hornbill_small", "assets/sprites/hornbill_small.png");
 
     // Cat spritesheets: 8 cols x 10 rows of 32x32 frames
     const cats = ["mammacat", "blacky", "tiger", "jayco", "fluffy"];
