@@ -62,6 +62,11 @@ export interface HumanConfig {
    */
   waypointPauseMs?: number[];
   /**
+   * Set false for hand-authored routes that should keep their macro waypoints.
+   * Exit routing can still be injected separately via {@link routeToExit}.
+   */
+  routePath?: boolean;
+  /**
    * Fired once when the NPC reaches the perimeter exit after
    * {@link exitAfterRoute}, after the NPC has been deactivated.
    */

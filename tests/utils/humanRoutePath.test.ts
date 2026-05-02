@@ -5,6 +5,20 @@ import { buildCamilleEraCareRoutes } from "../../src/utils/camilleCareRoute";
 import { createNavigationGrid, routeHumanPath, type NavigationGrid, type RoutePoint } from "../../src/utils/humanRoutePath";
 
 describe("routeHumanPath", () => {
+  it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])(
+    "rejects invalid tileSize %s before creating a navigation grid",
+    (tileSize) => {
+      expect(() =>
+        createNavigationGrid({
+          width: 1,
+          height: 1,
+          tileSize,
+          isBlocked: () => false,
+        }),
+      ).toThrow("createNavigationGrid: tileSize must be a positive finite number");
+    },
+  );
+
   it("routes around blocked tiles instead of preserving a wall-crossing straight segment", () => {
     const blocked = new Set(["2,0", "2,1", "2,2", "2,3"]);
     const grid = createNavigationGrid({
@@ -76,6 +90,74 @@ describe("routeHumanPath", () => {
     expect(result.path).toEqual([{ x: 5, y: 5 }]);
   });
 
+  it("preserves repeated waypoints instead of treating already-there segments as route failures", () => {
+    const grid = createNavigationGrid({
+      width: 2,
+      height: 2,
+      tileSize: 10,
+      isBlocked: () => false,
+    });
+
+    const result = routeHumanPath(
+      [
+        { x: 5, y: 5 },
+        { x: 5, y: 5 },
+        { x: 15, y: 15 },
+      ],
+      grid,
+      {
+        waypointPauseMs: [0, 200, 0],
+      },
+    );
+
+    expect(result.path).toEqual([
+      { x: 5, y: 5 },
+      { x: 5, y: 5 },
+      { x: 15, y: 15 },
+    ]);
+    expect(result.waypointPauseMs?.[1]).toBe(200);
+  });
+
+  it("does not diagonal-cut through blocked corners", () => {
+    const blocked = new Set(["1,0", "0,1"]);
+    const grid = createNavigationGrid({
+      width: 2,
+      height: 2,
+      tileSize: 10,
+      isBlocked: (x, y) => blocked.has(`${x},${y}`),
+    });
+
+    const result = routeHumanPath(
+      [
+        { x: 5, y: 5 },
+        { x: 15, y: 15 },
+      ],
+      grid,
+    );
+
+    expect(result.path).toEqual([{ x: 5, y: 5 }]);
+  });
+
+  it("keeps the male jogger's Paseo underpass segment as turn points instead of tile-step targets", () => {
+    const grid = navigationGridFromAtgMap();
+    const routed = routeHumanPath(
+      [
+        { x: 16, y: 1392 },
+        { x: 1008, y: 432 },
+      ],
+      grid,
+    );
+
+    expect(routed.path[0]).toEqual({ x: 16, y: 1392 });
+    expect(routed.path[routed.path.length - 1]).toEqual({ x: 1008, y: 432 });
+    expect(routed.path.length).toBeLessThan(10);
+    const firstMoveTileDistance = Math.max(
+      Math.abs(toCell(routed.path[1]!, grid).x - toCell(routed.path[0]!, grid).x),
+      Math.abs(toCell(routed.path[1]!, grid).y - toCell(routed.path[0]!, grid).y),
+    );
+    expect(firstMoveTileDistance).toBeGreaterThan(1);
+  });
+
   it("expands Camille-era care routes into walkable adjacent tile waypoints on the shipped map", () => {
     const grid = navigationGridFromAtgMap();
     const routes = buildCamilleEraCareRoutes(findAtgObject);
@@ -88,7 +170,8 @@ describe("routeHumanPath", () => {
       },
     );
 
-    expect(routed.path.length).toBeGreaterThan(routes.camille.length);
+    expect(toCell(routed.path[0]!, grid)).toEqual(toCell(routes.camille[0]!, grid));
+    expect(toCell(routed.path[routed.path.length - 1]!, grid)).toEqual(toCell(routes.camille[routes.camille.length - 1]!, grid));
     expect(routed.lingerWaypointIndex).toBe(0);
     expect(routed.waypointPauseMs?.[0]).toBe(CAMILLE_CARE_ROUTE_ENTRY_BLACKY_PAUSE_MS);
 
@@ -97,12 +180,7 @@ describe("routeHumanPath", () => {
       expect(grid.cells[cell.y]?.[cell.x]).toBe(0);
     }
 
-    for (let i = 1; i < routed.path.length; i += 1) {
-      const prev = toCell(routed.path[i - 1]!, grid);
-      const next = toCell(routed.path[i]!, grid);
-      const manhattanDistance = Math.abs(next.x - prev.x) + Math.abs(next.y - prev.y);
-      expect(manhattanDistance).toBeLessThanOrEqual(1);
-    }
+    expect(routed.path.length).toBeGreaterThan(1);
   });
 });
 

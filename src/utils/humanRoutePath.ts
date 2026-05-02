@@ -29,6 +29,10 @@ const WALKABLE = 0;
 const BLOCKED = 1;
 
 export function createNavigationGrid(input: NavigationGridInput): NavigationGrid {
+  if (!Number.isFinite(input.tileSize) || input.tileSize <= 0) {
+    throw new RangeError(`createNavigationGrid: tileSize must be a positive finite number (got ${input.tileSize}).`);
+  }
+
   const width = Math.max(0, Math.floor(input.width));
   const height = Math.max(0, Math.floor(input.height));
   const cells: number[][] = [];
@@ -71,14 +75,22 @@ export function routeHumanPath(
   for (let i = 1; i < waypoints.length; i += 1) {
     const previousCell = worldToCell(routedPath[routedPath.length - 1]!, grid);
     const targetCell = nearestWalkableCell(grid, worldToCell(waypoints[i]!, grid));
+    if (previousCell.x === targetCell.x && previousCell.y === targetCell.y) {
+      routedPath.push(cellToWorld(targetCell, grid));
+      if (pauseByIndex) pauseByIndex.push(options.waypointPauseMs?.[i] ?? 0);
+      mappedOriginalIndexes[i] = routedPath.length - 1;
+      continue;
+    }
+
     const segment = findTilePath(grid, previousCell, targetCell);
 
     if (!segment || segment.length === 0) {
       break;
     }
 
-    for (let j = 1; j < segment.length; j += 1) {
-      routedPath.push(cellToWorld(segment[j]!, grid));
+    const simplifiedSegment = simplifyTileSegment(segment);
+    for (let j = 1; j < simplifiedSegment.length; j += 1) {
+      routedPath.push(cellToWorld(simplifiedSegment[j]!, grid));
       if (pauseByIndex) pauseByIndex.push(0);
     }
 
@@ -105,7 +117,14 @@ function findTilePath(
   end: { x: number; y: number },
 ): Array<{ x: number; y: number }> | null {
   const easystar = new EasyStar.js();
-  (easystar as unknown as { enableSync: () => void }).enableSync();
+  const pathfinder = easystar as unknown as {
+    enableSync: () => void;
+    enableDiagonals: () => void;
+    disableCornerCutting: () => void;
+  };
+  pathfinder.enableSync();
+  pathfinder.enableDiagonals();
+  pathfinder.disableCornerCutting();
   easystar.setGrid(grid.cells);
   easystar.setAcceptableTiles([WALKABLE]);
   easystar.setIterationsPerCalculation(Number.MAX_SAFE_INTEGER);
@@ -120,6 +139,31 @@ function findTilePath(
   }
 
   return result ?? null;
+}
+
+function simplifyTileSegment(segment: Array<{ x: number; y: number }>): Array<{ x: number; y: number }> {
+  if (segment.length <= 2) return segment;
+
+  const simplified: Array<{ x: number; y: number }> = [segment[0]!];
+  let previousDirection = directionBetween(segment[0]!, segment[1]!);
+
+  for (let i = 1; i < segment.length - 1; i += 1) {
+    const currentDirection = directionBetween(segment[i]!, segment[i + 1]!);
+    if (currentDirection.x !== previousDirection.x || currentDirection.y !== previousDirection.y) {
+      simplified.push(segment[i]!);
+      previousDirection = currentDirection;
+    }
+  }
+
+  simplified.push(segment[segment.length - 1]!);
+  return simplified;
+}
+
+function directionBetween(from: { x: number; y: number }, to: { x: number; y: number }): { x: number; y: number } {
+  return {
+    x: Math.sign(to.x - from.x),
+    y: Math.sign(to.y - from.y),
+  };
 }
 
 function nearestWalkableCell(grid: NavigationGrid, cell: { x: number; y: number }): { x: number; y: number } {

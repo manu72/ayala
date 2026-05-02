@@ -2559,16 +2559,19 @@ export class GameScene extends Phaser.Scene {
   }
 
   private routeHumanConfig(config: HumanConfig, navigationGrid: NavigationGrid): HumanConfig {
-    const routed = routeHumanPath(config.path, navigationGrid, {
-      waypointPauseMs: config.waypointPauseMs,
-      lingerWaypointIndex: config.lingerWaypointIndex,
-    });
+    const shouldRoutePath = config.routePath !== false;
+    const routed = shouldRoutePath
+      ? routeHumanPath(config.path, navigationGrid, {
+          waypointPauseMs: config.waypointPauseMs,
+          lingerWaypointIndex: config.lingerWaypointIndex,
+        })
+      : null;
 
     return {
       ...config,
-      path: routed.path,
-      waypointPauseMs: routed.waypointPauseMs ?? config.waypointPauseMs,
-      lingerWaypointIndex: routed.lingerWaypointIndex ?? config.lingerWaypointIndex,
+      path: routed?.path ?? config.path,
+      waypointPauseMs: routed?.waypointPauseMs ?? config.waypointPauseMs,
+      lingerWaypointIndex: routed?.lingerWaypointIndex ?? config.lingerWaypointIndex,
       routeToExit: (from, exits) => {
         const nearest = this.nearestExitPoint(from, exits);
         if (!nearest) return [from];
@@ -3051,6 +3054,7 @@ export class GameScene extends Phaser.Scene {
         activePhases: ["dawn", "evening"],
         avoidanceRadius: 30,
         loopPauseSec: 5,
+        routePath: false,
         path: [
           { x: 16, y: 1392 }, // tile (0,43)  — SW spawn on diagonal sidewalk
           { x: 1008, y: 432 }, // tile (31,13) — NE turn onto main N walkway
