@@ -224,6 +224,11 @@ function makeHuman(overrides: Partial<HumanConfig> & { type: HumanConfig['type']
     lingerSec: overrides.lingerSec,
     lingerWaypointIndex: overrides.lingerWaypointIndex,
     exitAfterLinger: overrides.exitAfterLinger,
+    exitAfterRoute: overrides.exitAfterRoute,
+    sustainAcrossInactivePhases: overrides.sustainAcrossInactivePhases,
+    waypointPauseMs: overrides.waypointPauseMs,
+    onExitParkComplete: overrides.onExitParkComplete,
+    loopPauseSec: overrides.loopPauseSec,
     identityName: overrides.identityName,
   }
   const npc = new HumanNPC(harness.scene, cfg)
@@ -533,6 +538,105 @@ describe('HumanNPC.setPhase — activation / exit transitions', () => {
     }
     expect(npc.active).toBe(false)
     expect(npc.visible).toBe(false)
+  })
+})
+
+// ──────────────────────────────────────────────────────────────
+// Care route: waypoint pauses, sustain, exitAfterRoute
+// ──────────────────────────────────────────────────────────────
+
+describe('HumanNPC — care route (waypointPause / sustain / exitAfterRoute)', () => {
+  it('dwells at the first waypoint when waypointPauseMs[0] > 0', () => {
+    const { npc } = makeHuman({
+      type: 'camille',
+      lingerWaypointIndex: 0,
+      path: [
+        { x: 0, y: 0 },
+        { x: 100, y: 0 },
+      ],
+      waypointPauseMs: [400, 0],
+      activePhases: ['dawn'],
+    })
+    npc.setPhase('dawn')
+    const setVel = vi.spyOn(npc, 'setVelocity')
+    setVel.mockClear()
+    npc.update(16)
+    expect(setVel).toHaveBeenCalledWith(0)
+    npc.update(500)
+    npc.update(16)
+    const moved = setVel.mock.calls.some(([vx, vy]) => (vx ?? 0) !== 0 || (vy ?? 0) !== 0)
+    expect(moved).toBe(true)
+  })
+
+  it('sustainAcrossInactivePhases keeps the NPC visible when the calendar phase is outside activePhases', () => {
+    const { npc } = makeHuman({
+      type: 'camille',
+      lingerWaypointIndex: 0,
+      path: [
+        { x: 0, y: 0 },
+        { x: 400, y: 0 },
+      ],
+      waypointPauseMs: [0, 0],
+      activePhases: ['dawn', 'evening'],
+      sustainAcrossInactivePhases: true,
+    })
+    npc.setPhase('dawn')
+    npc.update(16)
+    npc.setPhase('day')
+    expect(npc.active).toBe(true)
+    expect(npc.visible).toBe(true)
+  })
+
+  it('exitAfterRoute invokes onExitParkComplete once then deactivates at the park edge', () => {
+    let exits = 0
+    const { npc } = makeHuman({
+      type: 'camille',
+      lingerWaypointIndex: 0,
+      path: [
+        { x: 0, y: 0 },
+        { x: 18, y: 0 },
+      ],
+      waypointPauseMs: [0, 0],
+      activePhases: ['dawn'],
+      exitAfterRoute: true,
+      onExitParkComplete: () => {
+        exits += 1
+      },
+    })
+    npc.setPhase('dawn')
+    for (let i = 0; i < 80; i++) {
+      simulatePhysics(npc, 50)
+    }
+    for (let i = 0; i < 4000 && npc.active; i++) {
+      simulatePhysics(npc, 200)
+    }
+    expect(npc.active).toBe(false)
+    expect(exits).toBe(1)
+  })
+
+  it('encounter pause blocks waypoint pause timer until resumeFromEncounter', () => {
+    const { npc } = makeHuman({
+      type: 'camille',
+      lingerWaypointIndex: 0,
+      path: [
+        { x: 0, y: 0 },
+        { x: 100, y: 0 },
+      ],
+      waypointPauseMs: [300, 0],
+      activePhases: ['dawn'],
+    })
+    npc.setPhase('dawn')
+    npc.update(16)
+    npc.pauseForEncounter(npc.x + 10)
+    npc.update(500)
+    npc.resumeFromEncounter()
+    npc.update(200)
+    npc.update(200)
+    const setVel = vi.spyOn(npc, 'setVelocity')
+    setVel.mockClear()
+    npc.update(16)
+    const moving = setVel.mock.calls.some(([vx, vy]) => (vx ?? 0) !== 0 || (vy ?? 0) !== 0)
+    expect(moving).toBe(true)
   })
 })
 

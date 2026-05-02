@@ -44,6 +44,28 @@ export interface HumanConfig {
    * teleport-wrap from the last waypoint to the first.
    */
   loopPauseSec?: number;
+  /**
+   * When true, after one full traversal of {@link path} the NPC walks to
+   * the nearest park exit and deactivates instead of looping.
+   */
+  exitAfterRoute?: boolean;
+  /**
+   * When true, leaving an `activePhases` window (e.g. dawn ends) does not
+   * force {@link startExiting} while the NPC is still mid-route. Used for
+   * Camille-era care visits that must finish their circuit across phases.
+   */
+  sustainAcrossInactivePhases?: boolean;
+  /**
+   * Optional per-waypoint dwell (ms) after reaching each point: crouch,
+   * pause, greet nearby cats. Index aligns with {@link path}. Missing or
+   * shorter entries default to 0 (no pause).
+   */
+  waypointPauseMs?: number[];
+  /**
+   * Fired once when the NPC reaches the perimeter exit after
+   * {@link exitAfterRoute} (before {@link deactivate}).
+   */
+  onExitParkComplete?: () => void;
 }
 
 /**
@@ -77,7 +99,9 @@ const PARK_EXITS: ReadonlyArray<{ x: number; y: number }> = [
 /**
  * A human NPC that follows a waypoint path during active time-of-day phases.
  * When their active phase ends, they walk to the nearest park exit before
- * becoming invisible rather than vanishing in place.
+ * becoming invisible rather than vanishing in place — unless
+ * {@link HumanConfig.sustainAcrossInactivePhases} keeps them on-route until
+ * the circuit completes.
  */
 export class HumanNPC extends BaseNPC {
   readonly humanType: HumanType;
@@ -132,6 +156,10 @@ export class HumanNPC extends BaseNPC {
   // Between-loop "off-map" pause (see HumanConfig.loopPauseSec).
   private loopPausing = false;
   private loopPauseTimer = 0;
+
+  /** Per-waypoint crouch / greet dwell (see HumanConfig.waypointPauseMs). */
+  private waypointPausing = false;
+  private waypointPauseTimer = 0;
 
   constructor(scene: Phaser.Scene, config: HumanConfig) {
     const prof = profileForType(config.type);
@@ -283,6 +311,15 @@ export class HumanNPC extends BaseNPC {
     const shouldBeActive = this.activePhases.has(phase);
     if (shouldBeActive && !this.isActive && !this.exiting) {
       this.activate();
+    } else if (
+      !shouldBeActive &&
+      this.isActive &&
+      !this.exiting &&
+      this.config.sustainAcrossInactivePhases
+    ) {
+      // Stay on the care route across dawn/day/evening/night until the path
+      // completes and exitAfterRoute drives a perimeter walk-off.
+      return;
     } else if (!shouldBeActive && this.isActive && !this.exiting) {
       if (this.loopPausing) {
         // Already off-map between loops; deactivate quietly — don't try to
@@ -312,6 +349,16 @@ export class HumanNPC extends BaseNPC {
 
     if (this.encounterPaused) {
       this.setVelocity(0);
+      return;
+    }
+
+    if (this.waypointPausing) {
+      this.setVelocity(0);
+      this.waypointPauseTimer -= delta;
+      if (this.waypointPauseTimer <= 0) {
+        this.waypointPausing = false;
+        this.advanceWaypoint();
+      }
       return;
     }
 
@@ -376,6 +423,16 @@ export class HumanNPC extends BaseNPC {
         }
         return;
       }
+      const pauseMs = this.config.waypointPauseMs?.[this.currentWaypoint] ?? 0;
+      if (pauseMs > 0) {
+        this.waypointPausing = true;
+        this.waypointPauseTimer = pauseMs;
+        this.greetedCats = new WeakSet<object>();
+        const nextWp = this.waypointPath[this.currentWaypoint + 1];
+        const faceX = nextWp?.x ?? this.x + 1;
+        this.playCrouchToward(faceX);
+        return;
+      }
       this.advanceWaypoint();
     } else {
       const speedMod = this.glanceTimer > 0 ? 0.3 : 1;
@@ -393,6 +450,10 @@ export class HumanNPC extends BaseNPC {
   private advanceWaypoint(): void {
     const next = this.currentWaypoint + 1;
     if (next >= this.waypointPath.length) {
+      if (this.config.exitAfterRoute) {
+        this.startExiting();
+        return;
+      }
       if (this.config.exitAfterLinger) {
         this.startExiting();
         return;
@@ -449,6 +510,8 @@ export class HumanNPC extends BaseNPC {
     this.isActive = true;
     this.loopPausing = false;
     this.loopPauseTimer = 0;
+    this.waypointPausing = false;
+    this.waypointPauseTimer = 0;
     this.setVisible(true);
     this.setActive(true);
     const body = this.body as Phaser.Physics.Arcade.Body | undefined;
@@ -473,6 +536,8 @@ export class HumanNPC extends BaseNPC {
     this.isActive = false;
     this.exiting = false;
     this.exitTarget = null;
+    this.waypointPausing = false;
+    this.waypointPauseTimer = 0;
     this.loopPausing = false;
     this.loopPauseTimer = 0;
     this.encounterPaused = false;
@@ -516,6 +581,7 @@ export class HumanNPC extends BaseNPC {
 
     const dist = Phaser.Math.Distance.Between(this.x, this.y, this.exitTarget.x, this.exitTarget.y);
     if (dist < 24) {
+      this.config.onExitParkComplete?.();
       this.deactivate();
       return;
     }
@@ -543,7 +609,14 @@ export class HumanNPC extends BaseNPC {
     neighbours: Iterable<{ x: number; y: number }>,
     radius: number,
   ): void {
-    if (!this.isActive || this.greetingActive || this.lingering || this.loopPausing) return;
+    if (
+      !this.isActive ||
+      this.greetingActive ||
+      this.lingering ||
+      this.loopPausing ||
+      this.waypointPausing
+    )
+      return;
     const body = this.body as Phaser.Physics.Arcade.Body | undefined;
     if (!body) return;
     const vx = body.velocity.x;

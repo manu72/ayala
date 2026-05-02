@@ -383,6 +383,10 @@ const objectPoints = [
   { name: 'spawn_blacky',   x: 32, y: 17 },
   { name: 'spawn_tiger',    x: 50, y: 36 },
   { name: 'spawn_jayco',    x: 80, y: 16 },
+  { name: 'spawn_jayco_jr', x: 73, y: 7 },
+  { name: 'spawn_fluffy',   x: 88, y: 2 },
+  { name: 'spawn_pedigree', x: 36, y: 64 },
+  { name: 'spawn_ginger',   x: 24, y: 43 },
 
   // POIs — landmarks
   { name: 'poi_starbucks',  x: 83, y: 19 },
@@ -391,10 +395,17 @@ const objectPoints = [
   { name: 'poi_blackbird',  x: 69, y: 53 },
   { name: 'poi_playground', x: 22, y: 31 },
   { name: 'poi_pyramid_steps', x: 82, y: 14 },
+  { name: 'poi_fountain_exchange', x: 16, y: 60 },
+  { name: 'poi_escalator', x: 14, y: 33 },
+  { name: 'poi_library', x: 44, y: 17 },
+  { name: 'poi_safe_sleep_central', x: 77, y: 8 },
+  { name: 'poi_starbucks_water', x: 74, y: 2 },
+  { name: 'poi_water_bowl_3', x: 73, y: 53 },
 
   // Food sources — feeding stations
   { name: 'poi_feeding_station_1', x: 48, y: 34 },
   { name: 'poi_feeding_station_2', x: 62, y: 30 },
+  { name: 'poi_feeding_station_3', x: 88, y: 5 },
 
   // Water sources — bowls near feeding stations
   { name: 'poi_water_bowl_1', x: 49, y: 35 },

@@ -30,6 +30,18 @@ export const GP = {
 } as const;
 
 /**
+ * Camille-era care route: default pause at each waypoint (crouch / refill /
+ * greet window). Pyramid stops use {@link CAMILLE_CARE_ROUTE_PYRAMID_PAUSE_MS}.
+ */
+export const CAMILLE_CARE_ROUTE_WAYPOINT_PAUSE_MS = 4500;
+
+/** Extra dwell at `poi_pyramid_steps` (both visits on the route). */
+export const CAMILLE_CARE_ROUTE_PYRAMID_PAUSE_MS = 22_000;
+
+/** Entry / underpass / final Blacky pause — slightly shorter than pyramid. */
+export const CAMILLE_CARE_ROUTE_ENTRY_BLACKY_PAUSE_MS = 3800;
+
+/**
  * Duration (ms) of the beat 5 decision window. Camille has asked "Would you
  * like to come home with me?" — the player has this long to approach and
  * press Space to greet. On timeout Camille stands down and the beat re-arms
