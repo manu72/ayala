@@ -42,6 +42,12 @@ vi.mock('phaser', () => {
     setOffset = vi.fn()
     setEnable = vi.fn()
     _sprite: MockSprite | null = null
+    /** Mirrors Phaser Arcade `Body.blocked` — tests can set facades for stuck / steering. */
+    blocked = { up: false, down: false, left: false, right: false }
+    /** Mirrors Phaser Arcade `Body.velocity` (read from sprite integration values). */
+    get velocity(): { x: number; y: number } {
+      return { x: this._sprite?._vx ?? 0, y: this._sprite?._vy ?? 0 }
+    }
     reset(x: number, y: number): void {
       if (this._sprite) {
         this._sprite.x = x
@@ -131,6 +137,7 @@ vi.mock('phaser', () => {
       Physics: { Arcade: { Sprite: MockSprite } },
       Math: {
         Vector2: MockVector2,
+        Clamp: (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi),
         Distance: {
           Between: (ax: number, ay: number, bx: number, by: number) =>
             Math.hypot(bx - ax, by - ay),
@@ -141,6 +148,7 @@ vi.mock('phaser', () => {
   }
 })
 
+import { GP } from '../../src/config/gameplayConstants'
 import { HumanNPC, type HumanConfig } from '../../src/sprites/HumanNPC'
 
 interface GraphicsMock {
@@ -237,6 +245,8 @@ function makeHuman(overrides: Partial<HumanConfig> & { type: HumanConfig['type']
     loopPauseSec: overrides.loopPauseSec,
     identityName: overrides.identityName,
     routeToExit: overrides.routeToExit,
+    routeLocalDetour: overrides.routeLocalDetour,
+    avoidanceRadius: overrides.avoidanceRadius,
   }
   const npc = new HumanNPC(harness.scene, cfg)
   return { npc, ...harness }
@@ -763,6 +773,86 @@ describe('HumanNPC — greeting helpers', () => {
 // ──────────────────────────────────────────────────────────────
 // glanceAt throttling
 // ──────────────────────────────────────────────────────────────
+
+describe('HumanNPC — stuck recovery + obstacle-safe steering', () => {
+  it('calls routeLocalDetour after sustained no-progress and follows returned detour', () => {
+    const routeLocalDetour = vi.fn(() => [{ x: 80, y: 0 }])
+    const { npc } = makeHuman({
+      type: 'jogger',
+      activePhases: ['day'],
+      speed: 50,
+      path: [
+        { x: 0, y: 0 },
+        { x: 500, y: 0 },
+      ],
+      routeLocalDetour,
+    })
+    npc.setPhase('day')
+    // Do not integrate position: velocity is non-zero but the NPC never moves,
+    // exercising the no-progress stuck path.
+    const steps =
+      Math.ceil(GP.HUMAN_STUCK_NO_PROGRESS_MS / 100) +
+      Math.ceil(GP.HUMAN_STUCK_TRIGGER_MS / 100) +
+      2
+    for (let i = 0; i < steps; i++) {
+      npc.update(100)
+    }
+    expect(routeLocalDetour).toHaveBeenCalled()
+    const detour = (npc as unknown as { detourQueue: Array<{ x: number; y: number }> }).detourQueue
+    expect(detour.length).toBeGreaterThan(0)
+    expect(detour[0]).toEqual({ x: 80, y: 0 })
+  })
+
+  it('after repeated failed detours, advances the macro waypoint (last resort)', () => {
+    const routeLocalDetour = vi.fn(() => null as Array<{ x: number; y: number }> | null)
+    const { npc } = makeHuman({
+      type: 'jogger',
+      activePhases: ['day'],
+      speed: 50,
+      path: [
+        { x: 0, y: 0 },
+        { x: 500, y: 0 },
+        { x: 900, y: 0 },
+      ],
+      routeLocalDetour,
+    })
+    npc.setPhase('day')
+    const perCycle = Math.ceil(GP.HUMAN_STUCK_NO_PROGRESS_MS / 200) + Math.ceil(GP.HUMAN_STUCK_TRIGGER_MS / 200) + 2
+    for (let cycle = 0; cycle < GP.HUMAN_STUCK_SKIP_WAYPOINT_AFTER_FAILURES; cycle++) {
+      for (let i = 0; i < perCycle; i++) {
+        npc.update(200)
+      }
+    }
+    expect(routeLocalDetour.mock.calls.length).toBeGreaterThanOrEqual(GP.HUMAN_STUCK_SKIP_WAYPOINT_AFTER_FAILURES)
+    const wp = (npc as unknown as { currentWaypoint: number }).currentWaypoint
+    expect(wp).toBe(2)
+  })
+
+  it('applySteeringAvoidance keeps pathing velocity when the nudge would push into a blocked.left facade', () => {
+    const { npc } = makeHuman({
+      type: 'jogger',
+      activePhases: ['day'],
+      speed: 50,
+      avoidanceRadius: 120,
+      path: [
+        { x: 0, y: 0 },
+        { x: 0, y: -400 },
+      ],
+    })
+    npc.setPhase('day')
+    npc.update(16)
+    const sprite = npc as unknown as { _vx: number; _vy: number }
+    const vx0 = sprite._vx
+    const vy0 = sprite._vy
+    const body = npc.body as unknown as { blocked: { left: boolean } }
+    body.blocked.left = true
+    // Neighbour ahead-right produces a negative lateral nudge while moving north,
+    // which would steer into the left facade if applied.
+    npc.applySteeringAvoidance([{ x: 50, y: -20 }], 120)
+    expect(sprite._vx).toBeCloseTo(vx0, 5)
+    expect(sprite._vy).toBeCloseTo(vy0, 5)
+  })
+})
 
 describe('HumanNPC.glanceAt — throttling', () => {
   it('ignores a second glance while the glance timer is still active', () => {
