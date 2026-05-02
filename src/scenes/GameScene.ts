@@ -1612,8 +1612,11 @@ export class GameScene extends Phaser.Scene {
 
     const currentEncounter = (this.registry.get(StoryKeys.CAMILLE_ENCOUNTER) as number) ?? 0;
     if (currentEncounter >= 5) {
-      this.trySpawnCamilleAmbientEveningVisit();
-      return;
+      const encounter5Complete = this.registry.get(StoryKeys.ENCOUNTER_5_COMPLETE) === true;
+      if (encounter5Complete) {
+        this.trySpawnCamilleAmbientEveningVisit();
+        return;
+      }
     }
 
     // One encounter per game day — check if we've already done one today
@@ -1633,7 +1636,7 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
-    this.startCamilleEncounter(currentEncounter + 1);
+    this.startCamilleEncounter(Math.min(currentEncounter + 1, 5));
   }
 
   /**
@@ -1682,6 +1685,7 @@ export class GameScene extends Phaser.Scene {
     const { includeManu, includeKish } = opts;
     this.camilleEraParkExitCount = 0;
     this.camilleEraParkExitTarget = 1 + (includeManu ? 1 : 0) + (includeKish ? 1 : 0);
+    this.kishCamilleSlowDownShown = false;
     const routes = buildCamilleEraCareRoutes((name) =>
       this.map.findObject("spawns", (o) => o.name === name),
     );

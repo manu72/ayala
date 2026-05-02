@@ -8,7 +8,7 @@
 
 ## Backstory
 
-Manu is Camille's partner. He was not a cat person when they met. He is now — quietly, practically, the way he is with most things. He comes on the evening circuit because Camille does, and because the cats have started to recognise him.
+Manu is Camille's partner. He was not a cat person when they met. He is now — quietly, practically, the way he is with most things. He comes on the evening circuit because Camille does, and because the cats have started to recognise him. Manu has made friends with Fluffy, and Fluffy, in turn, has decided that Manu is her human.
 
 ## Personality
 
@@ -27,7 +27,8 @@ Manu is Camille's partner. He was not a cat person when they met. He is now — 
 ## Knowledge
 
 - Knows Camille's routine and the cats Camille has flagged
-- Less sentimental about the colony than Camille; cares, but keeps distance
+- Less sentimental about the colony than Camille; cares, but keeps distance, except with Fluffy and the named cats.
+- Is especially sensitive to Tiger and has made friends with the old cat.
 - Aware that sudden movements scare cats and keeps his stance loose and slow
 
 ## Relationship to Mamma Cat
