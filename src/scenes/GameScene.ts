@@ -2588,7 +2588,8 @@ export class GameScene extends Phaser.Scene {
       routeLocalDetour: (from, to) => {
         const segment = routeHumanPath([from, to], navigationGrid);
         if (segment.path.length <= 1) return null;
-        return segment.path.slice(1);
+        const hops = segment.path.slice(1, -1);
+        return hops.length > 0 ? hops : null;
       },
       routeToExit: (from, exits) => {
         const nearest = this.nearestExitPoint(from, exits);

@@ -43,6 +43,7 @@ describe("human exit route wiring", () => {
     expect(gridSource).toContain("isExplorationCellBlocked");
     expect(routeConfigSource).toContain("routeLocalDetour: (from, to) => {");
     expect(routeConfigSource).toContain("routeHumanPath([from, to], navigationGrid)");
+    expect(routeConfigSource).toContain("segment.path.slice(1, -1)");
     expect(routeConfigSource).toContain("routeToExit: (from, exits) => {");
   });
 });

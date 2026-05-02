@@ -83,7 +83,8 @@ export interface HumanConfig {
   /**
    * Optional short reroute when the NPC is wedged against static geometry.
    * Scene supplies A* on the same clearance grid as {@link routeToExit}.
-   * Return intermediate waypoints only (caller already at `from`).
+   * Return intermediate hops only: exclude both `from` and the current
+   * target `to` (the NPC continues toward `to` after the queue is drained).
    */
   routeLocalDetour?: (
     from: { x: number; y: number },
