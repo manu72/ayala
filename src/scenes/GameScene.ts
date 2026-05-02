@@ -213,6 +213,8 @@ export class GameScene extends Phaser.Scene {
   private camilleEraParkExitCount = 0;
   /** How many spawned humans must exit before {@link onCamilleEraParkExit} tears down (1–3). */
   private camilleEraParkExitTarget = 1;
+  /** Defers care-route removal until after updateHumans finishes iterating. */
+  private camilleEraTeardownPending = false;
 
   /** NPC currently locked in dialogue with the player. */
   private engagedDialogueNPC: NPCCat | null = null;
@@ -1757,7 +1759,17 @@ export class GameScene extends Phaser.Scene {
   private onCamilleEraParkExit(): void {
     this.camilleEraParkExitCount += 1;
     if (this.camilleEraParkExitCount < this.camilleEraParkExitTarget) return;
+    this.camilleEraTeardownPending = true;
+    this.pendingCamilleEncounter = 0;
+    this.camilleEncounterActive = false;
+  }
+
+  /** Remove Camille-era route NPCs after the human update loop is no longer iterating. */
+  private flushCamilleEraTeardown(): void {
+    if (!this.camilleEraTeardownPending) return;
+    this.camilleEraTeardownPending = false;
     this.camilleEraParkExitCount = 0;
+    this.camilleEraParkExitTarget = 1;
     for (const npc of [this.camilleNPC, this.manuNPC, this.kishNPC]) {
       if (!npc) continue;
       const idx = this.humans.indexOf(npc);
@@ -1767,8 +1779,6 @@ export class GameScene extends Phaser.Scene {
     this.camilleNPC = null;
     this.manuNPC = null;
     this.kishNPC = null;
-    this.pendingCamilleEncounter = 0;
-    this.camilleEncounterActive = false;
   }
 
   /**
@@ -1790,6 +1800,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private cleanupCamilleNPCs(): void {
+    this.camilleEraTeardownPending = false;
     this.camilleEraParkExitCount = 0;
     this.camilleEraParkExitTarget = 1;
     this.kishCamilleSlowDownShown = false;
@@ -3273,6 +3284,8 @@ export class GameScene extends Phaser.Scene {
         human.applySteeringAvoidance(neighbours, avoidR);
       }
     }
+
+    this.flushCamilleEraTeardown();
 
     for (const dog of this.dogs) {
       dog.update(now, this.player, this.npcs, this.emotes, this);
