@@ -1611,8 +1611,9 @@ export class GameScene extends Phaser.Scene {
     if (this.camilleEncounterActive) return;
 
     const currentEncounter = (this.registry.get(StoryKeys.CAMILLE_ENCOUNTER) as number) ?? 0;
+    const encounter5Complete = this.registry.get(StoryKeys.ENCOUNTER_5_COMPLETE) === true;
+    const awaitingEncounter5Completion = currentEncounter >= 5 && !encounter5Complete;
     if (currentEncounter >= 5) {
-      const encounter5Complete = this.registry.get(StoryKeys.ENCOUNTER_5_COMPLETE) === true;
       if (encounter5Complete) {
         this.trySpawnCamilleAmbientEveningVisit();
         return;
@@ -1625,14 +1626,14 @@ export class GameScene extends Phaser.Scene {
 
     // Roll once per evening, not every periodic check
     if (this.camilleRollDay >= this.dayNight.dayCount) {
-      this.trySpawnCamilleAmbientEveningVisit();
+      if (!awaitingEncounter5Completion) this.trySpawnCamilleAmbientEveningVisit();
       return;
     }
     this.camilleRollDay = this.dayNight.dayCount;
 
     // 60% chance per eligible evening (100% for first encounter)
     if (currentEncounter > 0 && Math.random() > 0.6) {
-      this.trySpawnCamilleAmbientEveningVisit();
+      if (!awaitingEncounter5Completion) this.trySpawnCamilleAmbientEveningVisit();
       return;
     }
 
@@ -1764,6 +1765,7 @@ export class GameScene extends Phaser.Scene {
     this.camilleNPC = null;
     this.manuNPC = null;
     this.kishNPC = null;
+    this.pendingCamilleEncounter = 0;
     this.camilleEncounterActive = false;
   }
 
