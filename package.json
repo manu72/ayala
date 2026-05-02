@@ -1,7 +1,7 @@
 {
   "name": "ayala",
   "private": true,
-  "version": "0.3.8",
+  "version": "0.3.9",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -16,6 +16,8 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
+    "@types/easystarjs": "^0.1.29",
+    "easystarjs": "^0.4.4",
     "phaser": "^3.90.0"
   },
   "devDependencies": {

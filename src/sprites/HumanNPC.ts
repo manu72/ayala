@@ -63,9 +63,17 @@ export interface HumanConfig {
   waypointPauseMs?: number[];
   /**
    * Fired once when the NPC reaches the perimeter exit after
-   * {@link exitAfterRoute} (before {@link deactivate}).
+   * {@link exitAfterRoute}, after the NPC has been deactivated.
    */
   onExitParkComplete?: () => void;
+  /**
+   * Optional collision-aware route builder for the exit walk. The scene owns
+   * navigation data; HumanNPC only follows the returned waypoints.
+   */
+  routeToExit?: (
+    from: { x: number; y: number },
+    exits: ReadonlyArray<{ x: number; y: number }>,
+  ) => Array<{ x: number; y: number }>;
 }
 
 /**
@@ -152,6 +160,8 @@ export class HumanNPC extends BaseNPC {
 
   private exiting = false;
   private exitTarget: { x: number; y: number } | null = null;
+  private exitPath: Array<{ x: number; y: number }> = [];
+  private exitWaypoint = 0;
 
   // Between-loop "off-map" pause (see HumanConfig.loopPauseSec).
   private loopPausing = false;
@@ -536,6 +546,8 @@ export class HumanNPC extends BaseNPC {
     this.isActive = false;
     this.exiting = false;
     this.exitTarget = null;
+    this.exitPath = [];
+    this.exitWaypoint = 0;
     this.waypointPausing = false;
     this.waypointPauseTimer = 0;
     this.loopPausing = false;
@@ -570,7 +582,9 @@ export class HumanNPC extends BaseNPC {
         nearest = exit;
       }
     }
-    this.exitTarget = nearest;
+    this.exitPath = this.config.routeToExit?.({ x: this.x, y: this.y }, PARK_EXITS) ?? [nearest];
+    this.exitWaypoint = this.exitPath.length > 1 ? 1 : 0;
+    this.exitTarget = this.exitPath[this.exitWaypoint] ?? nearest;
   }
 
   private updateExiting(): void {
@@ -581,6 +595,12 @@ export class HumanNPC extends BaseNPC {
 
     const dist = Phaser.Math.Distance.Between(this.x, this.y, this.exitTarget.x, this.exitTarget.y);
     if (dist < 24) {
+      this.exitWaypoint += 1;
+      const nextTarget = this.exitPath[this.exitWaypoint];
+      if (nextTarget) {
+        this.exitTarget = nextTarget;
+        return;
+      }
       this.deactivate();
       this.config.onExitParkComplete?.();
       return;
