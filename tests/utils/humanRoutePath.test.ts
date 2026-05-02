@@ -42,6 +42,16 @@ describe("isCellLineWalkableOnGrid", () => {
     // but the segment touches blocked (1,0) and (0,1).
     expect(isCellLineWalkableOnGrid(grid, { x: 0, y: 0 }, { x: 1, y: 1 })).toBe(false);
   });
+
+  it("returns false on shallow diagonal (0,0)-(2,1) when (1,0) is blocked (supercover, not only 45°)", () => {
+    const grid = createNavigationGrid({
+      width: 3,
+      height: 2,
+      tileSize: 10,
+      isBlocked: (x, y) => x === 1 && y === 0,
+    });
+    expect(isCellLineWalkableOnGrid(grid, { x: 0, y: 0 }, { x: 2, y: 1 })).toBe(false);
+  });
 });
 
 describe("routeHumanPath", () => {
