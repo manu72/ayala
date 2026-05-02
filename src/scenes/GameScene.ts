@@ -480,6 +480,7 @@ export class GameScene extends Phaser.Scene {
     if (this.overheadLayer) {
       this.overheadLayer.setDepth(10);
     }
+    this.placePlaygroundCarabao();
     this.cacheShelterPoints();
 
     const spawnPoint = this.map.findObject("spawns", (obj) => obj.name === "spawn_mammacat");
@@ -800,6 +801,14 @@ export class GameScene extends Phaser.Scene {
     ) {
       this.time.delayedCall(500, () => this.startCamilleEncounter(5));
     }
+  }
+
+  private placePlaygroundCarabao(): void {
+    const playgroundPoint = this.map.findObject("spawns", (obj) => obj.name === "poi_playground");
+    const carabaoX = (playgroundPoint?.x ?? 22 * TILE_SIZE) + TILE_SIZE * 0.5;
+    const carabaoY = (playgroundPoint?.y ?? 31 * TILE_SIZE) + TILE_SIZE * 4;
+
+    this.add.image(carabaoX, carabaoY, "carabao_small").setOrigin(0.5, 1).setScale(0.5).setDepth(11);
   }
 
   // ──────────── Intro Cinematic ────────────
