@@ -211,6 +211,8 @@ export class GameScene extends Phaser.Scene {
   private camilleRollDay = 0;
   /** Counts Camille-era humans that reached the park perimeter after a care route. */
   private camilleEraParkExitCount = 0;
+  /** How many spawned humans must exit before {@link onCamilleEraParkExit} tears down (1–3). */
+  private camilleEraParkExitTarget = 1;
 
   /** NPC currently locked in dialogue with the player. */
   private engagedDialogueNPC: NPCCat | null = null;
@@ -1644,7 +1646,11 @@ export class GameScene extends Phaser.Scene {
     if (this.camilleNPC) return;
     const last = (this.registry.get(StoryKeys.CAMILLE_AMBIENT_DAWN_DAY) as number) ?? 0;
     if (last >= this.dayNight.dayCount) return;
-    this.spawnCamilleEraCareRouteNPCs();
+    const completedEnc = (this.registry.get(StoryKeys.CAMILLE_ENCOUNTER) as number) ?? 0;
+    this.spawnCamilleEraCareRouteNPCs({
+      includeManu: completedEnc >= 1,
+      includeKish: completedEnc >= 2,
+    });
     this.registry.set(StoryKeys.CAMILLE_AMBIENT_DAWN_DAY, this.dayNight.dayCount);
   }
 
@@ -1658,14 +1664,24 @@ export class GameScene extends Phaser.Scene {
     if (this.camilleNPC) return;
     const last = (this.registry.get(StoryKeys.CAMILLE_AMBIENT_EVENING_DAY) as number) ?? 0;
     if (last >= this.dayNight.dayCount) return;
-    this.spawnCamilleEraCareRouteNPCs();
+    const completedEnc = (this.registry.get(StoryKeys.CAMILLE_ENCOUNTER) as number) ?? 0;
+    this.spawnCamilleEraCareRouteNPCs({
+      includeManu: completedEnc >= 1,
+      includeKish: completedEnc >= 2,
+    });
     this.registry.set(StoryKeys.CAMILLE_AMBIENT_EVENING_DAY, this.dayNight.dayCount);
   }
 
-  /** Spawn Camille, Manu, and Kish on the shared Chapter 5+ care route. */
-  private spawnCamilleEraCareRouteNPCs(): void {
+  /**
+   * Spawn Camille-era humans on the Chapter 5+ care route.
+   * Manu appears from story encounter 2 onward (after encounter 1); Kish from encounter 3 onward (after encounter 2).
+   * Ambient callers pass flags from completed {@link StoryKeys.CAMILLE_ENCOUNTER}.
+   */
+  private spawnCamilleEraCareRouteNPCs(opts: { includeManu: boolean; includeKish: boolean }): void {
     if (!this.map) return;
+    const { includeManu, includeKish } = opts;
     this.camilleEraParkExitCount = 0;
+    this.camilleEraParkExitTarget = 1 + (includeManu ? 1 : 0) + (includeKish ? 1 : 0);
     const routes = buildCamilleEraCareRoutes((name) =>
       this.map.findObject("spawns", (o) => o.name === name),
     );
@@ -1692,38 +1708,48 @@ export class GameScene extends Phaser.Scene {
       waypointPauseMs: routes.camille.map((w) => w.pauseMs),
       ...routeBase,
     };
-    const manuConfig: HumanConfig = {
-      type: "manu",
-      speed: 35,
-      path: routes.manu.map((w) => ({ x: w.x, y: w.y })),
-      waypointPauseMs: routes.manu.map((w) => w.pauseMs),
-      ...routeBase,
-    };
-    const kishConfig: HumanConfig = {
-      type: "kish",
-      speed: 50,
-      path: routes.kish.map((w) => ({ x: w.x, y: w.y })),
-      waypointPauseMs: routes.kish.map((w) => w.pauseMs),
-      ...routeBase,
-    };
-
     const camille = new HumanNPC(this, camilleConfig);
-    const manu = new HumanNPC(this, manuConfig);
-    const kish = new HumanNPC(this, kishConfig);
     this.camilleNPC = camille;
-    this.manuNPC = manu;
-    this.kishNPC = kish;
-    for (const npc of [camille, manu, kish]) {
+    this.manuNPC = null;
+    this.kishNPC = null;
+    const toRegister: HumanNPC[] = [camille];
+
+    if (includeManu) {
+      const manuConfig: HumanConfig = {
+        type: "manu",
+        speed: 35,
+        path: routes.manu.map((w) => ({ x: w.x, y: w.y })),
+        waypointPauseMs: routes.manu.map((w) => w.pauseMs),
+        ...routeBase,
+      };
+      const manu = new HumanNPC(this, manuConfig);
+      this.manuNPC = manu;
+      toRegister.push(manu);
+    }
+    if (includeKish) {
+      const kishConfig: HumanConfig = {
+        type: "kish",
+        speed: 50,
+        path: routes.kish.map((w) => ({ x: w.x, y: w.y })),
+        waypointPauseMs: routes.kish.map((w) => w.pauseMs),
+        ...routeBase,
+      };
+      const kish = new HumanNPC(this, kishConfig);
+      this.kishNPC = kish;
+      toRegister.push(kish);
+    }
+
+    for (const npc of toRegister) {
       if (this.groundLayer) this.physics.add.collider(npc, this.groundLayer);
       if (this.objectsLayer) this.physics.add.collider(npc, this.objectsLayer);
       this.humans.push(npc);
     }
   }
 
-  /** After all three Camille-era humans reach the park exit, tear down refs. */
+  /** After every spawned Camille-era human reaches the park exit, tear down refs. */
   private onCamilleEraParkExit(): void {
     this.camilleEraParkExitCount += 1;
-    if (this.camilleEraParkExitCount < 3) return;
+    if (this.camilleEraParkExitCount < this.camilleEraParkExitTarget) return;
     this.camilleEraParkExitCount = 0;
     for (const npc of [this.camilleNPC, this.manuNPC, this.kishNPC]) {
       if (!npc) continue;
@@ -1757,6 +1783,7 @@ export class GameScene extends Phaser.Scene {
 
   private cleanupCamilleNPCs(): void {
     this.camilleEraParkExitCount = 0;
+    this.camilleEraParkExitTarget = 1;
     this.kishCamilleSlowDownShown = false;
     this.cancelBeat5Decision();
     this.beat5DecisionActive = false;
@@ -1795,7 +1822,10 @@ export class GameScene extends Phaser.Scene {
   private startCamilleEncounter(encounterNum: number): void {
     this.cleanupCamilleNPCs();
     this.camilleEncounterActive = true;
-    this.spawnCamilleEraCareRouteNPCs();
+    this.spawnCamilleEraCareRouteNPCs({
+      includeManu: encounterNum >= 2,
+      includeKish: encounterNum >= 3,
+    });
     this.registry.set(StoryKeys.CAMILLE_AMBIENT_EVENING_DAY, this.dayNight.dayCount);
     this.pendingCamilleEncounter = encounterNum;
   }
