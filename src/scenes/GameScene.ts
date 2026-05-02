@@ -2571,7 +2571,8 @@ export class GameScene extends Phaser.Scene {
       lingerWaypointIndex: routed.lingerWaypointIndex ?? config.lingerWaypointIndex,
       routeToExit: (from, exits) => {
         const nearest = this.nearestExitPoint(from, exits);
-        return nearest ? routeHumanPath([from, nearest], navigationGrid).path : [from];
+        if (!nearest) return [from];
+        return [from, ...routeHumanPath([from, nearest], navigationGrid).path];
       },
     };
   }
@@ -4173,8 +4174,9 @@ export class GameScene extends Phaser.Scene {
     this.snatcherSpawnChecked = true;
     if (Math.random() > 0.4) return;
     const snatcherCount = 1 + (Math.random() > 0.5 ? 1 : 0);
+    const navigationGrid = this.createHumanNavigationGrid();
     for (let i = 0; i < snatcherCount; i++) {
-      this.spawnSnatcher(i);
+      this.spawnSnatcher(i, false, navigationGrid);
     }
   }
 
@@ -4236,7 +4238,7 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  private spawnSnatcher(index: number, silent = false): void {
+  private spawnSnatcher(index: number, silent = false, navigationGrid = this.createHumanNavigationGrid()): void {
     // Snatchers patrol garden paths
     const patrolPaths = [
       [
@@ -4263,7 +4265,7 @@ export class GameScene extends Phaser.Scene {
       activePhases: ["night"],
       path,
     };
-    const snatcher = new HumanNPC(this, this.routeHumanConfig(config, this.createHumanNavigationGrid()));
+    const snatcher = new HumanNPC(this, this.routeHumanConfig(config, navigationGrid));
     snatcher.setTint(0x000000);
     if (this.groundLayer) this.physics.add.collider(snatcher, this.groundLayer);
     if (this.objectsLayer) this.physics.add.collider(snatcher, this.objectsLayer);

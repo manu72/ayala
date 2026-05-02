@@ -56,6 +56,26 @@ describe("routeHumanPath", () => {
     expect(result.waypointPauseMs?.slice(1, -1).every((pause) => pause === 0)).toBe(true);
   });
 
+  it("stops at the last reachable point when a segment has no route", () => {
+    const blocked = new Set(["1,0", "1,1", "1,2"]);
+    const grid = createNavigationGrid({
+      width: 3,
+      height: 3,
+      tileSize: 10,
+      isBlocked: (x, y) => blocked.has(`${x},${y}`),
+    });
+
+    const result = routeHumanPath(
+      [
+        { x: 5, y: 5 },
+        { x: 25, y: 5 },
+      ],
+      grid,
+    );
+
+    expect(result.path).toEqual([{ x: 5, y: 5 }]);
+  });
+
   it("expands Camille-era care routes into walkable adjacent tile waypoints on the shipped map", () => {
     const grid = navigationGridFromAtgMap();
     const routes = buildCamilleEraCareRoutes(findAtgObject);

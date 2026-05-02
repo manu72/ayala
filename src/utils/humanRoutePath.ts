@@ -74,10 +74,7 @@ export function routeHumanPath(
     const segment = findTilePath(grid, previousCell, targetCell);
 
     if (!segment || segment.length === 0) {
-      routedPath.push(cellToWorld(targetCell, grid));
-      if (pauseByIndex) pauseByIndex.push(options.waypointPauseMs?.[i] ?? 0);
-      mappedOriginalIndexes[i] = routedPath.length - 1;
-      continue;
+      break;
     }
 
     for (let j = 1; j < segment.length; j += 1) {
