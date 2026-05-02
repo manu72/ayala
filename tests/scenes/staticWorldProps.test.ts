@@ -12,12 +12,18 @@ describe("static world props", () => {
     const placementStart = gameSceneSource.indexOf("private placePlaygroundCarabao()");
     const placementEnd = gameSceneSource.indexOf("\n  private ", placementStart + 1);
     const placementSource = gameSceneSource.slice(placementStart, placementEnd);
+    const overheadDepthMatch = gameSceneSource.match(/this\.overheadLayer\.setDepth\((\d+)\)/);
+    const overheadDepth = Number(overheadDepthMatch?.[1]);
+    const sculptureDepths = [...placementSource.matchAll(/\.setDepth\((\d+)\)/g)].map((match) => Number(match[1]));
 
     expect(placementStart).toBeGreaterThanOrEqual(0);
+    expect(overheadDepth).toBe(10);
     expect(placementSource).toContain('this.add.image(carabaoX, carabaoY, "carabao_small")');
     expect(placementSource).toContain(".setOrigin(0.5, 1)");
     expect(placementSource).toContain(".setScale(0.5)");
-    expect(placementSource).toContain(".setDepth(11)");
+    expect(sculptureDepths).toEqual([4, 4]);
+    expect(sculptureDepths.every((depth) => depth < overheadDepth)).toBe(true);
+    expect(placementSource).not.toContain(".setDepth(11)");
     expect(placementSource).toContain("const hornbillX = carabaoX - TILE_SIZE * 3;");
     expect(placementSource).toContain("const hornbillY = carabaoY - TILE_SIZE * 3;");
     expect(placementSource).toContain('this.add.image(hornbillX, hornbillY, "hornbill_small")');

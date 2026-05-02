@@ -794,8 +794,8 @@ export class GameScene extends Phaser.Scene {
     const hornbillX = carabaoX - TILE_SIZE * 3;
     const hornbillY = carabaoY - TILE_SIZE * 3;
 
-    this.add.image(carabaoX, carabaoY, "carabao_small").setOrigin(0.5, 1).setScale(0.5).setDepth(11);
-    this.add.image(hornbillX, hornbillY, "hornbill_small").setOrigin(0.5, 1).setScale(0.3).setDepth(11);
+    this.add.image(carabaoX, carabaoY, "carabao_small").setOrigin(0.5, 1).setScale(0.5).setDepth(4);
+    this.add.image(hornbillX, hornbillY, "hornbill_small").setOrigin(0.5, 1).setScale(0.3).setDepth(4);
   }
 
   // ──────────── Intro Cinematic ────────────
