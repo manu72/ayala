@@ -105,8 +105,11 @@ const ZOOM_DURATION = 500;
 const HUMAN_ENGAGEMENT_COOLDOWN_MS = 5_000;
 const DUMPED_COMFORT_WINDOW_MS = 5_000;
 const DROPOFF_SUV_TEXTURE = "suv_small";
+const DROPOFF_COROLLA_TEXTURE = "corolla_small";
 const DROPOFF_SUV_DISPLAY_WIDTH = 72;
 const DROPOFF_SUV_DISPLAY_HEIGHT = 28;
+const DROPOFF_COROLLA_DISPLAY_WIDTH = 68;
+const DROPOFF_COROLLA_DISPLAY_HEIGHT = 28;
 const DROPOFF_SUV_TINT_CYCLE: ReadonlyArray<number | null> = [
   0x111111,
   0xffd43b,
@@ -115,6 +118,13 @@ const DROPOFF_SUV_TINT_CYCLE: ReadonlyArray<number | null> = [
   0x1c7ed6,
   null,
 ];
+
+interface DropoffVehicleOptions {
+  texture?: string;
+  displayWidth?: number;
+  displayHeight?: number;
+  tint?: number | null;
+}
 
 interface CatDialoguePersistenceSnapshot {
   timestamp: number;
@@ -809,14 +819,31 @@ export class GameScene extends Phaser.Scene {
     this.add.image(hornbillX, hornbillY, "hornbill_small").setOrigin(0.5, 1).setScale(0.3).setDepth(4);
   }
 
-  private tintForDumpingEvent(eventNum: number): number | null {
-    return DROPOFF_SUV_TINT_CYCLE[(eventNum - 1) % DROPOFF_SUV_TINT_CYCLE.length] ?? null;
+  private tintForSuvDropoff(sequenceIndex: number): number | null {
+    return DROPOFF_SUV_TINT_CYCLE[(sequenceIndex - 1) % DROPOFF_SUV_TINT_CYCLE.length] ?? null;
   }
 
-  private addDropoffVehicle(x: number, y: number, tint: number | null = null): Phaser.GameObjects.Image {
+  private vehicleOptionsForDumpingEvent(eventNum: number): DropoffVehicleOptions {
+    if (eventNum === 1) {
+      return {
+        texture: DROPOFF_COROLLA_TEXTURE,
+        displayWidth: DROPOFF_COROLLA_DISPLAY_WIDTH,
+        displayHeight: DROPOFF_COROLLA_DISPLAY_HEIGHT,
+      };
+    }
+
+    return { tint: this.tintForSuvDropoff(eventNum - 1) };
+  }
+
+  private addDropoffVehicle(x: number, y: number, options: DropoffVehicleOptions = {}): Phaser.GameObjects.Image {
+    const texture = options.texture ?? DROPOFF_SUV_TEXTURE;
+    const displayWidth = options.displayWidth ?? DROPOFF_SUV_DISPLAY_WIDTH;
+    const displayHeight = options.displayHeight ?? DROPOFF_SUV_DISPLAY_HEIGHT;
+    const tint = options.tint ?? null;
+
     const vehicle = this.add
-      .image(x, y, DROPOFF_SUV_TEXTURE)
-      .setDisplaySize(DROPOFF_SUV_DISPLAY_WIDTH, DROPOFF_SUV_DISPLAY_HEIGHT)
+      .image(x, y, texture)
+      .setDisplaySize(displayWidth, displayHeight)
       .setDepth(4);
 
     if (tint !== null) {
@@ -4421,8 +4448,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * Play a visible dumping event: SUV drives up, cat is placed near the road,
-   * SUV leaves, then narration fires because Mamma Cat witnessed it.
+   * Play a visible dumping event: vehicle drives up, cat is placed near the road,
+   * vehicle leaves, then narration fires because Mamma Cat witnessed it.
    *
    * `DUMPING_EVENTS_SEEN` and the colony count are persisted only inside
    * `showDumpingNarration`'s witness gate below. The sequence runs for
@@ -4447,7 +4474,7 @@ export class GameScene extends Phaser.Scene {
     const roadY = Math.min(Math.max(this.player.y, 400), 1900);
     const carStartX = roadX + 400;
 
-    const car = this.addDropoffVehicle(carStartX, roadY, this.tintForDumpingEvent(eventNum));
+    const car = this.addDropoffVehicle(carStartX, roadY, this.vehicleOptionsForDumpingEvent(eventNum));
 
     this.tweens.add({
       targets: car,
