@@ -733,6 +733,8 @@ export class HumanNPC extends BaseNPC {
     if (detour && detour.length > 0) {
       this.detourQueue = detour;
       this.stuckDetourFailures = 0;
+      const head = detour[0]!;
+      this.lastProgressSampleDistance = Phaser.Math.Distance.Between(this.x, this.y, head.x, head.y);
       return;
     }
 
