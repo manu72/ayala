@@ -11,7 +11,7 @@ import {
 } from "../../src/utils/humanRoutePath";
 
 describe("isCellLineWalkableOnGrid", () => {
-  it("returns true when every Bresenham cell on the segment is walkable", () => {
+  it("returns true when every supercover cell on the segment is walkable", () => {
     const grid = createNavigationGrid({
       width: 5,
       height: 1,
@@ -29,6 +29,18 @@ describe("isCellLineWalkableOnGrid", () => {
       isBlocked: (x, y) => x === 1 && y === 1,
     });
     expect(isCellLineWalkableOnGrid(grid, { x: 0, y: 0 }, { x: 2, y: 2 })).toBe(false);
+  });
+
+  it("returns false on a diagonal when only the grazed axial corner cells are blocked (supercover)", () => {
+    const grid = createNavigationGrid({
+      width: 2,
+      height: 2,
+      tileSize: 10,
+      isBlocked: (x, y) => (x === 1 && y === 0) || (x === 0 && y === 1),
+    });
+    // (0,0) and (1,1) are walkable; integer Bresenham only visits those two,
+    // but the segment touches blocked (1,0) and (0,1).
+    expect(isCellLineWalkableOnGrid(grid, { x: 0, y: 0 }, { x: 1, y: 1 })).toBe(false);
   });
 });
 

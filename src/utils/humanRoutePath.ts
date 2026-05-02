@@ -49,16 +49,17 @@ export function createNavigationGrid(input: NavigationGridInput): NavigationGrid
 }
 
 /**
- * Returns true if every tile centre on the Bresenham line between two cells
- * lies on walkable cells in {@link grid}. Used so simplified paths do not cut
- * across blocked corners after A* has found a safe polyline.
+ * Returns true if every grid cell the continuous segment between the two cell
+ * indices touches (supercover line — includes axial neighbours on diagonal
+ * steps) lies on walkable cells in {@link grid}. Used so simplified paths do
+ * not graze blocked corners after A* has found a safe polyline.
  */
 export function isCellLineWalkableOnGrid(
   grid: NavigationGrid,
   from: { x: number; y: number },
   to: { x: number; y: number },
 ): boolean {
-  for (const cell of bresenhamCells(from.x, from.y, to.x, to.y)) {
+  for (const cell of supercoverLineCells(from.x, from.y, to.x, to.y)) {
     if (!isWalkable(grid, cell.x, cell.y)) return false;
   }
   return true;
@@ -159,9 +160,9 @@ function findTilePath(
 
 /**
  * Collapse an A* cell polyline to a shorter sequence where each consecutive pair
- * has a fully walkable straight tile line (Bresenham). Avoids diagonal
- * shortcuts across blocked corners that only appeared after turn-point
- * reduction.
+ * has a fully walkable straight segment in tile space (see
+ * {@link supercoverLineCells}). Avoids diagonal shortcuts across blocked
+ * corners that only appeared after turn-point reduction.
  */
 function simplifySegmentGreedyVisible(
   grid: NavigationGrid,
@@ -184,9 +185,22 @@ function simplifySegmentGreedyVisible(
   return out;
 }
 
-/** Integer Bresenham line in tile space (inclusive of both endpoints). */
-function bresenhamCells(x0: number, y0: number, x1: number, y1: number): Array<{ x: number; y: number }> {
+/**
+ * Supercover line in tile indices: every cell the segment from (x0,y0) to
+ * (x1,y1) touches, inclusive. On a diagonal/tie step (both axes advance), also
+ * includes the two axial neighbours sharing that corner so walkability checks
+ * cannot approve lines that graze blocked corners.
+ */
+function supercoverLineCells(x0: number, y0: number, x1: number, y1: number): Array<{ x: number; y: number }> {
   const cells: Array<{ x: number; y: number }> = [];
+  const seen = new Set<string>();
+  const push = (cx: number, cy: number) => {
+    const k = `${cx},${cy}`;
+    if (seen.has(k)) return;
+    seen.add(k);
+    cells.push({ x: cx, y: cy });
+  };
+
   let x = x0;
   let y = y0;
   const dx = Math.abs(x1 - x0);
@@ -194,15 +208,22 @@ function bresenhamCells(x0: number, y0: number, x1: number, y1: number): Array<{
   const sx = x0 < x1 ? 1 : -1;
   const sy = y0 < y1 ? 1 : -1;
   let err = dx + dy;
+
   for (;;) {
-    cells.push({ x, y });
+    push(x, y);
     if (x === x1 && y === y1) break;
     const e2 = 2 * err;
-    if (e2 >= dy) {
+    const movX = e2 >= dy;
+    const movY = e2 <= dx;
+    if (movX && movY) {
+      push(x + sx, y);
+      push(x, y + sy);
+    }
+    if (movX) {
       err += dy;
       x += sx;
     }
-    if (e2 <= dx) {
+    if (movY) {
       err += dx;
       y += sy;
     }
