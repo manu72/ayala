@@ -30,21 +30,19 @@ describe("human exit route wiring", () => {
     expect(spawnSource).not.toContain("this.routeHumanConfig(config, this.createHumanNavigationGrid())");
   });
 
-  it("keeps the hand-authored male jogger loop out of route expansion", () => {
-    const spawnStart = gameSceneSource.indexOf("private spawnHumans()");
-    const spawnEnd = gameSceneSource.indexOf("\n  private ", spawnStart + 1);
-    const spawnHumansSource = gameSceneSource.slice(spawnStart, spawnEnd);
-    const maleJoggerStart = spawnHumansSource.indexOf('type: "jogger_male"');
-    const maleJoggerEnd = spawnHumansSource.indexOf("path: [", maleJoggerStart);
-    const maleJoggerConfigSource = spawnHumansSource.slice(maleJoggerStart, maleJoggerEnd);
+  it("wires local detour routing and clearance-aware human navigation grid", () => {
+    const gridStart = gameSceneSource.indexOf("private createHumanNavigationGrid()");
+    const gridEnd = gameSceneSource.indexOf("\n  private ", gridStart + 1);
+    const gridSource = gameSceneSource.slice(gridStart, gridEnd);
     const routeConfigStart = gameSceneSource.indexOf("private routeHumanConfig(");
     const routeConfigEnd = gameSceneSource.indexOf("\n  private ", routeConfigStart + 1);
     const routeConfigSource = gameSceneSource.slice(routeConfigStart, routeConfigEnd);
 
-    expect(maleJoggerStart).toBeGreaterThanOrEqual(0);
-    expect(maleJoggerConfigSource).toContain("routePath: false");
-    expect(routeConfigSource).toContain("const shouldRoutePath = config.routePath !== false;");
-    expect(routeConfigSource).toContain("path: routed?.path ?? config.path");
+    expect(gridStart).toBeGreaterThanOrEqual(0);
+    expect(gridSource).toContain("HUMAN_NAV_CLEARANCE_CHEBYSHEV_TILES");
+    expect(gridSource).toContain("isExplorationCellBlocked");
+    expect(routeConfigSource).toContain("routeLocalDetour: (from, to) => {");
+    expect(routeConfigSource).toContain("routeHumanPath([from, to], navigationGrid)");
     expect(routeConfigSource).toContain("routeToExit: (from, exits) => {");
   });
 });

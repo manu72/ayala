@@ -48,6 +48,22 @@ export function createNavigationGrid(input: NavigationGridInput): NavigationGrid
   return { width, height, tileSize: input.tileSize, cells };
 }
 
+/**
+ * Returns true if every tile centre on the Bresenham line between two cells
+ * lies on walkable cells in {@link grid}. Used so simplified paths do not cut
+ * across blocked corners after A* has found a safe polyline.
+ */
+export function isCellLineWalkableOnGrid(
+  grid: NavigationGrid,
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+): boolean {
+  for (const cell of bresenhamCells(from.x, from.y, to.x, to.y)) {
+    if (!isWalkable(grid, cell.x, cell.y)) return false;
+  }
+  return true;
+}
+
 export function routeHumanPath(
   waypoints: RoutePoint[],
   grid: NavigationGrid,
@@ -88,7 +104,7 @@ export function routeHumanPath(
       break;
     }
 
-    const simplifiedSegment = simplifyTileSegment(segment);
+    const simplifiedSegment = simplifySegmentGreedyVisible(grid, segment);
     for (let j = 1; j < simplifiedSegment.length; j += 1) {
       routedPath.push(cellToWorld(simplifiedSegment[j]!, grid));
       if (pauseByIndex) pauseByIndex.push(0);
@@ -141,29 +157,57 @@ function findTilePath(
   return result ?? null;
 }
 
-function simplifyTileSegment(segment: Array<{ x: number; y: number }>): Array<{ x: number; y: number }> {
+/**
+ * Collapse an A* cell polyline to a shorter sequence where each consecutive pair
+ * has a fully walkable straight tile line (Bresenham). Avoids diagonal
+ * shortcuts across blocked corners that only appeared after turn-point
+ * reduction.
+ */
+function simplifySegmentGreedyVisible(
+  grid: NavigationGrid,
+  segment: Array<{ x: number; y: number }>,
+): Array<{ x: number; y: number }> {
   if (segment.length <= 2) return segment;
-
-  const simplified: Array<{ x: number; y: number }> = [segment[0]!];
-  let previousDirection = directionBetween(segment[0]!, segment[1]!);
-
-  for (let i = 1; i < segment.length - 1; i += 1) {
-    const currentDirection = directionBetween(segment[i]!, segment[i + 1]!);
-    if (currentDirection.x !== previousDirection.x || currentDirection.y !== previousDirection.y) {
-      simplified.push(segment[i]!);
-      previousDirection = currentDirection;
+  const out: Array<{ x: number; y: number }> = [segment[0]!];
+  let anchorIndex = 0;
+  while (anchorIndex < segment.length - 1) {
+    let best = anchorIndex + 1;
+    for (let j = segment.length - 1; j > anchorIndex; j -= 1) {
+      if (isCellLineWalkableOnGrid(grid, segment[anchorIndex]!, segment[j]!)) {
+        best = j;
+        break;
+      }
     }
+    out.push(segment[best]!);
+    anchorIndex = best;
   }
-
-  simplified.push(segment[segment.length - 1]!);
-  return simplified;
+  return out;
 }
 
-function directionBetween(from: { x: number; y: number }, to: { x: number; y: number }): { x: number; y: number } {
-  return {
-    x: Math.sign(to.x - from.x),
-    y: Math.sign(to.y - from.y),
-  };
+/** Integer Bresenham line in tile space (inclusive of both endpoints). */
+function bresenhamCells(x0: number, y0: number, x1: number, y1: number): Array<{ x: number; y: number }> {
+  const cells: Array<{ x: number; y: number }> = [];
+  let x = x0;
+  let y = y0;
+  const dx = Math.abs(x1 - x0);
+  const dy = -Math.abs(y1 - y0);
+  const sx = x0 < x1 ? 1 : -1;
+  const sy = y0 < y1 ? 1 : -1;
+  let err = dx + dy;
+  for (;;) {
+    cells.push({ x, y });
+    if (x === x1 && y === y1) break;
+    const e2 = 2 * err;
+    if (e2 >= dy) {
+      err += dy;
+      x += sx;
+    }
+    if (e2 <= dx) {
+      err += dx;
+      y += sy;
+    }
+  }
+  return cells;
 }
 
 function nearestWalkableCell(grid: NavigationGrid, cell: { x: number; y: number }): { x: number; y: number } {

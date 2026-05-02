@@ -2,7 +2,35 @@ import { describe, expect, it } from "vitest";
 import atgMap from "../../public/assets/tilemaps/atg.json";
 import { CAMILLE_CARE_ROUTE_ENTRY_BLACKY_PAUSE_MS } from "../../src/config/gameplayConstants";
 import { buildCamilleEraCareRoutes } from "../../src/utils/camilleCareRoute";
-import { createNavigationGrid, routeHumanPath, type NavigationGrid, type RoutePoint } from "../../src/utils/humanRoutePath";
+import {
+  createNavigationGrid,
+  isCellLineWalkableOnGrid,
+  routeHumanPath,
+  type NavigationGrid,
+  type RoutePoint,
+} from "../../src/utils/humanRoutePath";
+
+describe("isCellLineWalkableOnGrid", () => {
+  it("returns true when every Bresenham cell on the segment is walkable", () => {
+    const grid = createNavigationGrid({
+      width: 5,
+      height: 1,
+      tileSize: 10,
+      isBlocked: () => false,
+    });
+    expect(isCellLineWalkableOnGrid(grid, { x: 0, y: 0 }, { x: 4, y: 0 })).toBe(true);
+  });
+
+  it("returns false when the straight tile line crosses a blocked cell", () => {
+    const grid = createNavigationGrid({
+      width: 3,
+      height: 3,
+      tileSize: 10,
+      isBlocked: (x, y) => x === 1 && y === 1,
+    });
+    expect(isCellLineWalkableOnGrid(grid, { x: 0, y: 0 }, { x: 2, y: 2 })).toBe(false);
+  });
+});
 
 describe("routeHumanPath", () => {
   it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])(
