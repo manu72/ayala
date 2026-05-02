@@ -187,15 +187,26 @@ describe("routeHumanPath", () => {
 function navigationGridFromAtgMap(): NavigationGrid {
   const ground = layerNamed("ground");
   const objects = layerNamed("objects");
-  const tileset = atgMap.tilesets[0];
-  if (!tileset || !Array.isArray(tileset.tiles)) {
-    throw new Error("Missing ATG tileset");
+  if (!Array.isArray(atgMap.tilesets) || atgMap.tilesets.length === 0) {
+    throw new Error("Missing ATG tilesets");
   }
-  const collidingGids = new Set(
-    tileset.tiles
-      .filter((tile) => tile.properties?.some((property) => property.name === "collides" && property.value === true))
-      .map((tile) => tile.id + tileset.firstgid),
-  );
+  const collidingGids = new Set<number>();
+  let hasTileMetadata = false;
+
+  for (const tileset of atgMap.tilesets) {
+    if (!tileset || !Array.isArray(tileset.tiles)) continue;
+    hasTileMetadata = true;
+
+    for (const tile of tileset.tiles) {
+      if (tile.properties?.some((property) => property.name === "collides" && property.value === true)) {
+        collidingGids.add(tile.id + tileset.firstgid);
+      }
+    }
+  }
+
+  if (!hasTileMetadata) {
+    throw new Error("Missing ATG tileset tile metadata");
+  }
 
   return createNavigationGrid({
     width: atgMap.width,
