@@ -4,11 +4,11 @@
 
 - Species: cat
 - Age: adult
-- Appearance: confident, tail-up near the pyramid steps / shops
+- Appearance: confident, tail-up near the pyramid steps / Starbucks / The Shops
 
 ## Backstory
 
-Jayco treats the steps like a living room. He knows vendors, scraps, and gossip — and he watches the guard so others do not have to learn the hard way.
+Jayco treats the steps like a living room. He knows vendors, scraps, and gossip — and he watches the guard so others do not have to learn the hard way. Jayco was originally rescued as a kitten from outside the Jayco store across Paseo de Roxas 6 months ago by Manu and Camille. He was starving when they found him and they fed him and nursed him back to health. Jayco is independent but always hopes that Manu and Camille will take him and Jayco Jr home eventually.
 
 ## Personality
 
