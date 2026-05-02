@@ -8,6 +8,10 @@ describe("static world props", () => {
     expect(bootSceneSource).toContain('this.load.image("hornbill_small", "assets/sprites/hornbill_small.png")');
   });
 
+  it("preloads the SUV sprite for drop-off vehicle sequences", () => {
+    expect(bootSceneSource).toContain('this.load.image("suv_small", "assets/sprites/suv_small.png")');
+  });
+
   it("places the carabao and hornbill without adding physics or collision", () => {
     const placementStart = gameSceneSource.indexOf("private placePlaygroundCarabao()");
     const placementEnd = gameSceneSource.indexOf("\n  private ", placementStart + 1);
@@ -30,5 +34,24 @@ describe("static world props", () => {
     expect(placementSource).toContain(".setScale(0.3)");
     expect(placementSource).not.toContain("physics.add.existing");
     expect(placementSource).not.toContain("physics.add.collider");
+  });
+
+  it("uses the SUV image helper instead of generated placeholder car textures", () => {
+    const introStart = gameSceneSource.indexOf("private startIntroCinematic(");
+    const introEnd = gameSceneSource.indexOf("\n  private ", introStart + 1);
+    const introSource = gameSceneSource.slice(introStart, introEnd);
+    const dumpingStart = gameSceneSource.indexOf("private playDumpingSequence(");
+    const dumpingEnd = gameSceneSource.indexOf("\n  private ", dumpingStart + 1);
+    const dumpingSource = gameSceneSource.slice(dumpingStart, dumpingEnd);
+
+    expect(introStart).toBeGreaterThanOrEqual(0);
+    expect(dumpingStart).toBeGreaterThanOrEqual(0);
+    expect(gameSceneSource).toContain('const DROPOFF_SUV_TEXTURE = "suv_small";');
+    expect(gameSceneSource).toContain("private addDropoffVehicle(");
+    expect(gameSceneSource).not.toContain("generateCarTextures");
+    expect(gameSceneSource).not.toContain("car_closed");
+    expect(gameSceneSource).not.toContain("car_open");
+    expect(introSource).toContain("this.addDropoffVehicle(carOffscreenX, roadY)");
+    expect(dumpingSource).toContain("this.addDropoffVehicle(carStartX, roadY)");
   });
 });

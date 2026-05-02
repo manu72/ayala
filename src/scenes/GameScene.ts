@@ -104,6 +104,9 @@ const PEEK_ZOOM = 0.8;
 const ZOOM_DURATION = 500;
 const HUMAN_ENGAGEMENT_COOLDOWN_MS = 5_000;
 const DUMPED_COMFORT_WINDOW_MS = 5_000;
+const DROPOFF_SUV_TEXTURE = "suv_small";
+const DROPOFF_SUV_DISPLAY_WIDTH = 72;
+const DROPOFF_SUV_DISPLAY_HEIGHT = 28;
 
 interface CatDialoguePersistenceSnapshot {
   timestamp: number;
@@ -798,6 +801,13 @@ export class GameScene extends Phaser.Scene {
     this.add.image(hornbillX, hornbillY, "hornbill_small").setOrigin(0.5, 1).setScale(0.3).setDepth(4);
   }
 
+  private addDropoffVehicle(x: number, y: number): Phaser.GameObjects.Image {
+    return this.add
+      .image(x, y, DROPOFF_SUV_TEXTURE)
+      .setDisplaySize(DROPOFF_SUV_DISPLAY_WIDTH, DROPOFF_SUV_DISPLAY_HEIGHT)
+      .setDepth(4);
+  }
+
   // ──────────── Intro Cinematic ────────────
 
   private startIntroCinematic(spawnX: number, spawnY: number): void {
@@ -811,7 +821,6 @@ export class GameScene extends Phaser.Scene {
     playerBody?.setEnable(false);
 
     this.cameras.main.centerOn(spawnX, spawnY);
-    this.generateCarTextures();
 
     const screenW = this.cameras.main.width;
     const screenH = this.cameras.main.height;
@@ -869,7 +878,7 @@ export class GameScene extends Phaser.Scene {
     const carOffscreenX = spawnX + 400;
     const carStopX = spawnX + 24;
 
-    const car = this.add.image(carOffscreenX, roadY, "car_closed").setDepth(4);
+    const car = this.addDropoffVehicle(carOffscreenX, roadY);
 
     this.queueIntroDelayed(4500, () => {
       this.queueIntroTween({
@@ -880,18 +889,10 @@ export class GameScene extends Phaser.Scene {
       });
     });
 
-    this.queueIntroDelayed(7000, () => {
-      car.setTexture("car_open");
-    });
-
     this.queueIntroDelayed(7500, () => {
       this.player.setPosition(carStopX - 20, roadY - 4);
       this.player.setVisible(true);
       this.player.enterForcedCrouchPose();
-    });
-
-    this.queueIntroDelayed(8500, () => {
-      car.setTexture("car_closed");
     });
 
     this.queueIntroDelayed(9000, () => {
@@ -955,35 +956,6 @@ export class GameScene extends Phaser.Scene {
       /* storage may be unavailable in some contexts */
     }
     this.registry.set(StoryKeys.INTRO_SEEN, true);
-  }
-
-  private generateCarTextures(): void {
-    if (this.textures.exists("car_closed")) return;
-
-    const g = this.make.graphics({ x: 0, y: 0 });
-
-    g.fillStyle(0x2a2a3a);
-    g.fillRoundedRect(0, 2, 48, 20, 3);
-    g.fillStyle(0x111111);
-    g.fillCircle(10, 24, 4);
-    g.fillCircle(38, 24, 4);
-    g.fillStyle(0x445566);
-    g.fillRect(28, 4, 12, 8);
-    g.generateTexture("car_closed", 48, 28);
-
-    g.clear();
-    g.fillStyle(0x2a2a3a);
-    g.fillRoundedRect(0, 2, 48, 20, 3);
-    g.fillStyle(0x111111);
-    g.fillCircle(10, 24, 4);
-    g.fillCircle(38, 24, 4);
-    g.fillStyle(0x445566);
-    g.fillRect(28, 4, 12, 8);
-    g.fillStyle(0x2a2a3a);
-    g.fillRect(22, 10, 2, 12);
-    g.generateTexture("car_open", 48, 28);
-
-    g.destroy();
   }
 
   setTouchMovementIntent(intent: MovementIntent): void {
@@ -4431,8 +4403,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * Play a visible dumping event: car drives up, door opens, cat placed,
-   * car leaves, then narration fires because Mamma Cat witnessed it.
+   * Play a visible dumping event: SUV drives up, cat is placed near the road,
+   * SUV leaves, then narration fires because Mamma Cat witnessed it.
    *
    * `DUMPING_EVENTS_SEEN` and the colony count are persisted only inside
    * `showDumpingNarration`'s witness gate below. The sequence runs for
@@ -4448,7 +4420,6 @@ export class GameScene extends Phaser.Scene {
    */
   private playDumpingSequence(eventNum: number): void {
     this.dumpingInProgress = true;
-    this.generateCarTextures();
 
     const hud = this.scene.get("HUDScene") as HUDScene | undefined;
     hud?.pulseEdge(0x221100, 0.3, 2500);
@@ -4458,7 +4429,7 @@ export class GameScene extends Phaser.Scene {
     const roadY = Math.min(Math.max(this.player.y, 400), 1900);
     const carStartX = roadX + 400;
 
-    const car = this.add.image(carStartX, roadY, "car_closed").setDepth(4);
+    const car = this.addDropoffVehicle(carStartX, roadY);
 
     this.tweens.add({
       targets: car,
@@ -4466,7 +4437,6 @@ export class GameScene extends Phaser.Scene {
       duration: 2000,
       ease: "Cubic.easeOut",
       onComplete: () => {
-        car.setTexture("car_open");
         this.time.delayedCall(500, () => {
           const dumpedCat = this.addBackgroundCat(roadX - 20, roadY - 4);
           if (dumpedCat) {
@@ -4475,7 +4445,6 @@ export class GameScene extends Phaser.Scene {
           }
 
           this.time.delayedCall(500, () => {
-            car.setTexture("car_closed");
             this.time.delayedCall(300, () => {
               this.tweens.add({
                 targets: car,
