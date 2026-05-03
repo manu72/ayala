@@ -276,7 +276,7 @@ const KISH_PROFILE: SpriteProfile = {
   },
 };
 
-// Snatcher: reuses Manu's directional sheets, tinted solid black in GameScene.
+// Snatcher: dedicated 68x68 hooded figure sheets, no scene tint.
 const SNATCHER_PROFILE: SpriteProfile = {
   key: "snatcher",
   cols: 8,
@@ -286,11 +286,11 @@ const SNATCHER_PROFILE: SpriteProfile = {
   bodyH: 18,
   scale: 0.9,
   directionalKeys: {
-    walkDown: "manu_walk_s",
-    walkLeft: "manu_walk_w",
-    walkRight: "manu_walk_e",
-    walkUp: "manu_walk_n",
-    idle: "manu_stand",
+    walkDown: "snatcher_walk_s",
+    walkLeft: "snatcher_walk_w",
+    walkRight: "snatcher_walk_e",
+    walkUp: "snatcher_walk_n",
+    idle: "snatcher_stand",
   },
   anims: {
     walkDown: { row: 0, count: 8 },

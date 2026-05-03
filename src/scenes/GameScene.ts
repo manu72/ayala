@@ -4288,7 +4288,6 @@ export class GameScene extends Phaser.Scene {
       path,
     };
     const snatcher = new HumanNPC(this, this.routeHumanConfig(config, navigationGrid));
-    snatcher.setTint(0x000000);
     if (this.groundLayer) this.physics.add.collider(snatcher, this.groundLayer);
     if (this.objectsLayer) this.physics.add.collider(snatcher, this.objectsLayer);
     this.snatchers.push(snatcher);
