@@ -803,6 +803,36 @@ describe('HumanNPC — stuck recovery + obstacle-safe steering', () => {
     expect(detour[0]).toEqual({ x: 80, y: 0 })
   })
 
+  it('merges follow-up detour when the new path shares the current detour head (keeps remaining hops)', () => {
+    let n = 0
+    const routeLocalDetour = vi.fn(() => {
+      n += 1
+      if (n === 1) return [{ x: 50, y: 0 }, { x: 80, y: 0 }]
+      return [{ x: 50, y: 0 }, { x: 55, y: 5 }]
+    })
+    const { npc } = makeHuman({
+      type: 'jogger',
+      activePhases: ['day'],
+      speed: 50,
+      path: [
+        { x: 0, y: 0 },
+        { x: 500, y: 0 },
+      ],
+      routeLocalDetour,
+    })
+    npc.setPhase('day')
+    for (let guard = 0; routeLocalDetour.mock.calls.length < 2 && guard < 500; guard += 1) {
+      npc.update(200)
+    }
+    const detour = (npc as unknown as { detourQueue: Array<{ x: number; y: number }> }).detourQueue
+    expect(detour).toEqual([
+      { x: 50, y: 0 },
+      { x: 55, y: 5 },
+      { x: 80, y: 0 },
+    ])
+    expect(routeLocalDetour).toHaveBeenCalledTimes(2)
+  })
+
   it('after repeated failed detours, advances the macro waypoint (last resort)', () => {
     const routeLocalDetour = vi.fn(() => null as Array<{ x: number; y: number }> | null)
     const { npc } = makeHuman({

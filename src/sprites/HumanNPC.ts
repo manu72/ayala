@@ -731,9 +731,30 @@ export class HumanNPC extends BaseNPC {
 
     const detour = this.config.routeLocalDetour?.({ x: this.x, y: this.y }, target);
     if (detour && detour.length > 0) {
-      this.detourQueue = detour;
+      const newHead = detour[0]!;
+      const sameHeadAsCurrent =
+        this.detourQueue.length > 0 &&
+        newHead.x === this.detourQueue[0]!.x &&
+        newHead.y === this.detourQueue[0]!.y;
+      if (sameHeadAsCurrent) {
+        const tail = this.detourQueue.slice(1);
+        let merged = [...detour];
+        if (
+          merged.length > 0 &&
+          tail.length > 0 &&
+          merged[merged.length - 1]!.x === tail[0]!.x &&
+          merged[merged.length - 1]!.y === tail[0]!.y
+        ) {
+          merged = [...merged, ...tail.slice(1)];
+        } else {
+          merged = [...merged, ...tail];
+        }
+        this.detourQueue = merged;
+      } else {
+        this.detourQueue = detour;
+      }
       this.stuckDetourFailures = 0;
-      const head = detour[0]!;
+      const head = this.detourQueue[0]!;
       this.lastProgressSampleDistance = Phaser.Math.Distance.Between(this.x, this.y, head.x, head.y);
       return;
     }
