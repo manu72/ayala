@@ -26,9 +26,12 @@ export class FallbackDialogueService implements DialogueService {
     request: DialogueRequest,
     callOpts?: AIDialogueCallOptions,
   ): Promise<DialogueResponse> {
+    const callerOwnsScriptedFallback = request.encounterBeat !== undefined;
     const scripted = this.secondary as ScriptedFirstDialogueService;
-    const unplayedScripted = await scripted.getUnplayedDialogue?.(request);
-    if (unplayedScripted) return unplayedScripted;
+    if (!callerOwnsScriptedFallback) {
+      const unplayedScripted = await scripted.getUnplayedDialogue?.(request);
+      if (unplayedScripted) return unplayedScripted;
+    }
 
     try {
       // Narrow: only AIDialogueService consumes callOpts. ScriptedDialogueService's
@@ -60,6 +63,10 @@ export class FallbackDialogueService implements DialogueService {
         (err instanceof Error && err.name === "AbortError");
       if (isAbort && callOpts?.signal?.aborted) {
         console.debug("[Dialogue] AI aborted by caller; rethrowing", err);
+        throw err;
+      }
+      if (callerOwnsScriptedFallback) {
+        console.debug("[Dialogue] AI failed during encounter beat; caller will use authored fallback", err);
         throw err;
       }
       if (isAbort) {

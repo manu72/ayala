@@ -10,7 +10,8 @@ export type HumanType =
   | "camille"
   | "manu"
   | "kish"
-  | "snatcher";
+  | "snatcher"
+  | "snatcher2";
 
 export interface SpriteProfile {
   key: string;
@@ -276,30 +277,35 @@ const KISH_PROFILE: SpriteProfile = {
   },
 };
 
-// Snatcher: dedicated 68x68 hooded figure sheets, no scene tint.
-const SNATCHER_PROFILE: SpriteProfile = {
-  key: "snatcher",
-  cols: 8,
-  frameW: 68,
-  frameH: 68,
-  bodyW: 20,
-  bodyH: 18,
-  scale: 0.9,
-  directionalKeys: {
-    walkDown: "snatcher_walk_s",
-    walkLeft: "snatcher_walk_w",
-    walkRight: "snatcher_walk_e",
-    walkUp: "snatcher_walk_n",
-    idle: "snatcher_stand",
-  },
-  anims: {
-    walkDown: { row: 0, count: 8 },
-    walkRight: { row: 0, count: 8 },
-    walkLeft: { row: 0, count: 8 },
-    walkUp: { row: 0, count: 8 },
-    idle: { row: 0, count: 1 },
-  },
-};
+function createSnatcherProfile(key: "snatcher" | "snatcher2", texturePrefix = key): SpriteProfile {
+  return {
+    key,
+    cols: 8,
+    frameW: 68,
+    frameH: 68,
+    bodyW: 20,
+    bodyH: 18,
+    scale: 0.9,
+    directionalKeys: {
+      walkDown: `${texturePrefix}_walk_s`,
+      walkLeft: `${texturePrefix}_walk_w`,
+      walkRight: `${texturePrefix}_walk_e`,
+      walkUp: `${texturePrefix}_walk_n`,
+      idle: `${texturePrefix}_stand`,
+    },
+    anims: {
+      walkDown: { row: 0, count: 8 },
+      walkRight: { row: 0, count: 8 },
+      walkLeft: { row: 0, count: 8 },
+      walkUp: { row: 0, count: 8 },
+      idle: { row: 0, count: 1 },
+    },
+  };
+}
+
+// Snatchers: dedicated 68x68 hooded figure sheets, no scene tint.
+const SNATCHER_PROFILE = createSnatcherProfile("snatcher");
+const SNATCHER2_PROFILE = createSnatcherProfile("snatcher2");
 
 export function profileForType(type: HumanType): SpriteProfile {
   switch (type) {
@@ -321,6 +327,8 @@ export function profileForType(type: HumanType): SpriteProfile {
       return KISH_PROFILE;
     case "snatcher":
       return SNATCHER_PROFILE;
+    case "snatcher2":
+      return SNATCHER2_PROFILE;
     default: {
       const _exhaustive: never = type;
       throw new Error(`Unhandled HumanType: ${_exhaustive}`);

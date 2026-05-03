@@ -32,7 +32,7 @@ describe("human spawn policy", () => {
   });
 
   it("does not alter non-feeder human phases", () => {
-    for (const type of ["jogger", "dogwalker", "camille", "manu", "kish", "snatcher"] as const) {
+    for (const type of ["jogger", "dogwalker", "camille", "manu", "kish", "snatcher", "snatcher2"] as const) {
       expect(getEffectiveHumanPhase(type, "dawn", 1)).toBe("dawn");
       expect(getEffectiveHumanPhase(type, "evening", 2)).toBe("evening");
       expect(getEffectiveHumanPhase(type, "night", 1)).toBe("night");

@@ -54,6 +54,8 @@ describe('profileForType', () => {
     camille: 'camille',
     manu: 'manu',
     kish: 'kish',
+    snatcher: 'snatcher',
+    snatcher2: 'snatcher2',
   }
 
   for (const [type, expectedKey] of Object.entries(expectedKeys)) {
@@ -70,7 +72,18 @@ describe('profileForType', () => {
   })
 
   it('all profiles have required shape fields', () => {
-    const types = ['jogger', 'jogger_male', 'feeder', 'ben', 'dogwalker', 'camille', 'manu', 'kish'] as const
+    const types = [
+      'jogger',
+      'jogger_male',
+      'feeder',
+      'ben',
+      'dogwalker',
+      'camille',
+      'manu',
+      'kish',
+      'snatcher',
+      'snatcher2',
+    ] as const
     for (const type of types) {
       const profile = profileForType(type)
       expect(typeof profile.key).toBe('string')
@@ -169,7 +182,18 @@ describe('profileForType', () => {
   })
 
   it('profiles with directionalKeys have the required direction textures', () => {
-    const types = ['jogger', 'jogger_male', 'dogwalker', 'feeder', 'ben', 'camille', 'manu', 'kish'] as const
+    const types = [
+      'jogger',
+      'jogger_male',
+      'dogwalker',
+      'feeder',
+      'ben',
+      'camille',
+      'manu',
+      'kish',
+      'snatcher',
+      'snatcher2',
+    ] as const
     for (const type of types) {
       const profile = profileForType(type)
       expect(profile.directionalKeys).toBeDefined()
@@ -183,6 +207,35 @@ describe('profileForType', () => {
 
   it('legacy row-based jogger sheet is no longer used by HumanType jogger', () => {
     expect(profileForType('jogger').directionalKeys).toBeDefined()
+  })
+
+  it('snatcher variants use separate animation and texture keys', () => {
+    expect(profileForType('snatcher')).toMatchObject({
+      key: 'snatcher',
+      frameW: 68,
+      frameH: 68,
+      scale: 0.9,
+      directionalKeys: {
+        walkDown: 'snatcher_walk_s',
+        walkLeft: 'snatcher_walk_w',
+        walkRight: 'snatcher_walk_e',
+        walkUp: 'snatcher_walk_n',
+        idle: 'snatcher_stand',
+      },
+    })
+    expect(profileForType('snatcher2')).toMatchObject({
+      key: 'snatcher2',
+      frameW: 68,
+      frameH: 68,
+      scale: 0.9,
+      directionalKeys: {
+        walkDown: 'snatcher2_walk_s',
+        walkLeft: 'snatcher2_walk_w',
+        walkRight: 'snatcher2_walk_e',
+        walkUp: 'snatcher2_walk_n',
+        idle: 'snatcher2_stand',
+      },
+    })
   })
 })
 
@@ -300,6 +353,30 @@ describe('createSpriteProfileAnimations', () => {
     expect(store.get('ben-crouch-right')?.frames).toEqual(walkFrames('ben_crouch_e', 5))
     expect(store.get('ben-crouch-left')?.repeat).toBe(0)
     expect(store.get('ben-crouch-right')?.repeat).toBe(0)
+  })
+
+  it('directional (snatcher2): registers animation keys against second snatcher textures', () => {
+    const { scene, store } = buildAnimScene()
+    const profile = profileForType('snatcher2')
+    createSpriteProfileAnimations(scene, profile)
+
+    const walkFrames = (tex: string, count: number) =>
+      Array.from({ length: count }, (_, i) => ({ key: tex, frame: i }))
+
+    expect(new Set(store.keys())).toEqual(
+      new Set([
+        'snatcher2-walk-down',
+        'snatcher2-walk-left',
+        'snatcher2-walk-right',
+        'snatcher2-walk-up',
+        'snatcher2-idle',
+      ]),
+    )
+    expect(store.get('snatcher2-walk-down')?.frames).toEqual(walkFrames('snatcher2_walk_s', 8))
+    expect(store.get('snatcher2-walk-left')?.frames).toEqual(walkFrames('snatcher2_walk_w', 8))
+    expect(store.get('snatcher2-walk-right')?.frames).toEqual(walkFrames('snatcher2_walk_e', 8))
+    expect(store.get('snatcher2-walk-up')?.frames).toEqual(walkFrames('snatcher2_walk_n', 8))
+    expect(store.get('snatcher2-idle')?.frames).toEqual(walkFrames('snatcher2_stand', 1))
   })
 
   it('duplicate call: early exit when idle exists; no extra creates or generateFrameNumbers', () => {

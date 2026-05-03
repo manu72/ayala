@@ -589,6 +589,65 @@ describe("FallbackDialogueService", () => {
     expect(primary.getDialogue).toHaveBeenCalled();
   });
 
+  it("does not let scripted-first dialogue intercept encounter beat AI", async () => {
+    const primary = {
+      getDialogue: vi.fn().mockResolvedValue({ lines: ["beat ai"] }),
+    };
+    const secondary = new ScriptedDialogueService({
+      Camille: [
+        {
+          id: "camille_return",
+          condition: () => true,
+          response: { lines: ["Generic Camille return."] },
+        },
+      ],
+    });
+    const fb = new FallbackDialogueService(primary, secondary);
+    const req = baseReq();
+    req.speaker = "Camille";
+    req.speakerType = "human";
+    req.conversationHistory = [{ timestamp: 1, speaker: "Camille", text: "Earlier ambient line." }];
+    req.encounterBeat = {
+      kind: "camille_encounter",
+      n: 2,
+      objective: "Places a treat and waits without crowding Mamma Cat.",
+    };
+
+    const out = await fb.getDialogue(req);
+
+    expect(out.lines).toEqual(["beat ai"]);
+    expect(primary.getDialogue).toHaveBeenCalled();
+  });
+
+  it("rethrows encounter beat AI failures so GameScene can use authored beat fallback", async () => {
+    const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
+    const primary = {
+      getDialogue: vi.fn().mockRejectedValue(new Error("network")),
+    };
+    const secondary = new ScriptedDialogueService({
+      Camille: [
+        {
+          id: "camille_return",
+          condition: () => true,
+          response: { lines: ["Generic Camille return."] },
+        },
+      ],
+    });
+    const fb = new FallbackDialogueService(primary, secondary);
+    const req = baseReq();
+    req.speaker = "Camille";
+    req.speakerType = "human";
+    req.conversationHistory = [{ timestamp: 1, speaker: "Camille", text: "Earlier ambient line." }];
+    req.encounterBeat = {
+      kind: "camille_encounter",
+      n: 3,
+      objective: "Slow blink trust exchange.",
+    };
+
+    await expect(fb.getDialogue(req)).rejects.toThrow("network");
+    debug.mockRestore();
+  });
+
   it("does not replay an exhausted script when AI fails", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const primary = {
