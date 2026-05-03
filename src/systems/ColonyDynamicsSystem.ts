@@ -150,7 +150,16 @@ export class ColonyDynamicsSystem {
    */
   tick(): void {
     if (this.scene.dialogue.isActive || this.dumpingInProgressFlag) return;
-    const dumpingSeen = (this.scene.registry.get(StoryKeys.DUMPING_EVENTS_SEEN) as number) ?? 0;
+    // Registry values are persisted through save/load and typed as `unknown`.
+    // Normalise defensively so a corrupt/edited save (NaN, negative, non-
+    // finite, string) can't silently wedge the dumping state machine —
+    // matches the pattern used for `CATS_SNATCHED`, `PLAYER_SNATCHED_COUNT`,
+    // and `COLLAPSE_COUNT` elsewhere.
+    const rawDumpingSeen = this.scene.registry.get(StoryKeys.DUMPING_EVENTS_SEEN);
+    const dumpingSeen =
+      typeof rawDumpingSeen === "number" && Number.isFinite(rawDumpingSeen) && rawDumpingSeen >= 0
+        ? Math.floor(rawDumpingSeen)
+        : 0;
     const chapter = this.scene.chapters.chapter;
 
     if (this.dumpingArmed === 0) {

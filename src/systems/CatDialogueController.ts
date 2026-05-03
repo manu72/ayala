@@ -355,12 +355,17 @@ export class CatDialogueController {
       });
     } catch (err) {
       console.error("[CatDialogueController] requestDialogue failed:", err);
-      cat.disengageDialogue();
-      // Only clear engagement + dismiss the dialogue if WE own it. The
-      // error may have fired before engageDialogue (no dialogue to
-      // dismiss), or a concurrent UI path could be showing something
-      // unrelated; tearing that down would be a bug.
+      // Only disengage + dismiss the dialogue if WE own the engagement. The
+      // error may have fired BEFORE `engageDialogue` (e.g. during the
+      // IndexedDB history lookup or the `dialogueService.getDialogue` call),
+      // in which case this cat is still in whatever state its own state
+      // machine put it in — wandering, sleeping, fleeing, alert — and
+      // `NPCCat.disengageDialogue()` unconditionally calls `enterState("idle")`,
+      // which would yank the cat out of that state. The scene-level
+      // dialogue.dismiss() carries the same "only if we own it" caveat
+      // (a concurrent UI path could be showing something unrelated).
       if (this.engagedDialogueNPC === cat) {
+        cat.disengageDialogue();
         this.engagedDialogueNPC = null;
         if (this.scene.dialogue.isActive) {
           this.scene.dialogue.dismiss();
