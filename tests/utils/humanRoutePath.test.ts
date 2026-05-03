@@ -52,6 +52,27 @@ describe("isCellLineWalkableOnGrid", () => {
     });
     expect(isCellLineWalkableOnGrid(grid, { x: 0, y: 0 }, { x: 2, y: 1 })).toBe(false);
   });
+
+  it("returns false on shallow diagonal (0,0)-(2,1) when (0,1) is blocked — other axial supercover neighbour", () => {
+    const grid = createNavigationGrid({
+      width: 3,
+      height: 2,
+      tileSize: 10,
+      isBlocked: (x, y) => x === 0 && y === 1,
+    });
+    // Same segment as above: supercover visits (0,1) as well as (1,0), not only Bresenham cells.
+    expect(isCellLineWalkableOnGrid(grid, { x: 0, y: 0 }, { x: 2, y: 1 })).toBe(false);
+  });
+
+  it("returns true on shallow diagonal (0,0)-(2,1) when only a cell off the supercover envelope is blocked", () => {
+    const grid = createNavigationGrid({
+      width: 3,
+      height: 2,
+      tileSize: 10,
+      isBlocked: (x, y) => x === 2 && y === 0,
+    });
+    expect(isCellLineWalkableOnGrid(grid, { x: 0, y: 0 }, { x: 2, y: 1 })).toBe(true);
+  });
 });
 
 describe("routeHumanPath", () => {
