@@ -494,6 +494,7 @@ export class GameScene extends Phaser.Scene {
       this.overheadLayer.setDepth(10);
     }
     this.placePlaygroundCarabao();
+    this.placeStarbucksLogo();
     this.cacheShelterPoints();
 
     const spawnPoint = this.map.findObject("spawns", (obj) => obj.name === "spawn_mammacat");
@@ -820,6 +821,14 @@ export class GameScene extends Phaser.Scene {
 
     this.add.image(carabaoX, carabaoY, "carabao_small").setOrigin(0.5, 1).setScale(0.5).setDepth(4);
     this.add.image(hornbillX, hornbillY, "hornbill_small").setOrigin(0.5, 1).setScale(0.3).setDepth(4);
+  }
+
+  private placeStarbucksLogo(): void {
+    const waterPoint = this.map.findObject("spawns", (obj) => obj.name === "poi_starbucks_water");
+    const logoX = (waterPoint?.x ?? 74 * TILE_SIZE) + TILE_SIZE * 2;
+    const logoY = waterPoint?.y ?? 2 * TILE_SIZE;
+
+    this.add.image(logoX, logoY, "starbucks_logo").setOrigin(0.5, 0.5).setScale(0.3).setDepth(4);
   }
 
   private tintForSuvDropoff(sequenceIndex: number): number | null {

@@ -24,6 +24,7 @@ export class BootScene extends Phaser.Scene {
     this.load.tilemapTiledJSON("atg", "assets/tilemaps/atg.json");
     this.load.image("carabao_small", "assets/sprites/carabao_small.png");
     this.load.image("hornbill_small", "assets/sprites/hornbill_small.png");
+    this.load.image("starbucks_logo", "assets/sprites/starbucks.png");
     this.load.image("suv_small", "assets/sprites/suv_small.png");
     this.load.image("corolla_small", "assets/sprites/corolla_small.png");
 

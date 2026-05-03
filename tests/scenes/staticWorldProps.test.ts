@@ -8,6 +8,10 @@ describe("static world props", () => {
     expect(bootSceneSource).toContain('this.load.image("hornbill_small", "assets/sprites/hornbill_small.png")');
   });
 
+  it("preloads the Starbucks cafe logo as a plain image", () => {
+    expect(bootSceneSource).toContain('this.load.image("starbucks_logo", "assets/sprites/starbucks.png")');
+  });
+
   it("preloads the car sprites for drop-off vehicle sequences", () => {
     expect(bootSceneSource).toContain('this.load.image("suv_small", "assets/sprites/suv_small.png")');
     expect(bootSceneSource).toContain('this.load.image("corolla_small", "assets/sprites/corolla_small.png")');
@@ -33,6 +37,29 @@ describe("static world props", () => {
     expect(placementSource).toContain("const hornbillY = carabaoY - TILE_SIZE * 3;");
     expect(placementSource).toContain('this.add.image(hornbillX, hornbillY, "hornbill_small")');
     expect(placementSource).toContain(".setScale(0.3)");
+    expect(placementSource).not.toContain("physics.add.existing");
+    expect(placementSource).not.toContain("physics.add.collider");
+  });
+
+  it("places the Starbucks logo two tiles right of the Starbucks water POI", () => {
+    const placementStart = gameSceneSource.indexOf("private placeStarbucksLogo()");
+    const placementEnd = gameSceneSource.indexOf("\n  private ", placementStart + 1);
+    const placementSource = gameSceneSource.slice(placementStart, placementEnd);
+    const overheadDepthMatch = gameSceneSource.match(/this\.overheadLayer\.setDepth\((\d+)\)/);
+    const overheadDepth = Number(overheadDepthMatch?.[1]);
+    const logoDepths = [...placementSource.matchAll(/\.setDepth\((\d+)\)/g)].map((match) => Number(match[1]));
+
+    expect(placementStart).toBeGreaterThanOrEqual(0);
+    expect(overheadDepth).toBe(10);
+    expect(gameSceneSource).toContain("this.placeStarbucksLogo();");
+    expect(placementSource).toContain('obj.name === "poi_starbucks_water"');
+    expect(placementSource).toContain("const logoX = (waterPoint?.x ?? 74 * TILE_SIZE) + TILE_SIZE * 2;");
+    expect(placementSource).toContain("const logoY = waterPoint?.y ?? 2 * TILE_SIZE;");
+    expect(placementSource).toContain('this.add.image(logoX, logoY, "starbucks_logo")');
+    expect(placementSource).toContain(".setOrigin(0.5, 0.5)");
+    expect(placementSource).toContain(".setScale(0.3)");
+    expect(logoDepths).toEqual([4]);
+    expect(logoDepths.every((depth) => depth < overheadDepth)).toBe(true);
     expect(placementSource).not.toContain("physics.add.existing");
     expect(placementSource).not.toContain("physics.add.collider");
   });
