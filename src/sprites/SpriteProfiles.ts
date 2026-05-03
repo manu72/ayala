@@ -108,7 +108,7 @@ const JOGGER_PROFILE: SpriteProfile = {
     walkRight: { row: 0, count: 8 },
     walkLeft: { row: 0, count: 8 },
     walkUp: { row: 0, count: 8 },
-    idle: { row: 0, count: 1 },
+    idle: { row: 0, count: 8 },
   },
 };
 
@@ -297,7 +297,7 @@ const SNATCHER_PROFILE: SpriteProfile = {
     walkRight: { row: 0, count: 8 },
     walkLeft: { row: 0, count: 8 },
     walkUp: { row: 0, count: 8 },
-    idle: { row: 0, count: 8 },
+    idle: { row: 0, count: 1 },
   },
 };
 
