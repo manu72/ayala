@@ -32,6 +32,7 @@ import { StoryKeys, migrateLegacyIntroFlag } from "../registry/storyKeys";
 import { computeBackgroundSpawnCount, decrementColonyTotal } from "../utils/colonySpawn";
 import {
   ScriptedDialogueService,
+  findUnplayedDialogueScript,
   type DialogueService,
   type DialogueRequest,
   type DialogueResponse,
@@ -49,7 +50,8 @@ import {
   addNpcMemory,
 } from "../services/ConversationStore";
 import { AI_PERSONAS } from "../ai/personas";
-import { CAT_DIALOGUE_SCRIPTS, getRandomColonyLine } from "../data/cat-dialogue";
+import { getRandomColonyLine } from "../data/cat-dialogue";
+import { NPC_DIALOGUE_SCRIPTS } from "../data/npc-dialogue";
 import {
   CAMILLE_ENCOUNTER_BEATS,
   CAMILLE_ENCOUNTER_5_PREDECISION_STEPS,
@@ -62,7 +64,7 @@ import {
 import { resolveSnatcherSpawnAction } from "../systems/SnatcherSystem";
 import { AudioSystem } from "../systems/AudioSystem";
 import { hasLineOfSightTiles } from "../utils/lineOfSight";
-import { shouldUseHumanAiBubble } from "../utils/humanAiBubbleEligibility";
+import { shouldUseHumanAiBubble, shouldUseNamedHumanScriptedBubble } from "../utils/humanAiBubbleEligibility";
 import { getEffectiveHumanPhase } from "../utils/humanSpawnPolicy";
 import { buildCamilleEraCareRoutes } from "../utils/camilleCareRoute";
 import { buildDialogueRecencyContext } from "../utils/dialogueRecency";
@@ -492,6 +494,7 @@ export class GameScene extends Phaser.Scene {
       this.overheadLayer.setDepth(10);
     }
     this.placePlaygroundCarabao();
+    this.placeStarbucksLogo();
     this.cacheShelterPoints();
 
     const spawnPoint = this.map.findObject("spawns", (obj) => obj.name === "spawn_mammacat");
@@ -514,7 +517,7 @@ export class GameScene extends Phaser.Scene {
     this.audio.start(this);
     this.chapterCheckTimer = 0;
     this.narrationShown = new Set();
-    const scripted = new ScriptedDialogueService(CAT_DIALOGUE_SCRIPTS);
+    const scripted = new ScriptedDialogueService(NPC_DIALOGUE_SCRIPTS);
     const proxyUrl = import.meta.env.VITE_AI_PROXY_URL;
     const primary = import.meta.env.VITE_AI_PRIMARY === "openai" ? ("openai" as const) : ("deepseek" as const);
     const fb = import.meta.env.VITE_AI_FALLBACK;
@@ -818,6 +821,14 @@ export class GameScene extends Phaser.Scene {
 
     this.add.image(carabaoX, carabaoY, "carabao_small").setOrigin(0.5, 1).setScale(0.5).setDepth(4);
     this.add.image(hornbillX, hornbillY, "hornbill_small").setOrigin(0.5, 1).setScale(0.3).setDepth(4);
+  }
+
+  private placeStarbucksLogo(): void {
+    const waterPoint = this.map.findObject("spawns", (obj) => obj.name === "poi_starbucks_water");
+    const logoX = (waterPoint?.x ?? 74 * TILE_SIZE) + TILE_SIZE * 2;
+    const logoY = (waterPoint?.y ?? 2 * TILE_SIZE) - TILE_SIZE;
+
+    this.add.image(logoX, logoY, "starbucks_logo").setOrigin(0.5, 0.5).setScale(0.3).setDepth(4);
   }
 
   private tintForSuvDropoff(sequenceIndex: number): number | null {
@@ -3380,13 +3391,13 @@ export class GameScene extends Phaser.Scene {
 
   /**
    * Show a single greeting bubble above `human` using the best available
-   * source in priority order: caller-forced line > AI persona > scripted pool.
+   * source in priority order: caller-forced line > unplayed named-human script
+   * > AI persona > scripted pool.
    *
-   * AI path: eligible only for close Mamma Cat proximity greetings when the
-   * human has an `identityName` registered in `AI_PERSONAS`, its per-human
-   * cooldown has elapsed, no other AI bubble is in flight, and no caller-forced
-   * line was passed. Greetings aimed at other NPC cats stay scripted so they
-   * do not create Mamma Cat conversation history from offscreen encounters.
+   * Named-human scripts are eligible for close Mamma Cat proximity greetings
+   * even when AI is disabled or another AI bubble is in flight. Greetings
+   * aimed at other NPC cats stay on the local scripted pool so they do not
+   * create Mamma Cat conversation history from offscreen encounters.
    *
    * Timing: AI path uses a 3.5s budget (vs 8s for engaged cat dialogue) so
    * ambient bubbles never stall the scene. Caller's emote + greeting animation
@@ -3413,12 +3424,15 @@ export class GameScene extends Phaser.Scene {
       distanceToMammaCat,
       maxMammaCatDistance: GP.CAT_PERSON_PLAYER_GREET_DIST,
     });
+    const namedHumanDialogueEligible = shouldUseNamedHumanScriptedBubble({
+      hasPersona,
+      isMammaCatGreeting: opts?.nearNpcCat === undefined,
+      distanceToMammaCat,
+      maxMammaCatDistance: GP.CAT_PERSON_PLAYER_GREET_DIST,
+    });
 
-    if (aiEligible && identity !== null) {
-      // Per-human cooldown is set up front (regardless of success) so a burst
-      // of proximity events can't fire multiple AI calls for the same speaker.
-      this.humanAiBubbleCooldownUntil.set(human, now + GameScene.HUMAN_AI_BUBBLE_COOLDOWN_MS);
-      void this.requestHumanBubbleLine(human, identity, opts?.nearNpcCat).catch(() => {
+    if (namedHumanDialogueEligible && identity !== null) {
+      void this.requestHumanBubbleLine(human, identity, opts?.nearNpcCat, { aiAllowed: aiEligible }).catch(() => {
         /* fallbackLine branch inside already renders scripted on failure */
       });
       return;
@@ -3428,19 +3442,18 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * Ask the AI service for a single ambient line and render it. Falls back to
-   * a scripted line on timeout, network failure, parse failure, or if the
-   * human becomes ineligible (off-screen, exited, or no longer near Mamma Cat)
-   * mid-flight.
+   * Render a named-human ambient line: first consume any unplayed authored
+   * script, then ask the AI service if eligible. Falls back to the local
+   * scripted pool on timeout, network failure, parse failure, or if the human
+   * becomes ineligible mid-flight.
    */
   private async requestHumanBubbleLine(
     human: HumanNPC,
     speaker: string,
     nearNpcCat: NPCCat | undefined,
+    opts: { aiAllowed: boolean },
   ): Promise<void> {
-    this.humanAiBubbleInFlight = true;
-    const abort = new AbortController();
-    this.humanAiBubbleAbort = abort;
+    let abort: AbortController | null = null;
 
     const renderFallback = (): void => {
       if (!human.active || !human.visible || !this.isHumanCloseToMammaCat(human)) return;
@@ -3484,16 +3497,36 @@ export class GameScene extends Phaser.Scene {
         nearbyCat: nearNpcCat?.npcName,
       };
 
-      const response = await (this.dialogueService as FallbackDialogueService).getDialogue(request, {
-        timeoutMs: GameScene.HUMAN_AI_BUBBLE_TIMEOUT_MS,
-        signal: abort.signal,
-      });
+      const scripted = findUnplayedDialogueScript(NPC_DIALOGUE_SCRIPTS, request);
+      let line = scripted?.response.lines[0]?.trim();
 
-      if (abort.signal.aborted || !human.active || !human.visible || !this.isHumanCloseToMammaCat(human)) {
+      if (!line) {
+        if (!opts.aiAllowed) {
+          renderFallback();
+          return;
+        }
+        if (this.humanAiBubbleInFlight || !(this.dialogueService instanceof FallbackDialogueService)) {
+          renderFallback();
+          return;
+        }
+        // Per-human cooldown is set immediately before the AI call so bursts
+        // cannot spam the model, while pending scripted lines can still play
+        // during the cooldown.
+        this.humanAiBubbleInFlight = true;
+        abort = new AbortController();
+        this.humanAiBubbleAbort = abort;
+        this.humanAiBubbleCooldownUntil.set(human, this.time.now + GameScene.HUMAN_AI_BUBBLE_COOLDOWN_MS);
+        const response = await (this.dialogueService as FallbackDialogueService).getDialogue(request, {
+          timeoutMs: GameScene.HUMAN_AI_BUBBLE_TIMEOUT_MS,
+          signal: abort.signal,
+        });
+        line = response.lines[0]?.trim();
+      }
+
+      if (abort?.signal.aborted || !human.active || !human.visible || !this.isHumanCloseToMammaCat(human)) {
         return;
       }
-      const line = response.lines[0]?.trim();
-      if (!line) {
+      if (!line || line === "...") {
         renderFallback();
         return;
       }
@@ -3532,8 +3565,10 @@ export class GameScene extends Phaser.Scene {
     } catch {
       renderFallback();
     } finally {
-      this.humanAiBubbleInFlight = false;
-      if (this.humanAiBubbleAbort === abort) this.humanAiBubbleAbort = null;
+      if (abort) {
+        this.humanAiBubbleInFlight = false;
+        if (this.humanAiBubbleAbort === abort) this.humanAiBubbleAbort = null;
+      }
     }
   }
 
@@ -4279,10 +4314,11 @@ export class GameScene extends Phaser.Scene {
       ],
     ];
     const path = patrolPaths[index % patrolPaths.length]!;
+    const snatcherType = index % 2 === 0 ? "snatcher" : "snatcher2";
 
     // Snatcher patrol speed must be slow and stealthy
     const config: HumanConfig = {
-      type: "snatcher",
+      type: snatcherType,
       speed: 20,
       activePhases: ["night"],
       path,

@@ -26,6 +26,8 @@ describe("human exit route wiring", () => {
     expect(checkSource).toContain("const navigationGrid = this.createHumanNavigationGrid();");
     expect(checkSource).toContain("this.spawnSnatcher(i, false, navigationGrid);");
     expect(spawnSource).toContain("navigationGrid = this.createHumanNavigationGrid()");
+    expect(spawnSource).toContain('const snatcherType = index % 2 === 0 ? "snatcher" : "snatcher2";');
+    expect(spawnSource).toContain("type: snatcherType");
     expect(spawnSource).toContain("this.routeHumanConfig(config, navigationGrid)");
     expect(spawnSource).not.toContain("this.routeHumanConfig(config, this.createHumanNavigationGrid())");
   });

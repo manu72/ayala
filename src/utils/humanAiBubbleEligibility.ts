@@ -28,3 +28,15 @@ export function shouldUseHumanAiBubble({
     distanceToMammaCat <= maxMammaCatDistance
   );
 }
+
+export function shouldUseNamedHumanScriptedBubble({
+  hasPersona,
+  isMammaCatGreeting,
+  distanceToMammaCat,
+  maxMammaCatDistance,
+}: Pick<
+  HumanAiBubbleEligibilityInput,
+  "hasPersona" | "isMammaCatGreeting" | "distanceToMammaCat" | "maxMammaCatDistance"
+>): boolean {
+  return hasPersona && isMammaCatGreeting && distanceToMammaCat <= maxMammaCatDistance;
+}

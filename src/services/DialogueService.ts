@@ -98,6 +98,42 @@ export interface DialogueScript {
   response: DialogueResponse;
 }
 
+function dialogueTextSignature(lines: string[]): string {
+  return lines.join(" ").replace(/\s+/g, " ").trim();
+}
+
+function cloneDialogueResponse(response: DialogueResponse): DialogueResponse {
+  return {
+    ...response,
+    lines: [...response.lines],
+    memoryNote: response.memoryNote ? { ...response.memoryNote } : undefined,
+  };
+}
+
+function hasRenderedResponse(request: DialogueRequest, response: DialogueResponse): boolean {
+  const expected = dialogueTextSignature(response.lines);
+  if (!expected) return false;
+  return request.conversationHistory.some((entry) => dialogueTextSignature([entry.text]) === expected);
+}
+
+export function findMatchingDialogueScript(
+  scripts: Record<string, DialogueScript[]>,
+  request: DialogueRequest,
+): DialogueScript | null {
+  const speakerScripts = scripts[request.speaker];
+  if (!speakerScripts) return null;
+  return speakerScripts.find((script) => script.condition(request)) ?? null;
+}
+
+export function findUnplayedDialogueScript(
+  scripts: Record<string, DialogueScript[]>,
+  request: DialogueRequest,
+): DialogueScript | null {
+  const speakerScripts = scripts[request.speaker];
+  if (!speakerScripts) return null;
+  return speakerScripts.find((script) => script.condition(request) && !hasRenderedResponse(request, script.response)) ?? null;
+}
+
 export class ScriptedDialogueService implements DialogueService {
   private scripts: Record<string, DialogueScript[]>;
 
@@ -106,11 +142,17 @@ export class ScriptedDialogueService implements DialogueService {
   }
 
   async getDialogue(request: DialogueRequest): Promise<DialogueResponse> {
-    const speakerScripts = this.scripts[request.speaker];
-    if (!speakerScripts) return this.getDefaultResponse(request);
+    const match = findMatchingDialogueScript(this.scripts, request);
+    return match ? cloneDialogueResponse(match.response) : this.getDefaultResponse(request);
+  }
 
-    const match = speakerScripts.find((s) => s.condition(request));
-    return match?.response ?? this.getDefaultResponse(request);
+  async getUnplayedDialogue(request: DialogueRequest): Promise<DialogueResponse | null> {
+    const match = findUnplayedDialogueScript(this.scripts, request);
+    return match ? cloneDialogueResponse(match.response) : null;
+  }
+
+  async getFallbackDialogue(request: DialogueRequest): Promise<DialogueResponse> {
+    return (await this.getUnplayedDialogue(request)) ?? this.getDefaultResponse(request);
   }
 
   private getDefaultResponse(request: DialogueRequest): DialogueResponse {

@@ -4,8 +4,14 @@
  */
 
 import { isAiDialogueConsoleDebugEnabled } from "../config/aiDialogueDebug";
-import { CAT_DIALOGUE_SCRIPTS } from "../data/cat-dialogue";
-import type { DialogueRequest, DialogueResponse, DialogueService, SpeakerPose } from "./DialogueService";
+import { NPC_DIALOGUE_SCRIPTS } from "../data/npc-dialogue";
+import {
+  findMatchingDialogueScript,
+  type DialogueRequest,
+  type DialogueResponse,
+  type DialogueService,
+  type SpeakerPose,
+} from "./DialogueService";
 import { calculateRelationshipStage, type RelationshipStage } from "./DialogueRelationship";
 import {
   NPC_MEMORY_LABEL_MAX,
@@ -244,10 +250,13 @@ function shouldRetryWithFallback(status: number): boolean {
 }
 
 export function matchScriptedResponse(request: DialogueRequest): DialogueResponse | null {
-  const scripts = CAT_DIALOGUE_SCRIPTS[request.speaker];
-  if (!scripts) return null;
-  const match = scripts.find((s) => s.condition(request));
-  return match?.response ?? null;
+  const match = findMatchingDialogueScript(NPC_DIALOGUE_SCRIPTS, request);
+  if (!match) return null;
+  return {
+    ...match.response,
+    lines: [...match.response.lines],
+    memoryNote: match.response.memoryNote ? { ...match.response.memoryNote } : undefined,
+  };
 }
 
 export function buildSystemPrompt(personaMarkdown: string, request: DialogueRequest): string {

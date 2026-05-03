@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { shouldUseHumanAiBubble } from '../../src/utils/humanAiBubbleEligibility'
+import { shouldUseHumanAiBubble, shouldUseNamedHumanScriptedBubble } from '../../src/utils/humanAiBubbleEligibility'
 
 const eligibleInput = {
   hasPersona: true,
@@ -35,6 +35,26 @@ describe('shouldUseHumanAiBubble', () => {
     expect(shouldUseHumanAiBubble({
       ...eligibleInput,
       aiInFlight: true,
+    })).toBe(false)
+  })
+})
+
+describe('shouldUseNamedHumanScriptedBubble', () => {
+  it('allows close named-human Mamma Cat greetings independent of AI service state', () => {
+    expect(shouldUseNamedHumanScriptedBubble({
+      hasPersona: true,
+      isMammaCatGreeting: true,
+      distanceToMammaCat: 40,
+      maxMammaCatDistance: 50,
+    })).toBe(true)
+  })
+
+  it('blocks greetings aimed at another NPC cat', () => {
+    expect(shouldUseNamedHumanScriptedBubble({
+      hasPersona: true,
+      isMammaCatGreeting: false,
+      distanceToMammaCat: 40,
+      maxMammaCatDistance: 50,
     })).toBe(false)
   })
 })

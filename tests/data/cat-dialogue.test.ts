@@ -158,6 +158,29 @@ describe('cat-dialogue — trust-gated scripts', () => {
     expect(match!.response.event).toBe('ginger_return')
     expect(match!.response.speakerPose).toBe('wary')
   })
+
+  it('Ginger: hissing fallback only remains eligible while trust is low', () => {
+    const lowTrust = makeRequest({
+      speaker: 'Ginger',
+      conversationHistory: [{ timestamp: 1, speaker: 'Ginger', text: 'hi' }],
+      gameState: {
+        chapter: 1, timeOfDay: 'day', trustGlobal: 10, trustWithSpeaker: 10,
+        hunger: 80, thirst: 80, energy: 80, daysSurvived: 1, knownCats: [], recentEvents: [],
+      },
+    })
+    const highTrust = makeRequest({
+      speaker: 'Ginger',
+      conversationHistory: [{ timestamp: 1, speaker: 'Ginger', text: 'hi' }],
+      gameState: {
+        chapter: 1, timeOfDay: 'day', trustGlobal: 30, trustWithSpeaker: 30,
+        hunger: 80, thirst: 80, energy: 80, daysSurvived: 1, knownCats: [], recentEvents: [],
+      },
+    })
+    const scripts = CAT_DIALOGUE_SCRIPTS['Ginger']!
+
+    expect(scripts.find(s => s.condition(lowTrust))!.id).toBe('ginger_hostile_return')
+    expect(scripts.find(s => s.id === 'ginger_hostile_return')!.condition(highTrust)).toBe(false)
+  })
 })
 
 describe('cat-dialogue — Colony Cat', () => {

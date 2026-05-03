@@ -24,6 +24,7 @@ export class BootScene extends Phaser.Scene {
     this.load.tilemapTiledJSON("atg", "assets/tilemaps/atg.json");
     this.load.image("carabao_small", "assets/sprites/carabao_small.png");
     this.load.image("hornbill_small", "assets/sprites/hornbill_small.png");
+    this.load.image("starbucks_logo", "assets/sprites/starbucks.png");
     this.load.image("suv_small", "assets/sprites/suv_small.png");
     this.load.image("corolla_small", "assets/sprites/corolla_small.png");
 
@@ -221,6 +222,11 @@ export class BootScene extends Phaser.Scene {
       ["snatcher_walk_w", "snatcher1_walk_west"],
       ["snatcher_walk_n", "snatcher1_walk_north"],
       ["snatcher_walk_s", "snatcher1_walk_south"],
+      ["snatcher2_stand", "snatcher2_stand"],
+      ["snatcher2_walk_e", "snatcher2_walk_east"],
+      ["snatcher2_walk_w", "snatcher2_walk_west"],
+      ["snatcher2_walk_n", "snatcher2_walk_north"],
+      ["snatcher2_walk_s", "snatcher2_walk_south"],
     ];
     for (const [key, file] of snatcherSheets) {
       this.load.spritesheet(key, `assets/sprites/${file}.png`, {
