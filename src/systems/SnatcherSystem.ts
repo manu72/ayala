@@ -257,7 +257,7 @@ export class SnatcherSystem {
     if (ground) this.scene.physics.add.collider(snatcher, ground);
     if (objects) this.scene.physics.add.collider(snatcher, objects);
     this.snatchersList.push(snatcher);
-    this.scene.humans.push(snatcher);
+    this.scene.humans.register(snatcher);
 
     if (!silent) {
       const hud = this.scene.scene.get("HUDScene") as HUDScene | undefined;
@@ -273,8 +273,7 @@ export class SnatcherSystem {
 
   private despawnAll(): void {
     for (const snatcher of this.snatchersList) {
-      const idx = this.scene.humans.indexOf(snatcher);
-      if (idx !== -1) this.scene.humans.splice(idx, 1);
+      this.scene.humans.unregister(snatcher);
       snatcher.destroy();
     }
     this.snatchersList.length = 0;

@@ -284,8 +284,7 @@ export class CamilleEncounterSystem {
     this.eraParkExitTarget = 1;
     for (const npc of [this.camilleNPC, this.manuNPC, this.kishNPC]) {
       if (!npc) continue;
-      const idx = this.scene.humans.indexOf(npc);
-      if (idx !== -1) this.scene.humans.splice(idx, 1);
+      this.scene.humans.unregister(npc);
       npc.destroy();
     }
     this.camilleNPC = null;
@@ -309,7 +308,7 @@ export class CamilleEncounterSystem {
     this.kishSlowDownShown = true;
     // Consolidated into the ambient-bubble channel so all human-spoken
     // dialogue uses the same visual surface as greetings and encounter beats.
-    this.scene.renderGreetingBubble(this.camilleNPC, "Kish, slow down.");
+    this.scene.humans.renderGreetingBubble(this.camilleNPC, "Kish, slow down.");
     this.scene.emotes.show(this.scene, this.camilleNPC, "curious");
   }
 
@@ -448,7 +447,7 @@ export class CamilleEncounterSystem {
     for (const npc of toRegister) {
       if (scene.groundLayer) scene.physics.add.collider(npc, scene.groundLayer);
       if (scene.objectsLayer) scene.physics.add.collider(npc, scene.objectsLayer);
-      scene.humans.push(npc);
+      scene.humans.register(npc);
     }
   }
 
@@ -472,8 +471,7 @@ export class CamilleEncounterSystem {
     for (const npc of [this.camilleNPC, this.manuNPC, this.kishNPC]) {
       if (!npc) continue;
       npc.resumeFromEncounter();
-      const idx = this.scene.humans.indexOf(npc);
-      if (idx !== -1) this.scene.humans.splice(idx, 1);
+      this.scene.humans.unregister(npc);
       npc.destroy();
     }
     this.camilleNPC = null;
@@ -596,7 +594,7 @@ export class CamilleEncounterSystem {
           clearBubble();
           const step = steps[index];
           if (step?.spoken && speaker && speaker.active && speaker.visible) {
-            currentBubble = this.scene.renderHumanBubble(speaker, step.spoken, { persistent: true });
+            currentBubble = this.scene.humans.renderHumanBubble(speaker, step.spoken, { persistent: true });
           }
           opts?.onStepShown?.(index);
         },
@@ -630,7 +628,7 @@ export class CamilleEncounterSystem {
 
     const beat = this.beats[n];
     const onComplete = (): void => {
-      scene.recordHumanEngagement();
+      scene.humans.recordHumanEngagement();
       switch (n) {
         case 2:
           hud?.showNarration("She watches you eat. She doesn't reach for you. She understands.");
@@ -743,7 +741,7 @@ export class CamilleEncounterSystem {
     this.beat5DecisionActive = false;
     this.cancelBeat5Decision();
     this.scene.player.startGreeting();
-    this.scene.recordHumanEngagement();
+    this.scene.humans.recordHumanEngagement();
     if (this.camilleNPC) {
       this.scene.emotes.show(this.scene, this.camilleNPC, "heart");
       this.scene.emotes.show(this.scene, this.scene.player, "heart");
@@ -754,7 +752,7 @@ export class CamilleEncounterSystem {
       this.playBeat5Journey();
       return;
     }
-    const bubble = this.scene.renderHumanBubble(speaker, CAMILLE_BEAT5_ACCEPT_LINE, {
+    const bubble = this.scene.humans.renderHumanBubble(speaker, CAMILLE_BEAT5_ACCEPT_LINE, {
       persistent: true,
     });
     this.scene.time.delayedCall(3200, () => {
@@ -769,7 +767,7 @@ export class CamilleEncounterSystem {
     this.cancelBeat5Decision();
     const speaker = this.camilleNPC;
     if (speaker && speaker.active && speaker.visible) {
-      const bubble = this.scene.renderHumanBubble(speaker, CAMILLE_BEAT5_TIMEOUT_LINE, {
+      const bubble = this.scene.humans.renderHumanBubble(speaker, CAMILLE_BEAT5_TIMEOUT_LINE, {
         persistent: true,
       });
       this.scene.time.delayedCall(2600, () => bubble?.destroy());

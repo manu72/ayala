@@ -2,7 +2,6 @@ import Phaser from "phaser";
 import { MammaCat } from "../sprites/MammaCat";
 import { NPCCat } from "../sprites/NPCCat";
 import { GuardNPC } from "../sprites/GuardNPC";
-import { HumanNPC } from "../sprites/HumanNPC";
 import type { HumanConfig } from "../sprites/HumanNPC";
 import { DogNPC } from "../sprites/DogNPC";
 import { DayNightCycle } from "../systems/DayNightCycle";
@@ -18,20 +17,17 @@ import { ChapterSystem } from "../systems/ChapterSystem";
 import { TerritorySystem } from "../systems/TerritorySystem";
 import { ColonyDynamicsSystem } from "../systems/ColonyDynamicsSystem";
 import { SnatcherSystem } from "../systems/SnatcherSystem";
+import { HumanPresenceSystem } from "../systems/HumanPresenceSystem";
 import type { HUDScene } from "./HUDScene";
 import {
   GP,
   REST_HOLD_MS,
   COLLAPSE_RECOVERY_MS,
-  STATIONARY_GREET_CAP,
-  STATIONARY_MOVE_THRESHOLD_PX,
 } from "../config/gameplayConstants";
 import { StoryKeys, migrateLegacyIntroFlag } from "../registry/storyKeys";
 import {
   ScriptedDialogueService,
-  findUnplayedDialogueScript,
   type DialogueService,
-  type DialogueRequest,
   type DialogueResponse,
   type ConversationEntry,
 } from "../services/DialogueService";
@@ -52,8 +48,6 @@ import { NPC_DIALOGUE_SCRIPTS } from "../data/npc-dialogue";
 import { AudioSystem } from "../systems/AudioSystem";
 import { CamilleEncounterSystem } from "../systems/CamilleEncounterSystem";
 import { hasLineOfSightTiles } from "../utils/lineOfSight";
-import { shouldUseHumanAiBubble, shouldUseNamedHumanScriptedBubble } from "../utils/humanAiBubbleEligibility";
-import { getEffectiveHumanPhase } from "../utils/humanSpawnPolicy";
 import { buildDialogueRecencyContext } from "../utils/dialogueRecency";
 import { createNavigationGrid, routeHumanPath, type NavigationGrid } from "../utils/humanRoutePath";
 import { computeReachableCells, getCellKey } from "../utils/mapExploration";
@@ -92,7 +86,6 @@ const POSITIVE_EMOTES: ReadonlySet<EmoteType> = new Set(["heart"]);
 const DEFAULT_ZOOM = 2.5;
 const PEEK_ZOOM = 0.8;
 const ZOOM_DURATION = 500;
-const HUMAN_ENGAGEMENT_COOLDOWN_MS = 5_000;
 const DROPOFF_SUV_TEXTURE = "suv_small";
 const DROPOFF_COROLLA_TEXTURE = "corolla_small";
 const DROPOFF_SUV_DISPLAY_WIDTH = 72;
@@ -200,9 +193,16 @@ export class GameScene extends Phaser.Scene {
   emotes!: EmoteSystem;
   chapters!: ChapterSystem;
   private chapterCheckTimer = 0;
-  /** Human NPC roster, shared with {@link SnatcherSystem} + Camille-era spawns. */
-  humans: HumanNPC[] = [];
-  private dogs: DogNPC[] = [];
+  /**
+   * Owns the park's human NPC roster: ambient spawns (joggers, feeders,
+   * dog walkers), AI bubble throttle, stationary-greet cap, and the
+   * `register` / `unregister` API used by {@link SnatcherSystem} and
+   * {@link CamilleEncounterSystem} for their own spawned humans. After
+   * Commit C, no other code touches a raw `humans[]` array.
+   */
+  humans!: HumanPresenceSystem;
+  /** Dog NPCs tethered to dog-walker humans; pushed to by {@link HumanPresenceSystem.spawnAmbientHumans}. */
+  dogs: DogNPC[] = [];
   /** Tracks which cats have already shown narration this approach, to avoid repeating. */
   private narrationShown = new Set<string>();
   /** Shared with {@link CamilleEncounterSystem} for Camille beat LLM calls. */
@@ -233,25 +233,6 @@ export class GameScene extends Phaser.Scene {
   private aiThinkingTimer: Phaser.Time.TimerEvent | null = null;
 
   /**
-   * Per-human cooldown (wall ms) before another AI-driven ambient bubble is
-   * requested. Scripted bubbles continue firing during the cooldown so the
-   * world does not fall silent. Keyed by HumanNPC instance so named entities
-   * (Camille) and anonymous-but-identified entities (feeders) each get their
-   * own timer.
-   */
-  private humanAiBubbleCooldownUntil: WeakMap<HumanNPC, number> = new WeakMap();
-  /**
-   * Global single-flight guard: at most one AI ambient bubble may be in
-   * flight at a time. Prevents a crowded scene (Camille + Manu + Kish all
-   * approaching cats at once) from burning a burst of LLM calls. Engaged
-   * (Space-triggered) cat dialogue uses its own `dialogueRequestInFlight`
-   * guard and is independent.
-   */
-  private humanAiBubbleInFlight = false;
-  /** Abort controller for the currently in-flight human bubble (if any). */
-  private humanAiBubbleAbort: AbortController | null = null;
-
-  /**
    * NPC the player just finished a conversation with. The player must leave
    * the cat's interaction range before re-engaging, otherwise a single Space
    * press (or held key) chains straight into the next scripted response —
@@ -280,22 +261,13 @@ export class GameScene extends Phaser.Scene {
    * mutates it; scene update reads it to short-circuit movement.
    */
   playerInputFrozen = false;
-  /**
-   * Reference position used to decide whether Mamma Cat is "stationary" for
-   * the purposes of the per-human greeting cap. Reset to the player's
-   * current position whenever she moves more than STATIONARY_MOVE_THRESHOLD_PX
-   * from this anchor; every human's stationary greet counter is cleared at
-   * the same time. See {@link STATIONARY_GREET_CAP}.
-   */
-  private playerStationaryAnchorX = 0;
-  private playerStationaryAnchorY = 0;
+  // Human stationary-greet anchor moved to HumanPresenceSystem.
   private previousPlayerX = 0;
   private previousPlayerY = 0;
   private reachableCells = new Set<number>();
   private trustEventUnsubscribe: (() => void) | null = null;
   private pendingGameOverReason: "collapse" | "snatched" | null = null;
   private gameOverTriggered = false;
-  private lastHumanEngagementAt = -Infinity;
 
   // Kish "slow down" flag + Camille personal lines moved into
   // `CamilleEncounterSystem`. Use `this.camille.getPersonalLineForNamedCat(name)`
@@ -345,18 +317,9 @@ export class GameScene extends Phaser.Scene {
     this.aiThinkingTimer?.remove(false);
     this.aiThinkingTimer = null;
 
-    // Abort any in-flight ambient AI bubble and clear the single-flight
-    // guard. Without this, a scene restart mid-fetch (e.g. snatcher capture
-    // during a 1.5s human bubble call) leaves `humanAiBubbleInFlight = true`
-    // persisted on the Phaser-reused scene instance, blocking every ambient
-    // AI bubble after restart until the orphaned fetch's finally runs. The
-    // abort also tells AIDialogueService (via FallbackDialogueService's new
-    // caller-abort-rethrow path) that the caller no longer wants this work.
-    if (this.humanAiBubbleAbort) {
-      this.humanAiBubbleAbort.abort();
-      this.humanAiBubbleAbort = null;
-    }
-    this.humanAiBubbleInFlight = false;
+    // Ambient human-bubble abort + roster reset delegated to
+    // {@link HumanPresenceSystem.shutdown} (see its docstring for why the
+    // abort is load-bearing across scene restarts).
 
     // Beat-5 cleanup. A scene shutdown mid-pickup could strand the player
     // invisible with a disabled body and an active input freeze, which
@@ -384,6 +347,7 @@ export class GameScene extends Phaser.Scene {
     this.snatcher?.shutdown();
     this.colony?.shutdown();
     this.camille?.shutdown();
+    this.humans?.shutdown();
   }
 
   /** Remove pending intro delayed calls and tweens (idempotent). */
@@ -425,7 +389,6 @@ export class GameScene extends Phaser.Scene {
     this.clearTouchInputState(true);
 
     this.npcs = [];
-    this.humans = [];
     this.dogs = [];
     this.shelterPoints = [];
     this.restHoldTimer = 0;
@@ -477,7 +440,6 @@ export class GameScene extends Phaser.Scene {
     this.lives = MAX_LIVES;
     this.pendingGameOverReason = null;
     this.gameOverTriggered = false;
-    this.lastHumanEngagementAt = -Infinity;
     this.emotes = new EmoteSystem();
     this.chapters = new ChapterSystem();
     this.audio = new AudioSystem();
@@ -488,6 +450,11 @@ export class GameScene extends Phaser.Scene {
     this.snatcher.snatchedThisNight = data?.snatcherCapture === true;
     this.camille = new CamilleEncounterSystem(this);
     this.camille.resetTransient();
+    this.humans = new HumanPresenceSystem(this);
+    // resetTransient() seeds the stationary anchor at the player's spawn
+    // so an instant interaction on frame 0 doesn't fire the
+    // "moved beyond threshold" reset that clears every greet counter.
+    this.humans.resetTransient(spawnX, spawnY);
     this.chapterCheckTimer = 0;
     this.narrationShown = new Set();
     const scripted = new ScriptedDialogueService(NPC_DIALOGUE_SCRIPTS);
@@ -637,7 +604,7 @@ export class GameScene extends Phaser.Scene {
     }
     this.guardIndicator = new ThreatIndicator(this, this.guard, "Guard", "dangerous", true);
 
-    this.spawnHumans();
+    this.humans.spawnAmbientHumans();
 
     this.foodSources = new FoodSourceManager(this);
     if (savedSourceStates && savedSourceStates.length > 0) {
@@ -1229,7 +1196,7 @@ export class GameScene extends Phaser.Scene {
     if (this.player.isResting) {
       this.updateResting(deltaSec);
       this.updateNPCs(delta);
-      this.updateHumans(delta);
+      this.updateHumansAndHazards(delta);
       this.foodSources.update(this.dayNight.currentPhase, time);
       this.guard.update(delta);
       this.guardIndicator.update();
@@ -1248,7 +1215,7 @@ export class GameScene extends Phaser.Scene {
       } else {
         this.player.setVelocity(0);
         this.updateNPCs(delta);
-        this.updateHumans(delta);
+        this.updateHumansAndHazards(delta);
         this.foodSources.update(this.dayNight.currentPhase, time);
         this.guard.update(delta);
         this.guardIndicator.update();
@@ -1375,13 +1342,13 @@ export class GameScene extends Phaser.Scene {
       );
     }
 
-    this.updatePlayerStationaryAnchor();
+    this.humans.updatePlayerStationaryAnchor();
 
     this.foodSources.update(this.dayNight.currentPhase, time);
     this.guard.update(delta);
     this.guardIndicator.update();
     this.updateNPCs(delta);
-    this.updateHumans(delta);
+    this.updateHumansAndHazards(delta);
 
     // Check chapter progression every 5 seconds
     this.chapterCheckTimer += delta;
@@ -2129,317 +2096,34 @@ export class GameScene extends Phaser.Scene {
     gingerB.setTint(0xffaa44);
   }
 
-  // ──────────── Humans ────────────
-
-  private spawnHumans(): void {
-    const configs: HumanConfig[] = [
-      // Jogger 1: long loop through central gardens via main walkways
-      {
-        type: "jogger",
-        speed: 100,
-        activePhases: ["dawn", "evening"],
-        path: [
-          { x: 600, y: 1100 },
-          { x: 1200, y: 700 },
-          { x: 1800, y: 600 },
-          { x: 2300, y: 500 },
-          { x: 2300, y: 1000 },
-          { x: 1600, y: 1200 },
-          { x: 1000, y: 1300 },
-        ],
-      },
-      // Jogger 2: shorter central gardens loop
-      {
-        type: "jogger",
-        speed: 90,
-        activePhases: ["dawn", "evening"],
-        path: [
-          { x: 1200, y: 800 },
-          { x: 1700, y: 700 },
-          { x: 1900, y: 1000 },
-          { x: 1400, y: 1100 },
-        ],
-      },
-      // Jogger 3 (male): clockwise perimeter loop around the park triangle.
-      // Dawn + evenings only. Steers softly around other NPCs/cats (he
-      // ignores cats socially but must not run through them).
-      {
-        type: "jogger_male",
-        speed: 120,
-        activePhases: ["dawn", "evening"],
-        avoidanceRadius: 30,
-        loopPauseSec: 5,
-        path: [
-          { x: 16, y: 1392 }, // tile (0,43)  — SW spawn on diagonal sidewalk
-          { x: 1008, y: 432 }, // tile (31,13) — NE turn onto main N walkway
-          { x: 3024, y: 432 }, // tile (94,13) — E end, turn south
-          { x: 3024, y: 2480 }, // tile (94,77) — SE corner, turn west
-          { x: 16, y: 2480 }, // tile (0,77)  — west-edge exit along Ayala Ave
-        ],
-      },
-      ...this.buildFeederConfigs(),
-      // Dog walker 1: western gardens near fountain and underpass
-      {
-        type: "dogwalker",
-        speed: 60,
-        activePhases: ["dawn", "evening", "day"],
-        path: [
-          { x: 550, y: 1000 },
-          { x: 800, y: 900 },
-          { x: 1100, y: 1000 },
-          { x: 1100, y: 1200 },
-          { x: 800, y: 1300 },
-          { x: 550, y: 1200 },
-        ],
-      },
-      // Dog walker 2: eastern gardens near The Shops and restaurants
-      {
-        type: "dogwalker",
-        speed: 55,
-        activePhases: ["dawn", "evening"],
-        path: [
-          { x: 1900, y: 600 },
-          { x: 2200, y: 700 },
-          { x: 2400, y: 1000 },
-          { x: 2100, y: 1300 },
-          { x: 1900, y: 1000 },
-        ],
-      },
-    ];
-
-    const walkerDogKeys = Phaser.Utils.Array.Shuffle(["SmallDog", "BrownDog", "WhiteDog"]);
-    let walkerDogIdx = 0;
-    const navigationGrid = this.createHumanNavigationGrid();
-
-    for (const config of configs) {
-      const routedConfig = this.routeHumanConfig(config, navigationGrid);
-      const human = new HumanNPC(this, routedConfig);
-      if (this.groundLayer) {
-        this.physics.add.collider(human, this.groundLayer);
-      }
-      if (this.objectsLayer) {
-        this.physics.add.collider(human, this.objectsLayer);
-      }
-      this.humans.push(human);
-
-      if (routedConfig.type === "dogwalker") {
-        const dogKey = walkerDogKeys[walkerDogIdx % walkerDogKeys.length]!;
-        this.dogs.push(new DogNPC(this, human, dogKey));
-        walkerDogIdx++;
-      }
-    }
-  }
+  // ──────────── Humans (thin scene-facade) ────────────
 
   /**
-   * Build feeder configs with circuit paths through cat areas.
-   * Each feeder walks a circuit visiting cat locations, greeting each cat,
-   * lingering at a feeding station, then exiting.
+   * Tick per-human behaviour, then the hazards they depend on (dog
+   * updates, snatcher detection, danger music, colony-cat flee-from-
+   * snatcher sweep). Kept on the scene because the flee loop and the
+   * audio danger crossfade touch systems that aren't human-presence
+   * concerns. Called from three arms of {@link update} (resting, peek,
+   * normal) so the ordering around food sources / guards is preserved.
    */
-  private buildFeederConfigs(): HumanConfig[] {
-    const poi = (name: string) => this.map.findObject("spawns", (o) => o.name === name);
-    const blacky = poi("spawn_blacky");
-    const ginger = poi("spawn_ginger");
-    const station1 = poi("poi_feeding_station_1");
-    const station2 = poi("poi_feeding_station_2");
-    const tiger = poi("spawn_tiger");
-    const jayco = poi("spawn_jayco");
-    const fluffy = poi("spawn_fluffy");
+  private updateHumansAndHazards(delta: number): void {
+    this.humans.tick(delta);
 
-    const px = (obj: Phaser.Types.Tilemaps.TiledObject | null, fallback: number) => obj?.x ?? fallback;
-    const py = (obj: Phaser.Types.Tilemaps.TiledObject | null, fallback: number) => obj?.y ?? fallback;
-
-    const entryX = px(blacky, 411) - 50;
-    const entryY = py(blacky, 1083);
-
-    const feederCircuit: Array<{ x: number; y: number }> = [
-      { x: entryX, y: entryY },
-      { x: px(blacky, 411), y: py(blacky, 1083) },
-      { x: px(ginger, 774), y: py(ginger, 1378) },
-      { x: px(station1, 1000), y: py(station1, 900) },
-      { x: px(tiger, 1141), y: py(tiger, 632) },
-      { x: px(jayco, 1427), y: py(jayco, 484) },
-      { x: px(fluffy, 1500), y: py(fluffy, 900) },
-      { x: px(station2, 1600), y: py(station2, 1000) },
-      { x: entryX, y: entryY },
-    ];
-
-    return [
-      {
-        type: "feeder",
-        identityName: "Rose",
-        speed: 40,
-        activePhases: ["dawn", "evening"],
-        lingerSec: 45,
-        lingerWaypointIndex: 3,
-        exitAfterLinger: false,
-        path: feederCircuit,
-      },
-      {
-        type: "ben",
-        identityName: "Ben",
-        speed: 38,
-        activePhases: ["dawn", "evening"],
-        lingerSec: 40,
-        lingerWaypointIndex: feederCircuit.length - 1 - 7,
-        exitAfterLinger: false,
-        path: [...feederCircuit].reverse(),
-      },
-    ];
-  }
-
-  /**
-   * Track Mamma Cat's position to drive the per-human stationary greeting
-   * cap. If she has moved more than {@link STATIONARY_MOVE_THRESHOLD_PX}
-   * from the current anchor, reset every human's stationary greet counter
-   * and re-anchor. While she is stationary (or asleep/resting) the counter
-   * accumulates until it hits {@link STATIONARY_GREET_CAP}, at which point
-   * `updateHumans` skips the ambient greeting branch until she moves again.
-   *
-   * Uses squared-distance to avoid a per-frame sqrt. O(humans) on threshold
-   * crossings, otherwise O(1).
-   */
-  private updatePlayerStationaryAnchor(): void {
-    const dx = this.player.x - this.playerStationaryAnchorX;
-    const dy = this.player.y - this.playerStationaryAnchorY;
-    const thresholdSq = STATIONARY_MOVE_THRESHOLD_PX * STATIONARY_MOVE_THRESHOLD_PX;
-    if (dx * dx + dy * dy < thresholdSq) return;
-    this.playerStationaryAnchorX = this.player.x;
-    this.playerStationaryAnchorY = this.player.y;
-    for (const human of this.humans) {
-      human.resetStationaryGreet();
-    }
-  }
-
-  private updateHumans(delta: number): void {
     const now = this.time.now;
-    for (const human of this.humans) {
-      human.setPhase(getEffectiveHumanPhase(human.humanType, this.dayNight.currentPhase, this.dayNight.dayCount));
-      human.update(delta);
-
-      if (!human.visible) continue;
-
-      // Humans that are paused for an encounter beat (Camille during her
-      // dialogue, Manu/Kish while flanking her) must not enter the ambient
-      // proximity-greeting branch — their encounter pause already sets
-      // their pose, and firing a second greeting would clobber the crouch
-      // animation and spawn a duplicate bubble above their head.
-      if (human.isCatPerson && !human.isGreeting && !human.isEncounterPaused) {
-        let greeted = false;
-
-        // Mamma Cat proximity greeting, capped per human per stationary
-        // session. See STATIONARY_GREET_CAP. The cap resets automatically
-        // via `resetStationaryGreet` when Mamma moves more than
-        // STATIONARY_MOVE_THRESHOLD_PX from her anchor (see
-        // `updatePlayerStationaryAnchor`). The isGreeting cooldown (4-6s)
-        // still prevents frame-spam during the N allowed attempts.
-        const playerDist = Phaser.Math.Distance.Between(human.x, human.y, this.player.x, this.player.y);
-        if (playerDist < GP.CAT_PERSON_PLAYER_GREET_DIST && human.stationaryGreetCount < STATIONARY_GREET_CAP) {
-          let playerLine: string | undefined;
-          if (human.humanType === "camille") {
-            const enc = (this.registry.get(StoryKeys.CAMILLE_ENCOUNTER) as number) ?? 0;
-            if (enc < 2) {
-              playerLine = "And who are you, sweetheart?";
-            }
-          }
-          human.startGreeting(this.player.x, this.player.y);
-          human.incrementStationaryGreet();
-          this.showGreetingBubble(human, { line: playerLine });
-          this.emotes.show(this, human, "heart");
-          this.emotes.show(this, this.player, "heart");
-          greeted = true;
-        }
-
-        if (!greeted) {
-          for (const { cat } of this.npcs) {
-            if (cat.state === "fleeing") continue;
-            const dist = Phaser.Math.Distance.Between(human.x, human.y, cat.x, cat.y);
-            if (dist < GP.CAT_PERSON_GREET_DIST && !human.hasGreeted(cat)) {
-              if (human.humanType === "manu" && human.shouldDeferManuGreet()) {
-                human.markGreeted(cat);
-                continue;
-              }
-              human.startGreeting(cat.x, cat.y);
-              human.markGreeted(cat);
-              this.showGreetingBubble(human, { nearNpcCat: cat });
-              this.emotes.show(this, human, "heart");
-              if (cat.state !== "sleeping") this.emotes.show(this, cat, "heart");
-              break;
-            }
-          }
-        }
-      }
-
-      // Delegated to the Camille encounter system: at most one "Kish, slow
-      // down." aside per Camille evening spawn, gated on both NPCs being
-      // active, ungreeted, un-paused, and within 80px. The system renders
-      // the Camille bubble and the curious emote when it fires.
-      this.camille.tryPlayKishSlowDownBeat();
-
-      // Category A: passers-through glance at nearby cats (including Mamma Cat).
-      // Both female ("jogger") and male ("jogger_male") joggers behave the
-      // same here: they glance, and their presence mildly alerts cats.
-      const isJogger = human.humanType === "jogger" || human.humanType === "jogger_male";
-      if (isJogger || human.humanType === "dogwalker") {
-        let glanced = false;
-        const playerDist = Phaser.Math.Distance.Between(human.x, human.y, this.player.x, this.player.y);
-        if (playerDist < GP.GLANCE_DIST) {
-          human.glanceAt(this.player.x, this.player.y);
-          glanced = true;
-        }
-
-        if (!glanced) {
-          for (const { cat } of this.npcs) {
-            const dist = Phaser.Math.Distance.Between(human.x, human.y, cat.x, cat.y);
-            if (dist < GP.GLANCE_DIST) {
-              if (isJogger) {
-                if (cat.state !== "sleeping" && cat.state !== "alert") {
-                  cat.triggerAlert();
-                  this.emotes.show(this, cat, "alert");
-                }
-              }
-              human.glanceAt(cat.x, cat.y);
-              break;
-            }
-          }
-        }
-      }
-
-      // Soft steering avoidance for opted-in humans (e.g. the male jogger).
-      // Runs after update() so we can bend the velocity pathing just set.
-      const avoidR = human.config.avoidanceRadius ?? 0;
-      if (avoidR > 0) {
-        const neighbours: Array<{ x: number; y: number }> = [];
-        for (const other of this.humans) {
-          if (other === human || !other.visible) continue;
-          neighbours.push({ x: other.x, y: other.y });
-        }
-        for (const { cat } of this.npcs) {
-          if (!cat.visible) continue;
-          neighbours.push({ x: cat.x, y: cat.y });
-        }
-        // Include the player so the jogger also weaves around them.
-        neighbours.push({ x: this.player.x, y: this.player.y });
-        human.applySteeringAvoidance(neighbours, avoidR);
-      }
-    }
-
-    this.camille.flushTeardown();
-
     for (const dog of this.dogs) {
       dog.update(now, this.player, this.npcs, this.emotes, this);
     }
 
-    // Snatcher detection during night
     if (this.dayNight.currentPhase === "night") {
       this.snatcher.checkDetection();
     }
 
-    // Crossfade background music to the danger theme whenever any snatcher
-    // exists in the park. setDanger() is idempotent, so calling it every
-    // frame is cheap.
+    // Crossfade background music to the danger theme whenever any
+    // snatcher exists in the park. setDanger() is idempotent, so
+    // calling it every frame is cheap.
     this.audio.setDanger(this.snatcher.hasAnyActive);
 
-    // NPC cats flee from snatchers
+    // NPC cats flee from snatchers.
     if (this.snatcher.hasAnyActive) {
       for (const snatcher of this.snatcher.activeSnatchers) {
         if (!snatcher.visible) continue;
@@ -2453,285 +2137,6 @@ export class GameScene extends Phaser.Scene {
       }
     }
   }
-
-  // ──────────── Cat Person Greetings ────────────
-
-  private readonly catPersonGreetings: Record<string, string[]> = {
-    camille: ["Hi sweetie.", "Kamusta, pusa.", "There you are.", "Good girl.", "Hello, beautiful."],
-    manu: ["Hey, little one.", "You're okay.", "Hi there."],
-    kish: ["OMG KITTY!", "Hi hi hi!", "Look at you!", "SO CUTE!"],
-    feeder: ["Hi sweetie.", "Kamusta, pusa.", "There you are.", "Good kitty."],
-  };
-
-  /**
-   * Show a single greeting bubble above `human` using the best available
-   * source in priority order: caller-forced line > unplayed named-human script
-   * > AI persona > scripted pool.
-   *
-   * Named-human scripts are eligible for close Mamma Cat proximity greetings
-   * even when AI is disabled or another AI bubble is in flight. Greetings
-   * aimed at other NPC cats stay on the local scripted pool so they do not
-   * create Mamma Cat conversation history from offscreen encounters.
-   *
-   * Timing: AI path uses a 3.5s budget (vs 8s for engaged cat dialogue) so
-   * ambient bubbles never stall the scene. Caller's emote + greeting animation
-   * fire synchronously in `updateHumans` regardless of which path is chosen.
-   */
-  private showGreetingBubble(human: HumanNPC, opts?: { line?: string; nearNpcCat?: NPCCat }): void {
-    if (opts?.line) {
-      this.renderGreetingBubble(human, opts.line);
-      return;
-    }
-
-    const identity = human.identityName;
-    const hasPersona = identity !== null && identity in AI_PERSONAS;
-    const now = this.time.now;
-    const cooldownUntil = this.humanAiBubbleCooldownUntil.get(human) ?? 0;
-    const distanceToMammaCat = Phaser.Math.Distance.Between(human.x, human.y, this.player.x, this.player.y);
-    const aiEligible = shouldUseHumanAiBubble({
-      hasPersona,
-      aiServiceAvailable: this.dialogueService instanceof FallbackDialogueService,
-      aiInFlight: this.humanAiBubbleInFlight,
-      now,
-      cooldownUntil,
-      isMammaCatGreeting: opts?.nearNpcCat === undefined,
-      distanceToMammaCat,
-      maxMammaCatDistance: GP.CAT_PERSON_PLAYER_GREET_DIST,
-    });
-    const namedHumanDialogueEligible = shouldUseNamedHumanScriptedBubble({
-      hasPersona,
-      isMammaCatGreeting: opts?.nearNpcCat === undefined,
-      distanceToMammaCat,
-      maxMammaCatDistance: GP.CAT_PERSON_PLAYER_GREET_DIST,
-    });
-
-    if (namedHumanDialogueEligible && identity !== null) {
-      void this.requestHumanBubbleLine(human, identity, opts?.nearNpcCat, { aiAllowed: aiEligible }).catch(() => {
-        /* fallbackLine branch inside already renders scripted on failure */
-      });
-      return;
-    }
-
-    this.renderGreetingBubble(human, this.pickScriptedGreeting(human, opts?.nearNpcCat));
-  }
-
-  /**
-   * Render a named-human ambient line: first consume any unplayed authored
-   * script, then ask the AI service if eligible. Falls back to the local
-   * scripted pool on timeout, network failure, parse failure, or if the human
-   * becomes ineligible mid-flight.
-   */
-  private async requestHumanBubbleLine(
-    human: HumanNPC,
-    speaker: string,
-    nearNpcCat: NPCCat | undefined,
-    opts: { aiAllowed: boolean },
-  ): Promise<void> {
-    let abort: AbortController | null = null;
-
-    const renderFallback = (): void => {
-      if (!human.active || !human.visible || !this.isHumanCloseToMammaCat(human)) return;
-      this.renderGreetingBubble(human, this.pickScriptedGreeting(human, nearNpcCat));
-    };
-
-    try {
-      const history = await getRecentConversations(speaker, 10);
-      const conversationHistory: ConversationEntry[] = history.map((r) => ({
-        timestamp: r.timestamp,
-        speaker: r.speaker,
-        mammaCatTurn: r.mammaCatTurn,
-        text: r.lines.join(" "),
-      }));
-      const conversationCount = await getConversationCount(speaker);
-      const isFirstConversation = conversationCount === 0;
-
-      const request: DialogueRequest = {
-        speaker,
-        speakerType: "human",
-        target: "Mamma Cat",
-        gameState: {
-          chapter: this.chapters.chapter,
-          timeOfDay: this.dayNight.currentPhase,
-          trustGlobal: this.trust.global,
-          trustWithSpeaker: this.trust.global,
-          hunger: this.stats.hunger,
-          thirst: this.stats.thirst,
-          energy: this.stats.energy,
-          daysSurvived: this.dayNight.dayCount,
-          knownCats: Array.from(this.knownCats),
-          recentEvents: [],
-        },
-        conversationHistory,
-        isFirstConversation,
-        relationshipStage: calculateRelationshipStage({
-          isFirstConversation,
-          conversationCount,
-          trustWithSpeaker: this.trust.global,
-        }),
-        nearbyCat: nearNpcCat?.npcName,
-      };
-
-      const scripted = findUnplayedDialogueScript(NPC_DIALOGUE_SCRIPTS, request);
-      let line = scripted?.response.lines[0]?.trim();
-
-      if (!line) {
-        if (!opts.aiAllowed) {
-          renderFallback();
-          return;
-        }
-        if (this.humanAiBubbleInFlight || !(this.dialogueService instanceof FallbackDialogueService)) {
-          renderFallback();
-          return;
-        }
-        // Per-human cooldown is set immediately before the AI call so bursts
-        // cannot spam the model, while pending scripted lines can still play
-        // during the cooldown.
-        this.humanAiBubbleInFlight = true;
-        abort = new AbortController();
-        this.humanAiBubbleAbort = abort;
-        this.humanAiBubbleCooldownUntil.set(human, this.time.now + GameScene.HUMAN_AI_BUBBLE_COOLDOWN_MS);
-        const response = await (this.dialogueService as FallbackDialogueService).getDialogue(request, {
-          timeoutMs: GameScene.HUMAN_AI_BUBBLE_TIMEOUT_MS,
-          signal: abort.signal,
-        });
-        line = response.lines[0]?.trim();
-      }
-
-      if (abort?.signal.aborted || !human.active || !human.visible || !this.isHumanCloseToMammaCat(human)) {
-        return;
-      }
-      if (!line || line === "...") {
-        renderFallback();
-        return;
-      }
-      this.renderGreetingBubble(human, line);
-
-      // Persist for future bubbles. Store is keyed by speaker so per-human
-      // history stays consistent whether the player talks to this human via
-      // bubbles or via an encounter beat.
-      //
-      // Persist ONLY the line we actually rendered (`line`), not the whole
-      // `response.lines` payload. Ambient bubbles render a single bubble
-      // above the NPC, so any additional lines in response.lines were
-      // never seen by the player. Storing them would condition the next
-      // LLM call on dialogue the player never heard — see the matching
-      // lesson for Camille beats in WORKING_MEMORY.md.
-      const snapshotTrust = this.trust.global;
-      await storeConversation({
-        speaker,
-        timestamp: this.dayNight.totalGameTimeMs,
-        realTimestamp: Date.now(),
-        gameDay: this.dayNight.dayCount,
-        lines: [line],
-        trustBefore: snapshotTrust,
-        trustAfter: snapshotTrust,
-        chapter: this.chapters.chapter,
-        playerAction: "ambient_greeting",
-        gameStateSnapshot: {
-          trustWithSpeaker: snapshotTrust,
-          trustGlobal: this.trust.global,
-          timeOfDay: this.dayNight.currentPhase,
-          hunger: this.stats.hunger,
-          thirst: this.stats.thirst,
-          energy: this.stats.energy,
-        },
-      });
-    } catch {
-      renderFallback();
-    } finally {
-      if (abort) {
-        this.humanAiBubbleInFlight = false;
-        if (this.humanAiBubbleAbort === abort) this.humanAiBubbleAbort = null;
-      }
-    }
-  }
-
-  /** Pick a scripted line for a human greeting, honouring Camille's per-cat overrides. */
-  private pickScriptedGreeting(human: HumanNPC, nearNpcCat: NPCCat | undefined): string {
-    if (nearNpcCat && human.humanType === "camille") {
-      const named = this.camille.getPersonalLineForNamedCat(nearNpcCat.npcName);
-      if (named) return named;
-    }
-    const lines = this.catPersonGreetings[human.humanType] ?? this.catPersonGreetings.feeder!;
-    return lines[Math.floor(Math.random() * lines.length)]!;
-  }
-
-  private isHumanCloseToMammaCat(human: HumanNPC): boolean {
-    return (
-      Phaser.Math.Distance.Between(human.x, human.y, this.player.x, this.player.y) <= GP.CAT_PERSON_PLAYER_GREET_DIST
-    );
-  }
-
-  /**
-   * Render a floating speech bubble above `human` carrying `line`.
-   *
-   * All human-spoken dialogue — ambient greetings, Kish's "slow down"
-   * beat, and Camille's encounter lines — renders through this single
-   * helper so the game never shows more than one visual style for
-   * human speech.
-   *
-   * Lifetime is controlled by `opts.persistent`:
-   *  - `false` (default): auto-fades at ~2.5s and self-destroys; used
-   *    for ambient greetings where the player keeps moving.
-   *  - `true`: returns the Text GameObject and does NOT auto-destroy.
-   *    The caller owns the bubble's lifetime (typically tied to an
-   *    encounter beat step) and MUST `.destroy()` it when advancing
-   *    or aborting. Used by the Camille encounter loop.
-   */
-  /**
-   * Shared render surface for human-spoken bubbles. Public so
-   * {@link CamilleEncounterSystem} can render paired-beat spoken lines
-   * through the same channel as greetings (WORKING_MEMORY 5.1a: single
-   * visual surface for all human dialogue).
-   */
-  renderHumanBubble(human: HumanNPC, line: string, opts?: { persistent?: boolean }): Phaser.GameObjects.Text {
-    const bubble = this.add
-      .text(human.x, human.y - 30, line, {
-        fontFamily: "Arial, Helvetica, sans-serif",
-        fontSize: "10px",
-        color: "#ffffff",
-        stroke: "#000000",
-        strokeThickness: 2,
-        backgroundColor: "#00000066",
-        padding: { x: 4, y: 2 },
-      })
-      .setOrigin(0.5)
-      .setDepth(8);
-
-    if (!opts?.persistent) {
-      this.tweens.add({
-        targets: bubble,
-        y: human.y - 50,
-        alpha: 0,
-        delay: 2500,
-        duration: 1000,
-        onComplete: () => bubble.destroy(),
-      });
-    }
-
-    return bubble;
-  }
-
-  /**
-   * Back-compat wrapper for the ambient (auto-fading) bubble path.
-   * Kept as a named helper so call sites read naturally at the greeting
-   * sites. Public so {@link CamilleEncounterSystem} can reuse the same
-   * channel for Kish's scripted "slow down" aside.
-   */
-  renderGreetingBubble(human: HumanNPC, line: string): void {
-    this.renderHumanBubble(human, line);
-  }
-
-  /** Per-human wait between AI ambient bubbles, ms. */
-  private static readonly HUMAN_AI_BUBBLE_COOLDOWN_MS = 30_000;
-  /**
-   * Budget for ambient bubble LLM calls, ms. Observed proxy round-trips run
-   * 2000–4500 ms, so anything tighter forces almost every bubble through the
-   * scripted fallback (and spams the console). 3500 ms catches the common
-   * case while still well below the 8s engaged dialogue budget so a slow
-   * model can't stall the scene.
-   */
-  private static readonly HUMAN_AI_BUBBLE_TIMEOUT_MS = 3500;
 
   // ──────────── Food Sources ────────────
 
@@ -2889,9 +2294,9 @@ export class GameScene extends Phaser.Scene {
       // Only meow on a free greet if Mamma is actually greeting *someone* —
       // i.e. a human NPC is within the player-initiated greet range. A free
       // greet in empty space is silent.
-      if (this.isHumanInGreetRange()) {
+      if (this.humans.isHumanInGreetRange()) {
         this.audio.playMeow();
-        this.recordHumanEngagement();
+        this.humans.recordHumanEngagement();
       }
       return;
     }
@@ -2905,35 +2310,6 @@ export class GameScene extends Phaser.Scene {
     this.logInteractDiag("engaging dialogue", nearestEntry, nearestDist, nearestRawEntry, nearestRawDist);
     this.audio.playMeow();
     this.showCatDialogue(cat);
-  }
-
-  /**
-   * True when at least one visible human NPC is within the player-initiated
-   * greet radius. Used to gate the meow SFX for "free greet (no cat in
-   * range)" — without a target cat AND without a nearby human, the press is
-   * a silent idle greet rather than a social interaction.
-   */
-  private isHumanInGreetRange(): boolean {
-    const range = GP.CAT_PERSON_PLAYER_GREET_DIST;
-    for (const human of this.humans) {
-      if (!human.active || !human.visible) continue;
-      const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, human.x, human.y);
-      if (dist <= range) return true;
-    }
-    return false;
-  }
-
-  /**
-   * Stamp `lastHumanEngagementAt` so the ambient-bubble throttle treats
-   * the player as recently-engaged. Public so
-   * {@link CamilleEncounterSystem} can fire it after each paired beat
-   * and Beat-5 acceptance, matching the pre-refactor behaviour.
-   */
-  recordHumanEngagement(): void {
-    const now = this.time.now;
-    if (now - this.lastHumanEngagementAt < HUMAN_ENGAGEMENT_COOLDOWN_MS) return;
-    this.lastHumanEngagementAt = now;
-    this.scoring.recordHumanEngagement();
   }
 
   private updateCloseFriendsScore(): void {

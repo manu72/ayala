@@ -262,6 +262,12 @@ function makeFrozenUpdateScene() {
 
   Object.assign(scene, {
     camille: { trySpawnAmbientDawnVisit: vi.fn(), tick: vi.fn() },
+    humans: {
+      updatePlayerStationaryAnchor: vi.fn(),
+      tick: vi.fn(),
+      isHumanInGreetRange: vi.fn(() => false),
+      recordHumanEngagement: vi.fn(),
+    },
     cinematicActive: false,
     dayNight: { currentPhase: "day", isHeatActive: false, update: vi.fn() },
     engagedDialogueNPC: null,
@@ -292,9 +298,8 @@ function makeFrozenUpdateScene() {
     spaceKey: { justDown: false },
     stats: { canRun: true, collapsed: false, speedMultiplier: 1, update: vi.fn() },
     tabKey: { justDown: false },
-    updateHumans: vi.fn(),
+    updateHumansAndHazards: vi.fn(),
     updateNPCs: vi.fn(),
-    updatePlayerStationaryAnchor: vi.fn(),
   });
 
   return scene;
