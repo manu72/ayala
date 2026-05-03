@@ -261,6 +261,7 @@ function makeFrozenUpdateScene() {
   );
 
   Object.assign(scene, {
+    camille: { trySpawnAmbientDawnVisit: vi.fn(), tick: vi.fn() },
     cinematicActive: false,
     dayNight: { currentPhase: "day", isHeatActive: false, update: vi.fn() },
     engagedDialogueNPC: null,

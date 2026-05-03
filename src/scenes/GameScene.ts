@@ -23,7 +23,6 @@ import {
   GP,
   REST_HOLD_MS,
   COLLAPSE_RECOVERY_MS,
-  CAMILLE_BEAT5_DECISION_MS,
   STATIONARY_GREET_CAP,
   STATIONARY_MOVE_THRESHOLD_PX,
 } from "../config/gameplayConstants";
@@ -50,20 +49,11 @@ import {
 import { AI_PERSONAS } from "../ai/personas";
 import { getRandomColonyLine } from "../data/cat-dialogue";
 import { NPC_DIALOGUE_SCRIPTS } from "../data/npc-dialogue";
-import {
-  CAMILLE_ENCOUNTER_BEATS,
-  CAMILLE_ENCOUNTER_5_PREDECISION_STEPS,
-  CAMILLE_ENCOUNTER_5_JOURNEY_STEPS,
-  CAMILLE_BEAT5_ACCEPT_LINE,
-  CAMILLE_BEAT5_TIMEOUT_LINE,
-  mergeCamilleBeatSteps,
-  type EncounterStep,
-} from "../data/camille-encounter-beats";
 import { AudioSystem } from "../systems/AudioSystem";
+import { CamilleEncounterSystem } from "../systems/CamilleEncounterSystem";
 import { hasLineOfSightTiles } from "../utils/lineOfSight";
 import { shouldUseHumanAiBubble, shouldUseNamedHumanScriptedBubble } from "../utils/humanAiBubbleEligibility";
 import { getEffectiveHumanPhase } from "../utils/humanSpawnPolicy";
-import { buildCamilleEraCareRoutes } from "../utils/camilleCareRoute";
 import { buildDialogueRecencyContext } from "../utils/dialogueRecency";
 import { createNavigationGrid, routeHumanPath, type NavigationGrid } from "../utils/humanRoutePath";
 import { computeReachableCells, getCellKey } from "../utils/mapExploration";
@@ -186,8 +176,10 @@ export class GameScene extends Phaser.Scene {
   /** Objects collision layer, shared with {@link ColonyDynamicsSystem} + {@link SnatcherSystem}. */
   objectsLayer: Phaser.Tilemaps.TilemapLayer | null = null;
   private overheadLayer!: Phaser.Tilemaps.TilemapLayer | null;
-  private map!: Phaser.Tilemaps.Tilemap;
-  private knownCats: Set<string> = new Set();
+  /** Shared with {@link CamilleEncounterSystem} for spawn-point lookup. */
+  map!: Phaser.Tilemaps.Tilemap;
+  /** Shared with {@link CamilleEncounterSystem} for AI dialogue context. */
+  knownCats: Set<string> = new Set();
   private shelterPoints: Array<{ x: number; y: number }> = [];
   private collapseRecoveryTimer = 0;
   private collapseRecovering = false;
@@ -213,7 +205,8 @@ export class GameScene extends Phaser.Scene {
   private dogs: DogNPC[] = [];
   /** Tracks which cats have already shown narration this approach, to avoid repeating. */
   private narrationShown = new Set<string>();
-  private dialogueService!: DialogueService;
+  /** Shared with {@link CamilleEncounterSystem} for Camille beat LLM calls. */
+  dialogueService!: DialogueService;
   territory!: TerritorySystem;
   /** Owns dumping events + dynamic colony population (mirrors `StoryKeys.COLONY_COUNT`). */
   colony!: ColonyDynamicsSystem;
@@ -225,18 +218,13 @@ export class GameScene extends Phaser.Scene {
    */
   audio!: AudioSystem;
 
-  // Camille encounter sequence state
-  private camilleNPC: HumanNPC | null = null;
-  private manuNPC: HumanNPC | null = null;
-  private kishNPC: HumanNPC | null = null;
-  private camilleEncounterActive = false;
-  private camilleRollDay = 0;
-  /** Counts Camille-era humans that reached the park perimeter after a care route. */
-  private camilleEraParkExitCount = 0;
-  /** How many spawned humans must exit before {@link onCamilleEraParkExit} tears down (1–3). */
-  private camilleEraParkExitTarget = 1;
-  /** Defers care-route removal until after updateHumans finishes iterating. */
-  private camilleEraTeardownPending = false;
+  /**
+   * Owns the Camille Beat 1–5 narrative arc: ambient care-route spawns
+   * during the Camille era, the scripted 4-day encounter schedule, the
+   * Beat 5 consent window, pickup tween, and Kish "slow down" aside. See
+   * {@link CamilleEncounterSystem}.
+   */
+  camille!: CamilleEncounterSystem;
 
   /** NPC currently locked in dialogue with the player. */
   private engagedDialogueNPC: NPCCat | null = null;
@@ -281,26 +269,17 @@ export class GameScene extends Phaser.Scene {
   private static readonly LAST_PARTNER_HOLD_MS = 1500;
 
   // Snatcher + colony dynamics state now live on `this.snatcher` and
-  // `this.colony` respectively (see extracted systems above). The scene
-  // retains only cross-system orchestration state.
-  private pendingCamilleEncounter = 0;
+  // `this.colony` respectively. Camille beat state lives on `this.camille`.
 
   /**
-   * True while Camille's beat-5 10-second decision window is open. The player
-   * must walk Mamma Cat within CAMILLE_BEAT5_TOUCH_DIST of Camille and press
-   * Space to greet her within the window for the beat to resolve as "yes";
-   * otherwise Camille speaks a gentle timeout line and the beat re-arms.
+   * Freeze flag for player input during the beat-5 pickup sequence. Set by
+   * {@link CamilleEncounterSystem.runBeat5Pickup} just before the tween
+   * starts and cleared on accept completion / scene shutdown. While true,
+   * movement, interact, and rest inputs are all ignored so the pickup
+   * cinematic cannot be short-circuited. Public because the Camille system
+   * mutates it; scene update reads it to short-circuit movement.
    */
-  private beat5DecisionActive = false;
-  /** TimerEvent for the beat-5 decision window; cancelled on accept / shutdown. */
-  private beat5DecisionTimer: Phaser.Time.TimerEvent | null = null;
-  /**
-   * Freeze flag for player input during the beat-5 pickup sequence. Set just
-   * before the pickup tween starts and cleared on scene shutdown / cleanup.
-   * While true, movement, interact, and rest inputs are all ignored so the
-   * pickup cinematic cannot be short-circuited.
-   */
-  private playerInputFrozen = false;
+  playerInputFrozen = false;
   /**
    * Reference position used to decide whether Mamma Cat is "stationary" for
    * the purposes of the per-human greeting cap. Reset to the player's
@@ -318,20 +297,9 @@ export class GameScene extends Phaser.Scene {
   private gameOverTriggered = false;
   private lastHumanEngagementAt = -Infinity;
 
-  /** One scripted "Kish, slow down" beat per Camille evening spawn. */
-  private kishCamilleSlowDownShown = false;
-
-  /** Camille lines when she recognises a named colony cat (Phase 4.5). */
-  private readonly camillePersonalLines: Record<string, string[]> = {
-    Blacky: ["Blacky, you handsome boy.", "Hey, Blacky.", "There's my boy."],
-    Tiger: ["Tiger, not hissing today?", "Hi, Tiger.", "Easy, Tiger."],
-    Jayco: ["Jayco. Good to see you.", "Hey, Jayco."],
-    "Jayco Jr": ["Hey, little one.", "Jayco Jr — you're getting big."],
-    Fluffy: ["Fluffy. How's the fountain?", "Hi, Fluffy."],
-    Pedigree: ["Well, look at you.", "Hello, beautiful."],
-    Ginger: ["Ginger. Hey, sweetie.", "Hi, Ginger."],
-    "Ginger B": ["There you are, Ginger B.", "Hey, you."],
-  };
+  // Kish "slow down" flag + Camille personal lines moved into
+  // `CamilleEncounterSystem`. Use `this.camille.getPersonalLineForNamedCat(name)`
+  // when Camille recognises a named colony cat in `pickScriptedGreeting`.
 
   /** Dialogue lives in HUDScene (1x zoom) so it's always visible. */
   get dialogue(): {
@@ -392,9 +360,11 @@ export class GameScene extends Phaser.Scene {
 
     // Beat-5 cleanup. A scene shutdown mid-pickup could strand the player
     // invisible with a disabled body and an active input freeze, which
-    // would make the next scene start unplayable. Clear all of it.
-    this.cancelBeat5Decision();
-    this.beat5DecisionActive = false;
+    // would make the next scene start unplayable. Delegated to the Camille
+    // system, which owns the decision timer, Beat-5 flags, paused-human
+    // roster, and scripted-slow-down flag. We still defensively restore
+    // player body/alpha here because `playerInputFrozen` is a scene-level
+    // flag read by scene `update()`.
     this.playerInputFrozen = false;
     if (this.player) {
       const body = this.player.body as Phaser.Physics.Arcade.Body | undefined;
@@ -402,7 +372,6 @@ export class GameScene extends Phaser.Scene {
       this.player.setAlpha(1);
       this.player.setVisible(true);
     }
-    this.resumeCamilleEraHumans();
 
     // Stop music + release sound instances so a scene restart (e.g. after a
     // snatcher capture at GameScene.ts:3750) doesn't stack overlapping loops.
@@ -414,6 +383,7 @@ export class GameScene extends Phaser.Scene {
     // NOT auto-wired").
     this.snatcher?.shutdown();
     this.colony?.shutdown();
+    this.camille?.shutdown();
   }
 
   /** Remove pending intro delayed calls and tweens (idempotent). */
@@ -516,6 +486,8 @@ export class GameScene extends Phaser.Scene {
     this.colony.resetTransient();
     this.snatcher = new SnatcherSystem(this);
     this.snatcher.snatchedThisNight = data?.snatcherCapture === true;
+    this.camille = new CamilleEncounterSystem(this);
+    this.camille.resetTransient();
     this.chapterCheckTimer = 0;
     this.narrationShown = new Set();
     const scripted = new ScriptedDialogueService(NPC_DIALOGUE_SCRIPTS);
@@ -537,11 +509,6 @@ export class GameScene extends Phaser.Scene {
           )
         : scripted;
     this.territory = new TerritorySystem();
-    this.camilleNPC = null;
-    this.manuNPC = null;
-    this.kishNPC = null;
-    this.camilleEncounterActive = false;
-    this.camilleRollDay = 0;
 
     // Clear story state from any prior session before restoring
     for (const key of [
@@ -789,15 +756,16 @@ export class GameScene extends Phaser.Scene {
       });
     }
 
-    // Recovery: encounter 5 was started but narrative never completed (save/load mid-encounter).
-    // Must call startCamilleEncounter to actually spawn Camille; just setting flags
-    // leaves pendingCamilleEncounter orphaned with no NPC to trigger proximity.
+    // Recovery: encounter 5 was started but narrative never completed
+    // (save/load mid-encounter). Must call CamilleEncounterSystem.startEncounter
+    // to actually spawn Camille; just setting flags leaves
+    // `pendingCamilleEncounter` orphaned with no NPC to trigger proximity.
     if (
       data?.loadSave &&
       (this.registry.get(StoryKeys.CAMILLE_ENCOUNTER) as number) >= 5 &&
       this.registry.get(StoryKeys.ENCOUNTER_5_COMPLETE) !== true
     ) {
-      this.time.delayedCall(500, () => this.startCamilleEncounter(5));
+      this.time.delayedCall(500, () => this.camille.startEncounter(5));
     }
   }
 
@@ -1217,7 +1185,7 @@ export class GameScene extends Phaser.Scene {
 
     const deltaSec = delta / 1000;
     this.dayNight.update(delta);
-    this.trySpawnCamilleAmbientDawnVisit();
+    this.camille.trySpawnAmbientDawnVisit();
 
     this.player.speedMultiplier = this.stats.speedMultiplier;
 
@@ -1422,8 +1390,7 @@ export class GameScene extends Phaser.Scene {
       this.checkZone6Visit();
       this.checkChapterProgression();
       this.recheckTerritoryEligibility();
-      this.checkCamilleEncounter();
-      this.checkCamilleProximity();
+      this.camille.tick();
       this.snatcher.updateSpawnCheck();
       this.colony.tick();
       this.checkTerritoryBenefits();
@@ -1503,7 +1470,7 @@ export class GameScene extends Phaser.Scene {
 
   private checkChapterProgression(): void {
     if (this.dialogue.isActive) return;
-    if (this.camilleEncounterActive) return;
+    if (this.camille.isEncounterActive) return;
 
     const namedKnown = new Set([...this.knownCats].filter((name) => !name.startsWith("Colony Cat")));
     const triggered = this.chapters.check({
@@ -1615,834 +1582,19 @@ export class GameScene extends Phaser.Scene {
     return Phaser.Math.Distance.Between(x, y, shopsPOI.x ?? 0, shopsPOI.y ?? 0) < 120;
   }
 
-  // ──────────── Chapter 5: Camille Encounters ────────────
-
-  /**
-   * Check if conditions are met to spawn a Camille encounter for this evening.
-   * Called during phase transitions or periodic checks.
-   */
-  private checkCamilleEncounter(): void {
-    if (!this.map || !this.dayNight || !this.chapters || this.chapters.chapter < 5) return;
-    if (this.dayNight.currentPhase !== "evening") {
-      this.camilleEncounterActive = false;
-      return;
-    }
-    if (this.camilleEncounterActive) return;
-
-    const currentEncounter = (this.registry.get(StoryKeys.CAMILLE_ENCOUNTER) as number) ?? 0;
-    const encounter5Complete = this.registry.get(StoryKeys.ENCOUNTER_5_COMPLETE) === true;
-    const awaitingEncounter5Completion = currentEncounter >= 5 && !encounter5Complete;
-    if (currentEncounter >= 5) {
-      if (encounter5Complete) {
-        this.trySpawnCamilleAmbientEveningVisit();
-        return;
-      }
-    }
-
-    // One encounter per game day — check if we've already done one today
-    const lastDay = (this.registry.get(StoryKeys.CAMILLE_ENCOUNTER_DAY) as number) ?? 0;
-    if (lastDay >= this.dayNight.dayCount) return;
-
-    // Roll once per evening, not every periodic check
-    if (this.camilleRollDay >= this.dayNight.dayCount) {
-      if (!awaitingEncounter5Completion) this.trySpawnCamilleAmbientEveningVisit();
-      return;
-    }
-    this.camilleRollDay = this.dayNight.dayCount;
-
-    // 60% chance per eligible evening (100% for first encounter)
-    if (currentEncounter > 0 && Math.random() > 0.6) {
-      if (!awaitingEncounter5Completion) this.trySpawnCamilleAmbientEveningVisit();
-      return;
-    }
-
-    this.startCamilleEncounter(Math.min(currentEncounter + 1, 5));
-  }
-
-  /**
-   * Ambient dawn care visit: Chapter 5+ only, once per game day, no story
-   * encounter pending (evening encounters stay evening-only).
-   */
-  private trySpawnCamilleAmbientDawnVisit(): void {
-    if (!this.map || !this.dayNight || !this.chapters || this.chapters.chapter < 5) return;
-    if (this.dayNight.currentPhase !== "dawn") return;
-    if (this.camilleNPC) return;
-    const last = (this.registry.get(StoryKeys.CAMILLE_AMBIENT_DAWN_DAY) as number) ?? 0;
-    if (last >= this.dayNight.dayCount) return;
-    const completedEnc = (this.registry.get(StoryKeys.CAMILLE_ENCOUNTER) as number) ?? 0;
-    const encounter5Complete = this.registry.get(StoryKeys.ENCOUNTER_5_COMPLETE) === true;
-    if (completedEnc >= 5 && !encounter5Complete) return;
-    this.spawnCamilleEraCareRouteNPCs({
-      includeManu: completedEnc >= 1,
-      includeKish: completedEnc >= 2,
-    });
-    this.registry.set(StoryKeys.CAMILLE_AMBIENT_DAWN_DAY, this.dayNight.dayCount);
-  }
-
-  /**
-   * Ambient evening care visit when no story encounter rolled/spawned this
-   * evening — still at most one evening visit per day via registry.
-   */
-  private trySpawnCamilleAmbientEveningVisit(): void {
-    if (!this.map || !this.dayNight || !this.chapters || this.chapters.chapter < 5) return;
-    if (this.dayNight.currentPhase !== "evening") return;
-    if (this.camilleNPC) return;
-    const last = (this.registry.get(StoryKeys.CAMILLE_AMBIENT_EVENING_DAY) as number) ?? 0;
-    if (last >= this.dayNight.dayCount) return;
-    const completedEnc = (this.registry.get(StoryKeys.CAMILLE_ENCOUNTER) as number) ?? 0;
-    this.spawnCamilleEraCareRouteNPCs({
-      includeManu: completedEnc >= 1,
-      includeKish: completedEnc >= 2,
-    });
-    this.registry.set(StoryKeys.CAMILLE_AMBIENT_EVENING_DAY, this.dayNight.dayCount);
-  }
-
-  /**
-   * Spawn Camille-era humans on the Chapter 5+ care route.
-   * Manu appears from story encounter 2 onward (after encounter 1); Kish from encounter 3 onward (after encounter 2).
-   * Ambient callers pass flags from completed {@link StoryKeys.CAMILLE_ENCOUNTER}.
-   */
-  private spawnCamilleEraCareRouteNPCs(opts: {
-    includeManu: boolean;
-    includeKish: boolean;
-    sustainAcrossInactivePhases?: boolean;
-  }): void {
-    if (!this.map) return;
-    const { includeManu, includeKish, sustainAcrossInactivePhases = true } = opts;
-    this.camilleEraParkExitCount = 0;
-    this.camilleEraParkExitTarget = 1 + (includeManu ? 1 : 0) + (includeKish ? 1 : 0);
-    this.kishCamilleSlowDownShown = false;
-    const routes = buildCamilleEraCareRoutes((name) => this.map.findObject("spawns", (o) => o.name === name));
-    const navigationGrid = this.createHumanNavigationGrid();
-    const routeBase: Pick<
-      HumanConfig,
-      "activePhases" | "sustainAcrossInactivePhases" | "exitAfterRoute" | "onExitParkComplete" | "lingerWaypointIndex"
-    > = {
-      activePhases: ["dawn", "evening"],
-      sustainAcrossInactivePhases,
-      exitAfterRoute: true,
-      /** Start pathing at waypoint 0 so the underpass entry pause runs (see HumanNPC.activate). */
-      lingerWaypointIndex: 0,
-      onExitParkComplete: () => this.onCamilleEraParkExit(),
-    };
-
-    const camilleConfig: HumanConfig = {
-      type: "camille",
-      speed: 35,
-      path: routes.camille.map((w) => ({ x: w.x, y: w.y })),
-      waypointPauseMs: routes.camille.map((w) => w.pauseMs),
-      ...routeBase,
-    };
-    const camille = new HumanNPC(this, this.routeHumanConfig(camilleConfig, navigationGrid));
-    this.camilleNPC = camille;
-    this.manuNPC = null;
-    this.kishNPC = null;
-    const toRegister: HumanNPC[] = [camille];
-
-    if (includeManu) {
-      const manuConfig: HumanConfig = {
-        type: "manu",
-        speed: 35,
-        path: routes.manu.map((w) => ({ x: w.x, y: w.y })),
-        waypointPauseMs: routes.manu.map((w) => w.pauseMs),
-        ...routeBase,
-      };
-      const manu = new HumanNPC(this, this.routeHumanConfig(manuConfig, navigationGrid));
-      this.manuNPC = manu;
-      toRegister.push(manu);
-    }
-    if (includeKish) {
-      const kishConfig: HumanConfig = {
-        type: "kish",
-        speed: 50,
-        path: routes.kish.map((w) => ({ x: w.x, y: w.y })),
-        waypointPauseMs: routes.kish.map((w) => w.pauseMs),
-        ...routeBase,
-      };
-      const kish = new HumanNPC(this, this.routeHumanConfig(kishConfig, navigationGrid));
-      this.kishNPC = kish;
-      toRegister.push(kish);
-    }
-
-    for (const npc of toRegister) {
-      if (this.groundLayer) this.physics.add.collider(npc, this.groundLayer);
-      if (this.objectsLayer) this.physics.add.collider(npc, this.objectsLayer);
-      this.humans.push(npc);
-    }
-  }
-
-  /** After every spawned Camille-era human reaches the park exit, tear down refs. */
-  private onCamilleEraParkExit(): void {
-    this.camilleEraParkExitCount += 1;
-    if (this.camilleEraParkExitCount < this.camilleEraParkExitTarget) return;
-    this.camilleEraTeardownPending = true;
-    this.pendingCamilleEncounter = 0;
-    this.camilleEncounterActive = false;
-  }
-
-  /** Remove Camille-era route NPCs after the human update loop is no longer iterating. */
-  private flushCamilleEraTeardown(): void {
-    if (!this.camilleEraTeardownPending) return;
-    this.camilleEraTeardownPending = false;
-    this.camilleEraParkExitCount = 0;
-    this.camilleEraParkExitTarget = 1;
-    for (const npc of [this.camilleNPC, this.manuNPC, this.kishNPC]) {
-      if (!npc) continue;
-      const idx = this.humans.indexOf(npc);
-      if (idx !== -1) this.humans.splice(idx, 1);
-      npc.destroy();
-    }
-    this.camilleNPC = null;
-    this.manuNPC = null;
-    this.kishNPC = null;
-  }
-
-  /**
-   * Check if Mamma Cat is close enough to Camille (and has line-of-sight)
-   * to trigger the pending encounter narrative.
-   */
-  private checkCamilleProximity(): void {
-    if (this.pendingCamilleEncounter === 0) return;
-    if (this.dayNight.currentPhase !== "evening") return;
-    if (!this.camilleNPC?.visible) return;
-    if (this.dialogue.isActive) return;
-
-    const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, this.camilleNPC.x, this.camilleNPC.y);
-    if (dist > GP.CAMILLE_ENCOUNTER_DIST) return;
-    if (!this.hasLineOfSight(this.player.x, this.player.y, this.camilleNPC.x, this.camilleNPC.y)) return;
-
-    const encounterNum = this.pendingCamilleEncounter;
-    this.pendingCamilleEncounter = 0;
-    this.playCamilleEncounterNarrative(encounterNum);
-  }
-
-  private cleanupCamilleNPCs(): void {
-    this.camilleEraTeardownPending = false;
-    this.camilleEraParkExitCount = 0;
-    this.camilleEraParkExitTarget = 1;
-    this.kishCamilleSlowDownShown = false;
-    this.cancelBeat5Decision();
-    this.beat5DecisionActive = false;
-    this.playerInputFrozen = false;
-    for (const npc of [this.camilleNPC, this.manuNPC, this.kishNPC]) {
-      if (!npc) continue;
-      npc.resumeFromEncounter();
-      const idx = this.humans.indexOf(npc);
-      if (idx !== -1) this.humans.splice(idx, 1);
-      npc.destroy();
-    }
-    this.camilleNPC = null;
-    this.manuNPC = null;
-    this.kishNPC = null;
-  }
-
-  /**
-   * Pause Camille (and any nearby story humans Manu/Kish) for the duration
-   * of a paired beat so they stop walking their circuits during narration.
-   * Mirrors the Phase 5.1a contract: the visual speaker is fixed while the
-   * modal + bubble play. Idempotent.
-   */
-  private pauseCamilleEraHumans(faceTargetX: number): void {
-    this.camilleNPC?.pauseForEncounter(faceTargetX);
-    this.manuNPC?.pauseForEncounter(faceTargetX);
-    this.kishNPC?.pauseForEncounter(faceTargetX);
-  }
-
-  /** Resume any paused Camille-era humans. Safe to call when nothing is paused. */
-  private resumeCamilleEraHumans(): void {
-    this.camilleNPC?.resumeFromEncounter();
-    this.manuNPC?.resumeFromEncounter();
-    this.kishNPC?.resumeFromEncounter();
-  }
-
-  private startCamilleEncounter(encounterNum: number): void {
-    this.cleanupCamilleNPCs();
-    this.camilleEncounterActive = true;
-    this.spawnCamilleEraCareRouteNPCs({
-      includeManu: encounterNum >= 2,
-      includeKish: encounterNum >= 3,
-      sustainAcrossInactivePhases: false,
-    });
-    this.registry.set(StoryKeys.CAMILLE_AMBIENT_EVENING_DAY, this.dayNight.dayCount);
-    this.pendingCamilleEncounter = encounterNum;
-  }
-
-  /**
-   * Delayed Camille beat: re-check proximity + LOS before dialogue (Phase 4.5).
-   * If conditions fail, re-arm {@link pendingCamilleEncounter} for the next 5s poll.
-   */
-  private scheduleCamilleEncounterDialogue(delayMs: number, encounterNum: number, run: () => void): void {
-    this.time.delayedCall(delayMs, () => {
-      if (!this.camilleNPC?.active) {
-        this.pendingCamilleEncounter = encounterNum;
-        return;
-      }
-      const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, this.camilleNPC.x, this.camilleNPC.y);
-      if (dist > GP.CAMILLE_ENCOUNTER_DIST) {
-        this.pendingCamilleEncounter = encounterNum;
-        return;
-      }
-      if (!this.hasLineOfSight(this.player.x, this.player.y, this.camilleNPC.x, this.camilleNPC.y)) {
-        this.pendingCamilleEncounter = encounterNum;
-        return;
-      }
-      if (this.dialogue.isActive) {
-        this.pendingCamilleEncounter = encounterNum;
-        return;
-      }
-      run();
-    });
-  }
-
-  /**
-   * Authored fallback lines + beat objectives for Camille's five encounters.
-   *
-   * Beat 1 and beat 5 stay scripted (pure narrator POV, plus the chapter-6
-   * handoff at the end) — those beats carry crucial story weight and must
-   * survive LLM failure byte-for-byte. Beats 2-4 attempt AI dialogue sourced
-   * from Camille's persona with the `encounterBeat` objective; on timeout,
-   * parse failure, or any network issue the `fallbackLines` array is shown
-   * so the player always sees the beat.
-   *
-   * All registry/trust/chapter side-effects live in {@link runCamilleEncounterBeat}
-   * — the LLM never controls story progression.
-   */
-  /**
-   * Paired narrator + spoken beats for Camille's 2–4th encounters.
-   * See {@link ../data/camille-encounter-beats} for the authored data
-   * and pairing contract; {@link runCamilleEncounterBeat} drives it.
-   */
-  private readonly camilleEncounterBeats = CAMILLE_ENCOUNTER_BEATS;
-
-  /**
-   * Beat 5 split into a pre-decision phase (Camille asks) and a journey
-   * phase (narration over the pickup tween). The 10-second player decision
-   * window sits between them. See
-   * {@link ../data/camille-encounter-beats.CAMILLE_ENCOUNTER_5_PREDECISION_STEPS}.
-   */
-  private readonly camilleBeat5PredecisionSteps = CAMILLE_ENCOUNTER_5_PREDECISION_STEPS;
-  private readonly camilleBeat5JourneySteps = CAMILLE_ENCOUNTER_5_JOURNEY_STEPS;
-
-  private playCamilleEncounterNarrative(encounterNum: number): void {
-    const hud = this.scene.get("HUDScene") as HUDScene | undefined;
-    hud?.pulseEdge(0x332200, 0.2, 2000);
-
-    switch (encounterNum) {
-      case 1:
-        this.registry.set(StoryKeys.CAMILLE_ENCOUNTER, encounterNum);
-        this.registry.set(StoryKeys.CAMILLE_ENCOUNTER_DAY, this.dayNight.dayCount);
-        hud?.showNarration(
-          "A new human. She moves differently from the others. Slowly. Gently. She smells like... kindness?",
-        );
-        break;
-
-      case 2:
-        this.scheduleCamilleEncounterDialogue(8000, 2, () => {
-          this.runCamilleEncounterBeat(2, hud);
-        });
-        break;
-
-      case 3:
-        this.scheduleCamilleEncounterDialogue(10000, 3, () => {
-          this.runCamilleEncounterBeat(3, hud);
-        });
-        break;
-
-      case 4:
-        this.scheduleCamilleEncounterDialogue(10000, 4, () => {
-          this.runCamilleEncounterBeat(4, hud);
-        });
-        break;
-
-      case 5:
-        this.scheduleCamilleEncounterDialogue(12000, 5, () => {
-          this.registry.set(StoryKeys.CAMILLE_ENCOUNTER, encounterNum);
-          this.registry.set(StoryKeys.CAMILLE_ENCOUNTER_DAY, this.dayNight.dayCount);
-          this.playCamilleBeat5Predecision(hud);
-        });
-        break;
-    }
-  }
-
-  /**
-   * Drive a paired narrator+spoken sequence.
-   *
-   * For each step:
-   *  1. The narrator line appears in the modal dialogue box.
-   *  2. If the step has a `spoken` line and a valid `speaker`, a
-   *     persistent bubble is spawned above the speaker with that line.
-   *  3. When the player presses Space, both the modal advances AND the
-   *     current spoken bubble is torn down before the next step begins.
-   *
-   * On entry the speaker (and, when the speaker is Camille, the other
-   * Camille-era humans) is frozen via `pauseForEncounter` so they stop
-   * walking their circuits for the beat. Pause lifecycle is then owned
-   * by the CALLER: {@link onComplete} runs with the pause still engaged,
-   * and the caller decides whether to resume (a single-shot beat), hold
-   * (chain into a decision window or follow-up beat), or reconfigure.
-   * Early dismissals (modal closed via click/x or external `.hide()`) are
-   * the only case where `playPairedBeat` itself releases the pause — via
-   * its internal `onHide` fallback — because there is no caller continuation.
-   *
-   * `onComplete` is only invoked when the player reads through the
-   * full sequence — matching the existing DialogueSystem contract.
-   *
-   * `onStepShown(index)` fires after the narrator line + spoken bubble for
-   * step `index` are on screen. Used by the beat-5 journey phase to kick
-   * off the pickup tween in lockstep with the first journey narration line.
-   */
-  private playPairedBeat(
-    steps: ReadonlyArray<EncounterStep>,
-    speaker: HumanNPC | null,
-    onComplete: () => void,
-    opts?: { onStepShown?: (index: number) => void },
-  ): void {
-    if (steps.length === 0) {
-      onComplete();
-      return;
-    }
-
-    if (speaker) {
-      speaker.pauseForEncounter(this.player.x);
-    }
-    const isCamilleBeat = speaker !== null && speaker === this.camilleNPC;
-    if (isCamilleBeat) {
-      this.pauseCamilleEraHumans(this.player.x);
-    }
-
-    const narratorLines = steps.map((s) => s.narrator);
-    let currentBubble: Phaser.GameObjects.Text | null = null;
-    let completed = false;
-    const clearBubble = (): void => {
-      if (currentBubble) {
-        currentBubble.destroy();
-        currentBubble = null;
-      }
-    };
-
-    this.dialogue.show(
-      narratorLines,
-      () => {
-        completed = true;
-        clearBubble();
-        onComplete();
-      },
-      {
-        onLineShown: (index: number): void => {
-          clearBubble();
-          const step = steps[index];
-          if (step?.spoken && speaker && speaker.active && speaker.visible) {
-            currentBubble = this.renderHumanBubble(speaker, step.spoken, { persistent: true });
-          }
-          opts?.onStepShown?.(index);
-        },
-        onHide: (): void => {
-          clearBubble();
-          // Only auto-release pause on EARLY dismiss (player closed the
-          // modal before the final line). Natural completion hands control
-          // to onComplete, which owns the pause lifecycle from there.
-          if (!completed) {
-            if (isCamilleBeat) {
-              this.resumeCamilleEraHumans();
-            } else if (speaker) {
-              speaker.resumeFromEncounter();
-            }
-          }
-        },
-      },
-    );
-  }
-
-  /**
-   * Execute one of Camille's middle encounter beats (2/3/4).
-   *
-   * Flow:
-   *  1. Pin registry side-effects *before* any async work so pause/resume
-   *     doesn't re-trigger the beat.
-   *  2. Play Camille's crouch animation.
-   *  3. Try AI dialogue for Camille's SPOKEN lines only (beat `objective`
-   *     makes this explicit). The authored narrator lines always run.
-   *     AI lines replace authored spoken fallbacks positionally.
-   *  4. Drive the paired narrator+spoken sequence via {@link playPairedBeat}
-   *     so the narrator renders in the modal and Camille's voice renders
-   *     as a floating bubble above her head.
-   *  5. Apply beat-specific side-effects in `onComplete` (stats restore,
-   *     emotes, HUD narration) so they run regardless of whether AI
-   *     spoken lines succeeded or the scripted fallback ran.
-   */
-  private runCamilleEncounterBeat(n: 2 | 3 | 4, hud: HUDScene | undefined): void {
-    this.registry.set(StoryKeys.CAMILLE_ENCOUNTER, n);
-    this.registry.set(StoryKeys.CAMILLE_ENCOUNTER_DAY, this.dayNight.dayCount);
-    this.camilleNPC?.playCrouchToward(this.player.x);
-
-    const beat = this.camilleEncounterBeats[n];
-    const onComplete = (): void => {
-      this.recordHumanEngagement();
-      switch (n) {
-        case 2:
-          hud?.showNarration("She watches you eat. She doesn't reach for you. She understands.");
-          this.stats.restore("hunger", 30);
-          break;
-        case 3:
-          this.emotes.show(this, this.player, "heart");
-          if (this.camilleNPC) this.emotes.show(this, this.camilleNPC, "heart");
-          hud?.showNarration("Something shifts between you. A thread, invisible but real.");
-          break;
-        case 4:
-          this.emotes.show(this, this.player, "heart");
-          if (this.camilleNPC) this.emotes.show(this, this.camilleNPC, "heart");
-          hud?.showNarration("The small one is loud. But Camille keeps her still. She understands you.");
-          break;
-      }
-      // Release the encounter pause so Camille (and Manu / Kish during the
-      // later beats) resume their circuits. playPairedBeat now intentionally
-      // leaves the pause engaged through onComplete so callers like the
-      // beat-5 state machine can chain into a follow-up phase without a
-      // one-frame "resume then re-pause" flicker.
-      this.resumeCamilleEraHumans();
-    };
-
-    // `runBeatWith` drives a single beat render + persist pass. It is
-    // called with either the AI-returned spoken lines (success path) or
-    // `null` (AI failed / unavailable — scripted fallback only).
-    //
-    // Persistence MUST happen here rather than in
-    // `requestCamilleEncounterLines` because the AI payload and the
-    // merged render surface can diverge: `mergeCamilleBeatSteps` maps
-    // AI lines only into authored-spoken slots (narrator-only steps stay
-    // silent), drops surplus AI lines, and substitutes authored
-    // fallbacks when AI lines are missing. Persisting the raw AI payload
-    // would therefore misrepresent what Camille actually said to Mamma
-    // Cat on screen — and future LLM calls, which condition on this
-    // history, would be grounded in a fiction.
-    const runBeatWith = (spokenOverrides: string[] | null): void => {
-      const { steps, spokenRendered } = mergeCamilleBeatSteps(beat.steps, spokenOverrides);
-      this.playPairedBeat(steps, this.camilleNPC, onComplete);
-      if (spokenRendered.length > 0) {
-        void this.persistCamilleBeatHistory(n, spokenRendered);
-      }
-    };
-
-    void this.requestCamilleEncounterLines(n, beat.objective)
-      .then((lines) => runBeatWith(lines))
-      .catch(() => runBeatWith(null));
-  }
-
-  /**
-   * Persist the spoken lines Camille was actually seen saying during a
-   * middle encounter beat (2/3/4). Called from `runCamilleEncounterBeat`
-   * after the render surface has been computed by `mergeCamilleBeatSteps`,
-   * so the stored record matches what the player saw — not the raw AI
-   * payload, which may be reshaped by the merge.
-   *
-   * Errors are swallowed: conversation history is best-effort context for
-   * future LLM calls, not a source of truth, and an IDB hiccup should
-   * never break a Camille beat.
-   */
-  private async persistCamilleBeatHistory(n: 2 | 3 | 4, spokenRendered: string[]): Promise<void> {
-    try {
-      const snapshotTrust = this.trust.global;
-      await storeConversation({
-        speaker: "Camille",
-        timestamp: this.dayNight.totalGameTimeMs,
-        realTimestamp: Date.now(),
-        gameDay: this.dayNight.dayCount,
-        lines: spokenRendered,
-        trustBefore: snapshotTrust,
-        trustAfter: snapshotTrust,
-        chapter: this.chapters.chapter,
-        playerAction: `camille_encounter_${n}`,
-        gameStateSnapshot: {
-          trustWithSpeaker: snapshotTrust,
-          trustGlobal: this.trust.global,
-          timeOfDay: this.dayNight.currentPhase,
-          hunger: this.stats.hunger,
-          thirst: this.stats.thirst,
-          energy: this.stats.energy,
-        },
-      });
-    } catch {
-      // Best-effort persistence; deliberately silent.
-    }
-  }
-
-  // ──────────── Camille Beat 5 (three-phase decision gate) ────────────
-  //
-  // Beat 5 is the Chapter-6 handoff: Camille asks Mamma Cat to come home
-  // with her, and the PLAYER must consent by walking Mamma Cat to Camille
-  // and greeting her (Space) within {@link CAMILLE_BEAT5_DECISION_MS}. This
-  // replaces the pre-v0.3.2 auto-pickup flow where Camille simply narrated
-  // the journey regardless of player action — the new flow gives agency to
-  // Mamma Cat and cleanly resolves the narrative/visual desync where
-  // Camille would walk off without her.
-  //
-  // Phases:
-  //   A: playCamilleBeat5Predecision  — paired beat, Camille asks.
-  //   B: beginBeat5Decision            — 10s window, player consent gate.
-  //   C: playCamilleBeat5Journey       — paired beat over pickup tween.
-  //
-  // On timeout Camille speaks {@link CAMILLE_BEAT5_TIMEOUT_LINE}, resumes
-  // her circuit, and `pendingCamilleEncounter = 5` so the next proximity
-  // poll re-arms the beat. The ENCOUNTER_5_COMPLETE registry flag is only
-  // set at the end of Phase C — a timed-out beat does NOT count as done.
-
-  /** Phase A: Camille asks. Runs first; holds the encounter pause through onComplete. */
-  private playCamilleBeat5Predecision(hud: HUDScene | undefined): void {
-    void hud;
-    this.camilleNPC?.playCrouchToward(this.player.x);
-    this.playPairedBeat(this.camilleBeat5PredecisionSteps, this.camilleNPC, () => this.beginBeat5Decision());
-  }
-
-  /**
-   * Phase B: open the 10-second decision window. Camille stays crouched
-   * (encounter pause remains engaged from Phase A), a gentle HUD narration
-   * primes the player, and a heart emote floats above Camille so the ask
-   * reads emotionally without embedding a heart glyph in bubble text.
-   *
-   * Acceptance is driven from {@link tryInteract}: the same Space-to-greet
-   * action the player already knows. Timeout falls through to {@link failBeat5}.
-   */
-  private beginBeat5Decision(): void {
-    this.beat5DecisionActive = true;
-    this.cancelBeat5Decision(); // defensive: drop any stale timer
-    if (this.camilleNPC) {
-      this.emotes.show(this, this.camilleNPC, "heart");
-      this.pauseCamilleEraHumans(this.player.x);
-    }
-    const hud = this.scene.get("HUDScene") as HUDScene | undefined;
-    hud?.showNarration("Approach Camille and press Space to go with her.");
-    this.beat5DecisionTimer = this.time.delayedCall(CAMILLE_BEAT5_DECISION_MS, () => {
-      if (!this.beat5DecisionActive) return;
-      this.failBeat5();
-    });
-  }
-
-  /** Cancel any in-flight beat-5 decision timer. Safe to call repeatedly. */
-  private cancelBeat5Decision(): void {
-    if (this.beat5DecisionTimer) {
-      this.beat5DecisionTimer.remove(false);
-      this.beat5DecisionTimer = null;
-    }
-  }
-
-  /**
-   * Check whether the player has accepted beat 5 this frame. Called from
-   * {@link tryInteract} when a no-target Space greet would otherwise fire.
-   * Returns `true` if the greet was consumed as the beat-5 acceptance (the
-   * caller should then SKIP the usual `player.startGreeting()`), `false`
-   * otherwise (normal greet flow).
-   */
-  private tryAcceptBeat5Decision(): boolean {
-    if (!this.beat5DecisionActive) return false;
-    if (!this.camilleNPC || !this.camilleNPC.active || !this.camilleNPC.visible) return false;
-    const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, this.camilleNPC.x, this.camilleNPC.y);
-    if (dist > GP.CAMILLE_BEAT5_TOUCH_DIST) return false;
-    this.acceptBeat5();
-    return true;
-  }
-
-  /** Player accepted within the window → play the accept line, then Phase C. */
-  private acceptBeat5(): void {
-    this.beat5DecisionActive = false;
-    this.cancelBeat5Decision();
-    this.player.startGreeting();
-    this.recordHumanEngagement();
-    if (this.camilleNPC) {
-      this.emotes.show(this, this.camilleNPC, "heart");
-      this.emotes.show(this, this.player, "heart");
-    }
-    // Show Camille's acceptance line as a persistent bubble, then Phase C.
-    const speaker = this.camilleNPC;
-    if (!speaker) {
-      // Shouldn't happen — defensive fallthrough.
-      this.playCamilleBeat5Journey();
-      return;
-    }
-    const bubble = this.renderHumanBubble(speaker, CAMILLE_BEAT5_ACCEPT_LINE, {
-      persistent: true,
-    });
-    this.time.delayedCall(3200, () => {
-      bubble?.destroy();
-      this.playCamilleBeat5Journey();
-    });
-  }
-
-  /** Window expired → gentle fallback, resume Camille, re-arm the beat. */
-  private failBeat5(): void {
-    this.beat5DecisionActive = false;
-    this.cancelBeat5Decision();
-    const speaker = this.camilleNPC;
-    if (speaker && speaker.active && speaker.visible) {
-      const bubble = this.renderHumanBubble(speaker, CAMILLE_BEAT5_TIMEOUT_LINE, {
-        persistent: true,
-      });
-      this.time.delayedCall(2600, () => bubble?.destroy());
-    }
-    this.resumeCamilleEraHumans();
-    // Re-arm so the next CAMILLE_ENCOUNTER_DIST proximity poll retries.
-    this.pendingCamilleEncounter = 5;
-  }
-
-  /**
-   * Phase C: narration over the pickup tween. The journey paired beat runs
-   * two narrator-only steps in the modal; on the FIRST step shown we kick
-   * off the pickup tween ({@link runBeat5Pickup}) so "The garden shrinks
-   * behind you" is perfectly synchronised with Mamma Cat being lifted into
-   * the carrier and Camille walking toward the underpass exit.
-   */
-  private playCamilleBeat5Journey(): void {
-    this.playerInputFrozen = true;
-    this.player.setVelocity(0);
-    this.playPairedBeat(
-      this.camilleBeat5JourneySteps,
-      this.camilleNPC,
-      () => {
-        this.registry.set(StoryKeys.ENCOUNTER_5_COMPLETE, true);
-        this.autoSave();
-        this.startChapter6Sequence();
-      },
-      {
-        onStepShown: (index) => {
-          if (index === 0) this.runBeat5Pickup();
-        },
-      },
-    );
-  }
-
-  /**
-   * Run the "Camille picks up Mamma Cat" visual:
-   *   1. Tween Mamma Cat to Camille's feet while fading out (carrier).
-   *   2. Disable Mamma's physics body + hide her.
-   *   3. Tween Camille off-screen toward the underpass exit (her spawn
-   *      waypoint) with her walk animation.
-   * All under the existing `playerInputFrozen` and `beat5PickupInProgress`
-   * guards so nothing else can steer the player while this plays out.
-   */
-  private runBeat5Pickup(): void {
-    const speaker = this.camilleNPC;
-    if (!speaker) return;
-
-    // Step 1+2: Mamma → Camille's feet, fade, hide.
-    const mammaBody = this.player.body as Phaser.Physics.Arcade.Body | undefined;
-    this.tweens.add({
-      targets: this.player,
-      x: speaker.x,
-      y: speaker.y + 4,
-      alpha: 0,
-      duration: 900,
-      ease: "Sine.easeInOut",
-      onComplete: () => {
-        mammaBody?.setEnable(false);
-        this.player.setVisible(false);
-      },
-    });
-
-    // Step 3: Camille walks off-screen toward her underpass spawn waypoint.
-    // Release just Camille (not the whole Camille-era group — Manu/Kish
-    // should continue their own circuits normally once the beat resolves).
-    const exitTarget = speaker.config.path[0] ?? { x: speaker.x - 200, y: speaker.y };
-    this.manuNPC?.resumeFromEncounter();
-    this.kishNPC?.resumeFromEncounter();
-    speaker.resumeFromEncounter();
-    this.tweens.add({
-      targets: speaker,
-      x: exitTarget.x,
-      y: exitTarget.y,
-      duration: 3200,
-      ease: "Sine.easeInOut",
-      onUpdate: () => {
-        const dx = exitTarget.x - speaker.x;
-        const dy = exitTarget.y - speaker.y;
-        const key = speaker.humanType;
-        const dir = Math.abs(dx) > Math.abs(dy) ? (dx < 0 ? "left" : "right") : dy < 0 ? "up" : "down";
-        if (this.anims.exists(`${key}-walk-${dir}`)) {
-          speaker.anims.play(`${key}-walk-${dir}`, true);
-        }
-      },
-      onComplete: () => {
-        speaker.setVisible(false);
-      },
-    });
-  }
-
-  /**
-   * Ask Camille's AI persona for beat-appropriate spoken lines. Returns the
-   * trimmed lines on success, or `null` on any failure (the caller then
-   * substitutes authored fallback text without error propagation).
-   *
-   * This method is intentionally SIDE-EFFECT-FREE — it does not persist
-   * conversation history. Persistence happens in
-   * {@link persistCamilleBeatHistory} after the caller has merged the AI
-   * lines with the authored beat via {@link mergeCamilleBeatSteps}, so the
-   * stored record reflects what Camille actually said on screen rather
-   * than the raw AI payload (which may be reshaped or partially dropped
-   * by the merge).
-   */
-  private async requestCamilleEncounterLines(n: 2 | 3 | 4, objective: string): Promise<string[] | null> {
-    if (!(this.dialogueService instanceof FallbackDialogueService)) {
-      return null;
-    }
-    if (!("Camille" in AI_PERSONAS)) return null;
-
-    try {
-      const history = await getRecentConversations("Camille", 10);
-      const conversationHistory: ConversationEntry[] = history.map((r) => ({
-        timestamp: r.timestamp,
-        speaker: r.speaker,
-        mammaCatTurn: r.mammaCatTurn,
-        text: r.lines.join(" "),
-      }));
-      const conversationCount = await getConversationCount("Camille");
-      const isFirstConversation = conversationCount === 0;
-
-      const request: DialogueRequest = {
-        speaker: "Camille",
-        speakerType: "human",
-        target: "Mamma Cat",
-        gameState: {
-          chapter: this.chapters.chapter,
-          timeOfDay: this.dayNight.currentPhase,
-          trustGlobal: this.trust.global,
-          trustWithSpeaker: this.trust.global,
-          hunger: this.stats.hunger,
-          thirst: this.stats.thirst,
-          energy: this.stats.energy,
-          daysSurvived: this.dayNight.dayCount,
-          knownCats: Array.from(this.knownCats),
-          recentEvents: [],
-        },
-        conversationHistory,
-        isFirstConversation,
-        relationshipStage: calculateRelationshipStage({
-          isFirstConversation,
-          conversationCount,
-          trustWithSpeaker: this.trust.global,
-        }),
-        encounterBeat: { kind: "camille_encounter", n, objective },
-      };
-
-      const response = await this.dialogueService.getDialogue(request, {
-        // Engaged-style budget: encounters are modal beats, the player is
-        // committed to the beat and can tolerate a longer wait than an
-        // ambient bubble.
-        timeoutMs: 5000,
-      });
-
-      const lines = response.lines.map((l) => l.trim()).filter((l) => l.length > 0);
-      return lines.length === 0 ? null : lines;
-    } catch {
-      return null;
-    }
-  }
-
   // ──────────── Chapter 6: Home ────────────
 
   private onChapter6Start(): void {
     this.startChapter6Sequence();
   }
 
-  private startChapter6Sequence(): void {
-    // Fade to black
+  /**
+   * Chapter 6 fade-to-black hand-off. Called by
+   * {@link CamilleEncounterSystem.playBeat5Journey} the moment the pickup
+   * tween completes, so the home-room narration is synchronised with
+   * Mamma Cat disappearing into Camille's carrier.
+   */
+  startChapter6Sequence(): void {
     this.cameras.main.fade(2000, 0, 0, 0, false, (_cam: Phaser.Cameras.Scene2D.Camera, progress: number) => {
       if (progress >= 1) {
         this.showChapter6Narration();
@@ -3217,22 +2369,11 @@ export class GameScene extends Phaser.Scene {
         }
       }
 
-      if (
-        !this.kishCamilleSlowDownShown &&
-        this.camilleNPC &&
-        this.kishNPC &&
-        !this.kishNPC.isGreeting &&
-        !this.camilleNPC.isEncounterPaused &&
-        !this.kishNPC.isEncounterPaused &&
-        Phaser.Math.Distance.Between(this.kishNPC.x, this.kishNPC.y, this.camilleNPC.x, this.camilleNPC.y) < 80
-      ) {
-        this.kishCamilleSlowDownShown = true;
-        // Consolidated into the ambient-bubble channel so all human-spoken
-        // dialogue uses the same visual surface as greetings and encounter
-        // beats. Camille is the speaker; Kish just hears it.
-        this.renderGreetingBubble(this.camilleNPC, "Kish, slow down.");
-        this.emotes.show(this, this.camilleNPC, "curious");
-      }
+      // Delegated to the Camille encounter system: at most one "Kish, slow
+      // down." aside per Camille evening spawn, gated on both NPCs being
+      // active, ungreeted, un-paused, and within 80px. The system renders
+      // the Camille bubble and the curious emote when it fires.
+      this.camille.tryPlayKishSlowDownBeat();
 
       // Category A: passers-through glance at nearby cats (including Mamma Cat).
       // Both female ("jogger") and male ("jogger_male") joggers behave the
@@ -3282,7 +2423,7 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    this.flushCamilleEraTeardown();
+    this.camille.flushTeardown();
 
     for (const dog of this.dogs) {
       dog.update(now, this.player, this.npcs, this.emotes, this);
@@ -3508,10 +2649,8 @@ export class GameScene extends Phaser.Scene {
   /** Pick a scripted line for a human greeting, honouring Camille's per-cat overrides. */
   private pickScriptedGreeting(human: HumanNPC, nearNpcCat: NPCCat | undefined): string {
     if (nearNpcCat && human.humanType === "camille") {
-      const named = this.camillePersonalLines[nearNpcCat.npcName];
-      if (named?.length) {
-        return named[Math.floor(Math.random() * named.length)]!;
-      }
+      const named = this.camille.getPersonalLineForNamedCat(nearNpcCat.npcName);
+      if (named) return named;
     }
     const lines = this.catPersonGreetings[human.humanType] ?? this.catPersonGreetings.feeder!;
     return lines[Math.floor(Math.random() * lines.length)]!;
@@ -3539,7 +2678,13 @@ export class GameScene extends Phaser.Scene {
    *    encounter beat step) and MUST `.destroy()` it when advancing
    *    or aborting. Used by the Camille encounter loop.
    */
-  private renderHumanBubble(human: HumanNPC, line: string, opts?: { persistent?: boolean }): Phaser.GameObjects.Text {
+  /**
+   * Shared render surface for human-spoken bubbles. Public so
+   * {@link CamilleEncounterSystem} can render paired-beat spoken lines
+   * through the same channel as greetings (WORKING_MEMORY 5.1a: single
+   * visual surface for all human dialogue).
+   */
+  renderHumanBubble(human: HumanNPC, line: string, opts?: { persistent?: boolean }): Phaser.GameObjects.Text {
     const bubble = this.add
       .text(human.x, human.y - 30, line, {
         fontFamily: "Arial, Helvetica, sans-serif",
@@ -3570,9 +2715,10 @@ export class GameScene extends Phaser.Scene {
   /**
    * Back-compat wrapper for the ambient (auto-fading) bubble path.
    * Kept as a named helper so call sites read naturally at the greeting
-   * sites.
+   * sites. Public so {@link CamilleEncounterSystem} can reuse the same
+   * channel for Kish's scripted "slow down" aside.
    */
-  private renderGreetingBubble(human: HumanNPC, line: string): void {
+  renderGreetingBubble(human: HumanNPC, line: string): void {
     this.renderHumanBubble(human, line);
   }
 
@@ -3729,7 +2875,7 @@ export class GameScene extends Phaser.Scene {
       // is open, consume the press as the "yes, take me home" answer.
       // acceptBeat5() fires Mamma's greeting animation itself so we return
       // early here and do NOT double-trigger startGreeting().
-      if (this.tryAcceptBeat5Decision()) {
+      if (this.camille.tryAcceptBeat5Decision()) {
         this.logInteractDiag("consumed by Beat-5 decision", null, Infinity, nearestRawEntry, nearestRawDist);
         this.audio.playMeow();
         return;
@@ -3777,7 +2923,13 @@ export class GameScene extends Phaser.Scene {
     return false;
   }
 
-  private recordHumanEngagement(): void {
+  /**
+   * Stamp `lastHumanEngagementAt` so the ambient-bubble throttle treats
+   * the player as recently-engaged. Public so
+   * {@link CamilleEncounterSystem} can fire it after each paired beat
+   * and Beat-5 acceptance, matching the pre-refactor behaviour.
+   */
+  recordHumanEngagement(): void {
     const now = this.time.now;
     if (now - this.lastHumanEngagementAt < HUMAN_ENGAGEMENT_COOLDOWN_MS) return;
     this.lastHumanEngagementAt = now;
