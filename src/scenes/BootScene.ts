@@ -214,6 +214,21 @@ export class BootScene extends Phaser.Scene {
       });
     }
 
+    // Snatcher spritesheets (68x68 frames, single-row strips)
+    const snatcherSheets: Array<[string, string]> = [
+      ["snatcher_stand", "snatcher1_stand"],
+      ["snatcher_walk_e", "snatcher1_walk_east"],
+      ["snatcher_walk_w", "snatcher1_walk_west"],
+      ["snatcher_walk_n", "snatcher1_walk_north"],
+      ["snatcher_walk_s", "snatcher1_walk_south"],
+    ];
+    for (const [key, file] of snatcherSheets) {
+      this.load.spritesheet(key, `assets/sprites/${file}.png`, {
+        frameWidth: 68,
+        frameHeight: 68,
+      });
+    }
+
     // Audio: two looping background tracks and a one-shot meow SFX.
     // Phaser's SoundManager keeps these cached across scene restarts so we
     // only pay the decode cost once at boot.
