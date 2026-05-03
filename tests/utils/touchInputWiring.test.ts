@@ -249,7 +249,7 @@ function makeJournalGameScene() {
     registry: { get: vi.fn((key: string) => (key === "KNOWN_CATS" ? [] : undefined)), set: vi.fn() },
     resumeGame: vi.fn(),
     scoring: { total: 0, getBreakdown: vi.fn(() => ({})) },
-    territory: { isClaimed: false },
+    territory: { isClaimed: false, visitCell: vi.fn(() => null) },
     trust: { getCatTrust: vi.fn(() => 0) },
   };
 }
@@ -262,6 +262,8 @@ function makeFrozenUpdateScene() {
 
   Object.assign(scene, {
     camille: { trySpawnAmbientDawnVisit: vi.fn(), tick: vi.fn() },
+    catDialogue: { tickEngagement: vi.fn(), refreshLastPartner: vi.fn(), isSkippedPartner: vi.fn(() => false), lastPartnerName: null, show: vi.fn(), clearPartnerIfMatches: vi.fn() },
+    collapse: { tick: vi.fn(() => "continue") },
     humans: {
       updatePlayerStationaryAnchor: vi.fn(),
       tick: vi.fn(),
@@ -298,6 +300,8 @@ function makeFrozenUpdateScene() {
     spaceKey: { justDown: false },
     stats: { canRun: true, collapsed: false, speedMultiplier: 1, update: vi.fn() },
     tabKey: { justDown: false },
+    territory: { isClaimed: false, visitCell: vi.fn(() => null) },
+    map: { width: 100 },
     updateHumansAndHazards: vi.fn(),
     updateNPCs: vi.fn(),
   });

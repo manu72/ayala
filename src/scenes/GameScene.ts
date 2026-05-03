@@ -12,77 +12,46 @@ import { ThreatIndicator } from "../systems/ThreatIndicator";
 import { SaveSystem } from "../systems/SaveSystem";
 import { TrustSystem } from "../systems/TrustSystem";
 import { ScoringSystem, type ScoreBreakdown } from "../systems/ScoringSystem";
-import { EmoteSystem, type EmoteType } from "../systems/EmoteSystem";
+import { EmoteSystem } from "../systems/EmoteSystem";
 import { ChapterSystem } from "../systems/ChapterSystem";
 import { TerritorySystem } from "../systems/TerritorySystem";
 import { ColonyDynamicsSystem } from "../systems/ColonyDynamicsSystem";
 import { SnatcherSystem } from "../systems/SnatcherSystem";
 import { HumanPresenceSystem } from "../systems/HumanPresenceSystem";
+import { CollapseSystem } from "../systems/CollapseSystem";
+import { CatDialogueController } from "../systems/CatDialogueController";
 import type { HUDScene } from "./HUDScene";
 import {
   GP,
   REST_HOLD_MS,
-  COLLAPSE_RECOVERY_MS,
 } from "../config/gameplayConstants";
 import { StoryKeys, migrateLegacyIntroFlag } from "../registry/storyKeys";
 import {
   ScriptedDialogueService,
   type DialogueService,
-  type DialogueResponse,
-  type ConversationEntry,
 } from "../services/DialogueService";
-import { calculateRelationshipStage } from "../services/DialogueRelationship";
 import { AIDialogueService } from "../services/AIDialogueService";
 import { FallbackDialogueService } from "../services/FallbackDialogueService";
 import type { DialogueHooks } from "../systems/DialogueSystem";
-import {
-  storeConversation,
-  getRecentConversations,
-  getConversationCount,
-  getNpcMemories,
-  addNpcMemory,
-} from "../services/ConversationStore";
 import { AI_PERSONAS } from "../ai/personas";
-import { getRandomColonyLine } from "../data/cat-dialogue";
 import { NPC_DIALOGUE_SCRIPTS } from "../data/npc-dialogue";
 import { AudioSystem } from "../systems/AudioSystem";
 import { CamilleEncounterSystem } from "../systems/CamilleEncounterSystem";
 import { hasLineOfSightTiles } from "../utils/lineOfSight";
-import { buildDialogueRecencyContext } from "../utils/dialogueRecency";
 import { createNavigationGrid, routeHumanPath, type NavigationGrid } from "../utils/humanRoutePath";
-import { computeReachableCells, getCellKey } from "../utils/mapExploration";
 import { applyLifeLoss, MAX_LIVES } from "../utils/lifeFlow";
 import { markGameOver } from "../utils/gameOverState";
 import { consumeSnatchedThisNight, restoreSnatchedThisNight } from "../utils/snatcherNightState";
 import { EMPTY_MOVEMENT_INTENT, type MovementIntent } from "../input/playerIntent";
 
 const INTERACTION_DISTANCE = GP.INTERACTION_DIST;
-const DIALOGUE_BREAK_DISTANCE = GP.DIALOGUE_BREAK_DIST;
 const LEARN_NAME_DISTANCE = GP.LEARN_NAME_DIST;
 const TILE_SIZE = GP.TILE_SIZE;
 
-/**
- * Canonical emote for each dialogue pose. Used both for the opening emote
- * shown when dialogue starts and to validate/normalise `response.emote`
- * so the closing emote can never contradict the pose (e.g. "heart" after
- * a hostile hiss).
- */
-const POSE_TO_EMOTE: Record<import("../services/DialogueService").SpeakerPose, EmoteType> = {
-  friendly: "heart",
-  hostile: "hostile",
-  wary: "alert",
-  curious: "curious",
-  submissive: "curious",
-  sleeping: "sleep",
-};
+// Cat-dialogue emote tables, `CatDialoguePersistenceSnapshot`, and the
+// named-cat "first meeting" registry mapping all live in
+// `CatDialogueController` now (Commit D).
 
-/**
- * Emotes that are inconsistent with a hostile pose. A cat mid-hiss must
- * never flash a heart or friendly cue: when the dialogue response pairs
- * one of these emotes with a hostile pose, we override the emote to stay
- * on-model.
- */
-const POSITIVE_EMOTES: ReadonlySet<EmoteType> = new Set(["heart"]);
 const DEFAULT_ZOOM = 2.5;
 const PEEK_ZOOM = 0.8;
 const ZOOM_DURATION = 500;
@@ -106,18 +75,6 @@ export interface DropoffVehicleOptions {
   displayWidth?: number;
   displayHeight?: number;
   tint?: number | null;
-}
-
-interface CatDialoguePersistenceSnapshot {
-  timestamp: number;
-  realTimestamp: number;
-  gameDay: number;
-  chapter: number;
-  timeOfDay: string;
-  hunger: number;
-  thirst: number;
-  energy: number;
-  trustBefore: number;
 }
 
 export interface NPCEntry {
@@ -174,21 +131,12 @@ export class GameScene extends Phaser.Scene {
   /** Shared with {@link CamilleEncounterSystem} for AI dialogue context. */
   knownCats: Set<string> = new Set();
   private shelterPoints: Array<{ x: number; y: number }> = [];
-  private collapseRecoveryTimer = 0;
-  private collapseRecovering = false;
   /**
-   * Rising/falling-edge tracker for `stats.collapsed`. `onCollapsed` /
-   * `onRecovered` only fire on the frame the flag transitions. Reset in
-   * `create()` after a save load so `fromJSON` never triggers narration.
+   * Owns the collapse → recovery → witness-narration state machine.
+   * Scene polls {@link CollapseSystem.tick} each frame; see the system
+   * for the detailed invariants (pre-teleport witness snapshot, etc.).
    */
-  private wasCollapsed = false;
-  /**
-   * The nearest friendly NPC cat captured at the moment of collapse, used by
-   * `recoverFromCollapse()` for witness-aware narration and bonus trust. Held
-   * by object ref (not name) so the check survives name churn. Null when no
-   * witness was in range, or between collapses.
-   */
-  private collapseWitness: NPCCat | null = null;
+  collapse!: CollapseSystem;
   /** Shared with {@link SnatcherSystem} for scripted-sighting flee emotes. */
   emotes!: EmoteSystem;
   chapters!: ChapterSystem;
@@ -226,28 +174,14 @@ export class GameScene extends Phaser.Scene {
    */
   camille!: CamilleEncounterSystem;
 
-  /** NPC currently locked in dialogue with the player. */
-  private engagedDialogueNPC: NPCCat | null = null;
-  private dialogueRequestInFlight = false;
-  /** Fires a subtle "thinking" emote if AI dialogue is slow to return. */
-  private aiThinkingTimer: Phaser.Time.TimerEvent | null = null;
-
   /**
-   * NPC the player just finished a conversation with. The player must leave
-   * the cat's interaction range before re-engaging, otherwise a single Space
-   * press (or held key) chains straight into the next scripted response —
-   * turning Blacky's first-meeting dialogue into the "Still here? Good..."
-   * return dialogue immediately, with no time having elapsed in-world.
-   *
-   * Cleared in `updateNPCs` when EITHER the player steps outside
-   * `INTERACTION_DISTANCE`, OR `LAST_PARTNER_HOLD_MS` elapses. The time
-   * expiry rescues the stationary-Mamma case: if the player closes a
-   * dialogue and doesn't move, waiting a beat is enough to re-engage —
-   * without it, the only way out was to walk a pixel away and back.
+   * Owns the entire cat-dialogue lifecycle: engagement gating, the async
+   * AI request, response rendering, and the post-close side effects
+   * (trust awards, registry flags, persistence, autosave). The scene
+   * keeps {@link tryInteract} as the entry point and calls into this
+   * controller for the dialogue path. See {@link CatDialogueController}.
    */
-  private lastDialoguePartner: NPCCat | null = null;
-  private lastDialoguePartnerAt = 0;
-  private static readonly LAST_PARTNER_HOLD_MS = 1500;
+  catDialogue!: CatDialogueController;
 
   // Snatcher + colony dynamics state now live on `this.snatcher` and
   // `this.colony` respectively. Camille beat state lives on `this.camille`.
@@ -264,9 +198,11 @@ export class GameScene extends Phaser.Scene {
   // Human stationary-greet anchor moved to HumanPresenceSystem.
   private previousPlayerX = 0;
   private previousPlayerY = 0;
-  private reachableCells = new Set<number>();
+  // Flood-filled reachable-cell set moved to `this.territory.reachableCells`
+  // (Commit D). Use `this.territory.initialiseExploration(...)` and
+  // `this.territory.visitCell(...)` instead.
   private trustEventUnsubscribe: (() => void) | null = null;
-  private pendingGameOverReason: "collapse" | "snatched" | null = null;
+  pendingGameOverReason: "collapse" | "snatched" | null = null;
   private gameOverTriggered = false;
 
   // Kish "slow down" flag + Camille personal lines moved into
@@ -300,22 +236,10 @@ export class GameScene extends Phaser.Scene {
       body?.setEnable(true);
       this.player?.setVisible(true);
     }
-    if (this.engagedDialogueNPC) {
-      this.engagedDialogueNPC.disengageDialogue();
-      this.engagedDialogueNPC = null;
-    }
-    this.lastDialoguePartner = null;
-    this.lastDialoguePartnerAt = 0;
     this.player?.stopGreeting();
-    this.collapseWitness = null;
-    this.wasCollapsed = false;
-    this.collapseRecovering = false;
-    this.collapseRecoveryTimer = 0;
     this.pendingGameOverReason = null;
     this.gameOverTriggered = false;
     this.dialogue.dismiss();
-    this.aiThinkingTimer?.remove(false);
-    this.aiThinkingTimer = null;
 
     // Ambient human-bubble abort + roster reset delegated to
     // {@link HumanPresenceSystem.shutdown} (see its docstring for why the
@@ -348,6 +272,8 @@ export class GameScene extends Phaser.Scene {
     this.colony?.shutdown();
     this.camille?.shutdown();
     this.humans?.shutdown();
+    this.collapse?.shutdown();
+    this.catDialogue?.shutdown();
   }
 
   /** Remove pending intro delayed calls and tweens (idempotent). */
@@ -395,10 +321,8 @@ export class GameScene extends Phaser.Scene {
     this.restHoldActive = false;
     this.isPeeking = false;
     this.isPaused = false;
-    this.collapseRecovering = false;
-    this.collapseRecoveryTimer = 0;
-    this.wasCollapsed = false;
-    this.collapseWitness = null;
+    this.collapse = new CollapseSystem(this);
+    this.collapse.resetTransient();
 
     this.map = this.make.tilemap({ key: "atg" });
     const parkTileset = this.map.addTilesetImage("park-tiles", "park-tiles");
@@ -455,6 +379,8 @@ export class GameScene extends Phaser.Scene {
     // so an instant interaction on frame 0 doesn't fire the
     // "moved beyond threshold" reset that clears every greet counter.
     this.humans.resetTransient(spawnX, spawnY);
+    this.catDialogue = new CatDialogueController(this);
+    this.catDialogue.resetTransient();
     this.chapterCheckTimer = 0;
     this.narrationShown = new Set();
     const scripted = new ScriptedDialogueService(NPC_DIALOGUE_SCRIPTS);
@@ -1104,20 +1030,9 @@ export class GameScene extends Phaser.Scene {
   update(time: number, delta: number): void {
     if (this.cinematicActive) return;
 
-    // Release NPC from dialogue engagement if dialogue was dismissed
-    if (this.engagedDialogueNPC && !this.dialogue.isActive) {
-      this.engagedDialogueNPC.disengageDialogue();
-      this.engagedDialogueNPC = null;
-    } else if (this.engagedDialogueNPC && this.dialogue.isActive) {
-      const cat = this.engagedDialogueNPC;
-      const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, cat.x, cat.y);
-      const broken = dist > DIALOGUE_BREAK_DISTANCE || cat.state === "fleeing" || !cat.active;
-      if (broken) {
-        this.dialogue.dismiss();
-        cat.disengageDialogue();
-        this.engagedDialogueNPC = null;
-      }
-    }
+    // Dialogue engagement release (close / out-of-range / flee / destroy)
+    // is owned by {@link CatDialogueController.tickEngagement}.
+    this.catDialogue.tickEngagement();
 
     // Escape must be checked before the pause gate so it can unpause.
     // When the journal is open, ESC closes it (same pattern as J key).
@@ -1156,41 +1071,15 @@ export class GameScene extends Phaser.Scene {
 
     this.player.speedMultiplier = this.stats.speedMultiplier;
 
-    // Collapse rising/falling-edge detection. Kept symmetrical and co-located
-    // with the polling branch below so the whole collapse state machine lives
-    // in one place. `onCollapsed` runs narrative side effects (narration, trust
-    // penalty, registry increment, witness capture) exactly once per collapse;
-    // `onRecovered` mirrors it for bookkeeping after `recoverFromCollapse()`
-    // flips `stats.collapsed` back to false.
-    if (this.stats.collapsed && !this.wasCollapsed) {
-      this.onCollapsed();
-    } else if (!this.stats.collapsed && this.wasCollapsed) {
-      this.onRecovered();
-    }
-    this.wasCollapsed = this.stats.collapsed;
-
-    // Collapse recovery — pins the player and drives the 3 s blackout timer.
-    // Consistent with every other polled state transition in this scene; no
-    // event emitter, no delayedCall, no listener lifecycle to manage.
-    if (this.stats.collapsed) {
-      this.player.setVelocity(0);
-      if (!this.collapseRecovering) {
-        this.collapseRecovering = true;
-        this.collapseRecoveryTimer = 0;
-      }
-      this.collapseRecoveryTimer += delta;
-      if (this.collapseRecoveryTimer >= COLLAPSE_RECOVERY_MS) {
-        if (this.pendingGameOverReason === "collapse") {
-          this.stats.resetCollapse();
-          this.collapseRecovering = false;
-          this.collapseRecoveryTimer = 0;
-          this.triggerGameOver("collapse");
-        } else {
-          this.recoverFromCollapse();
-        }
-      }
+    // Collapse rising/falling-edge detection + 3 s blackout timer live
+    // in {@link CollapseSystem}. The scene only has to translate the
+    // returned outcome into its local control flow.
+    const collapseOutcome = this.collapse.tick(delta);
+    if (collapseOutcome === "game_over") {
+      this.triggerGameOver("collapse");
       return;
     }
+    if (collapseOutcome === "blackout") return;
 
     // ──── Resting state ────
     if (this.player.isResting) {
@@ -1649,19 +1538,14 @@ export class GameScene extends Phaser.Scene {
   }
 
   private initialiseTerritoryExploration(spawnX: number, spawnY: number): void {
-    const width = this.map.width;
-    const height = this.map.height;
-    const startX = Math.floor(spawnX / TILE_SIZE);
-    const startY = Math.floor(spawnY / TILE_SIZE);
-
-    this.reachableCells = computeReachableCells({
-      width,
-      height,
-      startX,
-      startY,
+    const total = this.territory.initialiseExploration({
+      width: this.map.width,
+      height: this.map.height,
+      startX: Math.floor(spawnX / TILE_SIZE),
+      startY: Math.floor(spawnY / TILE_SIZE),
       isBlocked: (x, y) => this.isExplorationCellBlocked(x, y),
     });
-    this.scoring.setTotalExplorableCells(this.reachableCells.size);
+    this.scoring.setTotalExplorableCells(total);
     this.visitCurrentCell();
   }
 
@@ -1759,13 +1643,10 @@ export class GameScene extends Phaser.Scene {
   }
 
   private visitCurrentCell(): void {
-    if (this.reachableCells.size === 0) return;
     const tileX = Math.floor(this.player.x / TILE_SIZE);
     const tileY = Math.floor(this.player.y / TILE_SIZE);
-    const key = getCellKey(tileX, tileY, this.map.width);
-    if (this.reachableCells.has(key)) {
-      this.scoring.visitCell(key);
-    }
+    const key = this.territory.visitCell(tileX, tileY, this.map.width);
+    if (key !== null) this.scoring.visitCell(key);
   }
 
   private foodSourceKey(source: { type: SourceType; x: number; y: number }): string {
@@ -1773,114 +1654,17 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * Rising-edge handler for `stats.collapsed`. Fires exactly once on the frame
-   * the flag transitions from false to true. All side effects are idempotent
-   * enough to survive save-load (but `StatsSystem.fromJSON` also resets the
-   * flag, so in practice this only fires on a genuine in-session collapse).
+   * Called by {@link CollapseSystem.recoverFromCollapse} the moment it
+   * teleports Mamma Cat to the safe-sleep POI. Snapshots the new
+   * position so the next movement poll doesn't register a 1000+ px
+   * "step" (WORKING_MEMORY "Position-dependent checks across a
+   * teleport"), and re-fires the territory visit hook so the cell
+   * under the safe-sleep spawn counts toward the exploration grid.
    */
-  private onCollapsed(): void {
-    // Capture the nearest friendly NPC cat (with LOS) as a witness. Stored by
-    // object ref so a rename would still point to the same cat; we re-check
-    // `.active` before using it in `recoverFromCollapse`.
-    this.collapseWitness = this.findCollapseWitness();
-
-    const hud = this.scene.get("HUDScene") as HUDScene | undefined;
-    hud?.showNarration?.("You can't... go any further.");
-
-    const finalLife = this.loseLife();
-    if (!finalLife) {
-      this.trust.collapsedInColony();
-    } else {
-      this.pendingGameOverReason = "collapse";
-    }
-
-    // Defensive pre-increment normalisation — matches the peer counters
-    // (CATS_SNATCHED, PLAYER_SNATCHED_COUNT). Treating negative, fractional,
-    // or non-finite registry values as 0 prevents a corrupt value from
-    // propagating forward (and then being persisted by the next autosave,
-    // which reads `registry.get` directly without its own validation).
-    const prior = this.registry.get(StoryKeys.COLLAPSE_COUNT);
-    const priorCount = typeof prior === "number" && Number.isFinite(prior) && prior >= 0 ? Math.floor(prior) : 0;
-    this.registry.set(StoryKeys.COLLAPSE_COUNT, priorCount + 1);
-  }
-
-  /**
-   * Falling-edge handler. Currently a no-op hook; the recovery narration and
-   * trust credit are emitted from `recoverFromCollapse()` itself because they
-   * depend on witness range at the moment of teleport, not at the moment the
-   * flag flips. Kept as a distinct symbol so the edge detection above reads
-   * symmetrically and a future change (e.g. an end-of-blackout SFX cue) has an
-   * obvious home.
-   */
-  private onRecovered(): void {
-    // intentionally empty — see doc comment above.
-  }
-
-  /**
-   * Find the nearest friendly NPC cat within narration-witness range that has
-   * line-of-sight to the player. Returns null when no candidate qualifies.
-   * Used at the moment of collapse so a friendly cat who wanders off during
-   * the 3 s blackout can still be credited at recovery time.
-   */
-  private findCollapseWitness(): NPCCat | null {
-    let nearest: NPCCat | null = null;
-    let nearestDist: number = GP.NARRATION_WITNESS_DIST;
-    for (const { cat } of this.npcs) {
-      if (!cat.active) continue;
-      if (cat.disposition !== "friendly") continue;
-      const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, cat.x, cat.y);
-      if (dist > nearestDist) continue;
-      if (!this.hasLineOfSight(this.player.x, this.player.y, cat.x, cat.y)) continue;
-      nearest = cat;
-      nearestDist = dist;
-    }
-    return nearest;
-  }
-
-  private recoverFromCollapse(): void {
-    const safeSleep = this.map.findObject("spawns", (o) => o.name === "poi_safe_sleep");
-    const safeX = safeSleep?.x ?? this.map.widthInPixels / 2;
-    const safeY = safeSleep?.y ?? this.map.heightInPixels / 2;
-
-    // Witness-aware recovery narration. Must be evaluated BEFORE the teleport
-    // below: the intent of `witnessStillHere` is "did the witness stay close
-    // to where Mamma Cat collapsed during the 3 s blackout?" If we compute the
-    // distance after `setPosition(safeX, safeY)`, we measure from the safe-
-    // sleep POI instead — and since the POI is a dedicated map location and
-    // witnesses are ordinary colony cats scattered across the map, the range
-    // check at GP.NARRATION_WITNESS_DIST (~150 px) would almost always fail
-    // and the witness-aware branch would become unreachable. The player is
-    // velocity-pinned for the full blackout (see the `stats.collapsed` guard
-    // in update()), so `this.player.x/y` here still reflects the collapse
-    // location.
-    const witness = this.collapseWitness;
-    const witnessStillHere =
-      witness !== null &&
-      witness.active &&
-      Phaser.Math.Distance.Between(this.player.x, this.player.y, witness.x, witness.y) <= GP.NARRATION_WITNESS_DIST;
-
-    this.player.setPosition(safeX, safeY);
-    this.previousPlayerX = safeX;
-    this.previousPlayerY = safeY;
+  onCollapseTeleport(x: number, y: number): void {
+    this.previousPlayerX = x;
+    this.previousPlayerY = y;
     this.visitCurrentCell();
-    this.stats.resetCollapse();
-    this.collapseRecovering = false;
-    this.collapseRecoveryTimer = 0;
-
-    this.cameras.main.flash(500, 0, 0, 0);
-
-    const hud = this.scene.get("HUDScene") as HUDScene | undefined;
-    if (witnessStillHere && witness) {
-      hud?.showNarration?.(`You wake. ${witness.npcName} stayed close.`);
-      this.trust.supportedDuringCollapse(witness.npcName);
-      this.syncTrustDisposition(witness.npcName);
-    } else {
-      hud?.showNarration?.("You wake. Safer ground.");
-    }
-
-    this.collapseWitness = null;
-
-    this.autoSave();
   }
 
   private restoreDispositions(): void {
@@ -1903,7 +1687,7 @@ export class GameScene extends Phaser.Scene {
    * and update both the NPCCat and its ThreatIndicator. Safe to call
    * after any trust change -- it only promotes, never demotes.
    */
-  private syncTrustDisposition(catName: string): void {
+  syncTrustDisposition(catName: string): void {
     const entry = this.npcs.find((e) => e.cat.npcName === catName);
     if (!entry) return;
 
@@ -1917,15 +1701,9 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private awardFirstConversation(catName: string): void {
-    this.trust.firstConversation(catName);
-    this.syncTrustDisposition(catName);
-  }
-
-  private awardReturnConversation(catName: string): void {
-    this.trust.returnConversation(catName);
-    this.syncTrustDisposition(catName);
-  }
+  // awardFirstConversation / awardReturnConversation moved into
+  // {@link CatDialogueController} (Commit D). Both helpers were only
+  // called from the dialogue close callback.
 
   private setNPCDisposition(name: string, disposition: "friendly" | "neutral" | "territorial" | "wary"): void {
     const entry = this.npcs.find((e) => e.cat.npcName === name);
@@ -1935,7 +1713,7 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private addKnownCat(name: string): void {
+  addKnownCat(name: string): void {
     this.knownCats.add(name);
     this.registry.set("KNOWN_CATS", Array.from(this.knownCats));
 
@@ -1965,13 +1743,8 @@ export class GameScene extends Phaser.Scene {
       // triggers the next scripted response instead of it chaining from the
       // last one. The time branch prevents stationary Mamma from being
       // locked out of re-engaging a cat she didn't walk away from.
-      if (this.lastDialoguePartner === cat) {
-        const elapsedSinceChat = now - this.lastDialoguePartnerAt;
-        if (dist > INTERACTION_DISTANCE || elapsedSinceChat >= GameScene.LAST_PARTNER_HOLD_MS) {
-          this.lastDialoguePartner = null;
-          this.lastDialoguePartnerAt = 0;
-        }
-      }
+      // Logic lives in {@link CatDialogueController.refreshLastPartner}.
+      this.catDialogue.refreshLastPartner(cat, dist, now);
 
       if (!indicator.known) {
         if (dist < LEARN_NAME_DISTANCE) {
@@ -2188,7 +1961,7 @@ export class GameScene extends Phaser.Scene {
    * ("Jayco watches you from the steps", cat body-language lines); firing
    * them through a wall or building would lie about what the player can see.
    */
-  private narrateIfPerceivable(
+  narrateIfPerceivable(
     line: string,
     source?: { x: number; y: number },
     radius: number = GP.NARRATION_WITNESS_DIST,
@@ -2268,7 +2041,7 @@ export class GameScene extends Phaser.Scene {
       // out of range. Without this guard, a single Space press can both close
       // the current dialogue (Phaser dispatches key events before update())
       // and immediately re-open the next scripted response for the same NPC.
-      if (entry.cat === this.lastDialoguePartner) continue;
+      if (this.catDialogue.isSkippedPartner(entry.cat)) continue;
       if (dist < INTERACTION_DISTANCE && dist < nearestDist) {
         nearestEntry = entry;
         nearestDist = dist;
@@ -2309,7 +2082,7 @@ export class GameScene extends Phaser.Scene {
     }
     this.logInteractDiag("engaging dialogue", nearestEntry, nearestDist, nearestRawEntry, nearestRawDist);
     this.audio.playMeow();
-    this.showCatDialogue(cat);
+    this.catDialogue.show(cat);
   }
 
   private updateCloseFriendsScore(): void {
@@ -2346,313 +2119,16 @@ export class GameScene extends Phaser.Scene {
       dialogueActive: this.dialogue.isActive,
       frozen: this.playerInputFrozen,
       isGreeting: this.player.isGreeting,
-      lastPartner: this.lastDialoguePartner?.npcName ?? null,
+      lastPartner: this.catDialogue.lastPartnerName,
       selected: selected ? { name: selected.cat.npcName, dist: Math.round(selectedDist) } : null,
       nearestAny: rawNearest ? { name: rawNearest.cat.npcName, dist: Math.round(rawNearestDist) } : null,
       interactDist: INTERACTION_DISTANCE,
     });
   }
 
-  private showCatDialogue(cat: NPCCat): void {
-    const name = cat.npcName;
-
-    if (name.startsWith("Colony Cat")) {
-      this.colony.tryCreditDumpedPetComfort(cat);
-      this.dialogue.show([getRandomColonyLine()]);
-      return;
-    }
-
-    void this.requestCatDialogue(cat).catch(() => {
-      /* Errors are logged and cleaned up inside requestCatDialogue */
-    });
-  }
-
-  /**
-   * Request dialogue from the DialogueService, show it, and process the
-   * response events on completion. Conversation is stored in IndexedDB.
-   */
-  private async requestCatDialogue(cat: NPCCat): Promise<void> {
-    if (this.dialogueRequestInFlight) return;
-    this.dialogueRequestInFlight = true;
-    this.aiThinkingTimer = this.time.delayedCall(400, () => {
-      if (!this.dialogueRequestInFlight) return;
-      this.emotes.show(this, cat, "curious");
-    });
-
-    try {
-      const name = cat.npcName;
-      const trustBefore = this.trust.getCatTrust(name);
-      const persistenceSnapshot: CatDialoguePersistenceSnapshot = {
-        timestamp: this.dayNight.totalGameTimeMs,
-        realTimestamp: Date.now(),
-        gameDay: this.dayNight.dayCount,
-        chapter: this.chapters.chapter,
-        timeOfDay: this.dayNight.currentPhase,
-        hunger: this.stats.hunger,
-        thirst: this.stats.thirst,
-        energy: this.stats.energy,
-        trustBefore,
-      };
-
-      const [history, conversationCount, npcMemories] = await Promise.all([
-        getRecentConversations(name, 10),
-        getConversationCount(name),
-        getNpcMemories(name, 20),
-      ]);
-      const conversationHistory: ConversationEntry[] = history.map((r) => ({
-        timestamp: r.timestamp,
-        speaker: r.speaker,
-        mammaCatTurn: r.mammaCatTurn,
-        text: r.lines.join(" "),
-      }));
-      const lastConversation = history.length > 0 ? history[history.length - 1]! : null;
-      const gameDaysSinceLastTalk = lastConversation
-        ? Math.max(0, this.dayNight.dayCount - lastConversation.gameDay)
-        : undefined;
-      const conversationRecency = buildDialogueRecencyContext({
-        history,
-        nowRealTimestamp: Date.now(),
-        nowGameTimestamp: this.dayNight.totalGameTimeMs,
-        currentGameDay: this.dayNight.dayCount,
-      });
-      const isFirstConversation = this.isFirstConversationWithCat(conversationCount);
-
-      const request = {
-        speaker: name,
-        speakerType: "cat" as const,
-        target: "Mamma Cat",
-        gameState: {
-          chapter: persistenceSnapshot.chapter,
-          timeOfDay: persistenceSnapshot.timeOfDay,
-          trustGlobal: this.trust.global,
-          trustWithSpeaker: persistenceSnapshot.trustBefore,
-          hunger: persistenceSnapshot.hunger,
-          thirst: persistenceSnapshot.thirst,
-          energy: persistenceSnapshot.energy,
-          daysSurvived: persistenceSnapshot.gameDay,
-          knownCats: Array.from(this.knownCats),
-          recentEvents: this.buildRecentDialogueEvents(lastConversation, gameDaysSinceLastTalk),
-        },
-        conversationHistory,
-        isFirstConversation,
-        relationshipStage: calculateRelationshipStage({
-          isFirstConversation,
-          conversationCount,
-          trustWithSpeaker: trustBefore,
-          memories: npcMemories,
-        }),
-        npcMemories,
-        gameDaysSinceLastTalk,
-        conversationRecency,
-      };
-
-      const response = await this.dialogueService.getDialogue(request);
-
-      // Revalidate after async gap: cat may have fled or another dialogue opened,
-      // the player may have walked out of range, or line-of-sight may have
-      // been lost (e.g. they slipped behind an obstacle). Failing any of these
-      // checks means engaging would feel teleport-y, so we bail quietly.
-      if (this.dialogue.isActive || cat.state === "fleeing" || !cat.active) return;
-      const distToCat = Phaser.Math.Distance.Between(this.player.x, this.player.y, cat.x, cat.y);
-      if (distToCat > DIALOGUE_BREAK_DISTANCE) return;
-      if (!this.hasLineOfSight(this.player.x, this.player.y, cat.x, cat.y)) return;
-
-      cat.engageDialogue(this.player.x, this.player.y, response.speakerPose);
-      this.player.faceToward(cat.x, cat.y);
-      this.engagedDialogueNPC = cat;
-
-      // Normalise the response so the closing emote can never contradict
-      // the opening pose (e.g. a hostile hiss must not end on a heart).
-      // We mutate in place so processDialogueResponse at dialogue-close
-      // uses the corrected value.
-      if (response.speakerPose === "hostile" && response.emote) {
-        if (POSITIVE_EMOTES.has(response.emote as EmoteType)) {
-          response.emote = POSE_TO_EMOTE.hostile;
-        }
-      }
-
-      if (response.speakerPose) {
-        this.emotes.show(this, cat, POSE_TO_EMOTE[response.speakerPose]);
-
-        // A hostile pose is the dialogue-time "hissing" signal. Play the
-        // growl cue exactly once alongside the opening emote so the audio
-        // and visual land together; AudioSystem rate-limits further plays.
-        if (response.speakerPose === "hostile") {
-          this.audio.playCatGrowl();
-        }
-      }
-
-      if (response.narration) {
-        this.narrateIfPerceivable(response.narration, { x: cat.x, y: cat.y });
-      }
-
-      this.dialogue.show(response.lines, () => {
-        cat.disengageDialogue();
-        this.engagedDialogueNPC = null;
-        this.lastDialoguePartner = cat;
-        this.lastDialoguePartnerAt = this.time.now;
-        this.processDialogueResponse(cat, name, persistenceSnapshot, response);
-      });
-    } catch (err) {
-      console.error("[GameScene] requestCatDialogue failed:", err);
-      cat.disengageDialogue();
-      // Only clear engagement + dismiss the dialogue if WE own it. The error may
-      // have fired before engageDialogue (no dialogue to dismiss), or a concurrent
-      // UI path could be showing something unrelated; tearing that down would be
-      // a bug.
-      if (this.engagedDialogueNPC === cat) {
-        this.engagedDialogueNPC = null;
-        if (this.dialogue.isActive) {
-          this.dialogue.dismiss();
-        }
-      }
-      const hud = this.scene.get("HUDScene") as HUDScene | undefined;
-      hud?.showNarration("Words fail. The moment passes.");
-    } finally {
-      this.aiThinkingTimer?.remove(false);
-      this.aiThinkingTimer = null;
-      this.dialogueRequestInFlight = false;
-    }
-  }
-
-  /**
-   * Handle all side effects from a completed dialogue:
-   * trust awards, registry updates, indicator reveals, disposition
-   * changes, conversation storage, and auto-saves.
-   */
-  private processDialogueResponse(
-    cat: NPCCat,
-    catName: string,
-    snapshot: CatDialoguePersistenceSnapshot,
-    response: DialogueResponse,
-  ): void {
-    if (response.emote) {
-      this.emotes.show(this, cat, response.emote as EmoteType);
-    }
-
-    const event = response.event;
-    const isFirst = event ? event.endsWith("_first") : false;
-
-    if (event) {
-      if (isFirst) {
-        this.addKnownCat(catName);
-        this.npcs.find((e) => e.cat === cat)?.indicator.reveal();
-        this.awardFirstConversation(catName);
-      } else if (event.endsWith("_return") || event.endsWith("_warmup")) {
-        this.awardReturnConversation(catName);
-      }
-
-      switch (event) {
-        case "blacky_first":
-          this.registry.set("MET_BLACKY", true);
-          break;
-        case "tiger_first":
-          this.registry.set("TIGER_TALKS", 1);
-          break;
-        case "tiger_warmup":
-          this.registry.set("TIGER_TALKS", 2);
-          cat.disposition = "friendly";
-          this.npcs.find((e) => e.cat === cat)?.indicator.setDisposition("friendly");
-          break;
-        case "jayco_first":
-          this.registry.set("JAYCO_TALKS", 1);
-          cat.disposition = "friendly";
-          {
-            const entry = this.npcs.find((e) => e.cat === cat);
-            entry?.indicator.setDisposition("friendly");
-          }
-          break;
-        case "jaycojr_first":
-          this.registry.set("JAYCO_JR_TALKS", 1);
-          break;
-        case "fluffy_first":
-          this.registry.set("FLUFFY_TALKS", 1);
-          break;
-        case "pedigree_first":
-          this.registry.set("PEDIGREE_TALKS", 1);
-          break;
-        case "ginger_first":
-          this.registry.set("MET_GINGER_A", true);
-          break;
-        case "gingerb_first":
-          this.registry.set("MET_GINGER_B", true);
-          break;
-      }
-    }
-
-    // Persist after trust awards so trustAfter matches gameplay state.
-    const mammaCatTurn = this.buildMammaCatTurnForMemory(catName, snapshot, response.mammaCatCue);
-    void storeConversation({
-      speaker: catName,
-      timestamp: snapshot.timestamp,
-      realTimestamp: snapshot.realTimestamp,
-      gameDay: snapshot.gameDay,
-      mammaCatTurn,
-      lines: response.lines,
-      trustBefore: snapshot.trustBefore,
-      trustAfter: this.trust.getCatTrust(catName),
-      chapter: snapshot.chapter,
-      gameStateSnapshot: {
-        trustWithSpeaker: this.trust.getCatTrust(catName),
-        trustGlobal: this.trust.global,
-        timeOfDay: snapshot.timeOfDay,
-        hunger: snapshot.hunger,
-        thirst: snapshot.thirst,
-        energy: snapshot.energy,
-      },
-    });
-    if (response.memoryNote) {
-      void addNpcMemory(catName, {
-        kind: response.memoryNote.kind,
-        label: response.memoryNote.label,
-        value: response.memoryNote.value,
-        source: "ai",
-        gameDay: snapshot.gameDay,
-      });
-    }
-    if (event) {
-      void addNpcMemory(catName, {
-        kind: "event",
-        label: isFirst ? "first_meeting" : event,
-        value: isFirst
-          ? `Met Mamma Cat on day ${snapshot.gameDay} at ${snapshot.timeOfDay}.`
-          : `Shared a ${event.replace(/_/g, " ")} exchange on day ${snapshot.gameDay}.`,
-        source: "scripted",
-        gameDay: snapshot.gameDay,
-      });
-    }
-
-    if (isFirst) {
-      this.autoSave();
-    }
-  }
-
-  private isFirstConversationWithCat(conversationCount: number): boolean {
-    return conversationCount === 0;
-  }
-
-  private buildRecentDialogueEvents(
-    lastConversation: { gameDay: number } | null,
-    gameDaysSinceLastTalk: number | undefined,
-  ): string[] {
-    if (!lastConversation || gameDaysSinceLastTalk === undefined) return [];
-    if (gameDaysSinceLastTalk === 0) return ["Mamma Cat already spoke with this NPC today."];
-    if (gameDaysSinceLastTalk === 1) return ["Mamma Cat last spoke with this NPC yesterday."];
-    return [`Mamma Cat last spoke with this NPC ${gameDaysSinceLastTalk} game days ago.`];
-  }
-
-  private buildMammaCatTurnForMemory(
-    catName: string,
-    snapshot: CatDialoguePersistenceSnapshot,
-    mammaCatCue?: string,
-  ): string {
-    const base = [
-      `Mamma Cat approaches ${catName} during ${snapshot.timeOfDay}.`,
-      `Her hunger is ${snapshot.hunger}, thirst is ${snapshot.thirst}, and energy is ${snapshot.energy}.`,
-      `Trust with ${catName} before this exchange is ${snapshot.trustBefore}.`,
-    ].join(" ");
-    return mammaCatCue ? `${base} ${mammaCatCue}` : base;
-  }
+  // Cat-dialogue engagement, AI request orchestration, response
+  // rendering + post-close bookkeeping all live in
+  // {@link CatDialogueController}. Scene entry point is `tryInteract()`.
 
   // ──────────── Snatchers + Colony (extracted) ────────────
   // Snatcher lifecycle (spawn/detect/capture) lives in SnatcherSystem.
@@ -2685,10 +2161,7 @@ export class GameScene extends Phaser.Scene {
       cat.destroy();
     }
 
-    if (this.lastDialoguePartner === cat) {
-      this.lastDialoguePartner = null;
-      this.lastDialoguePartnerAt = 0;
-    }
+    this.catDialogue.clearPartnerIfMatches(cat);
   }
 
   // ──────────── Territory Benefits ────────────
