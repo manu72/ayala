@@ -2550,11 +2550,24 @@ export class GameScene extends Phaser.Scene {
   }
 
   private createHumanNavigationGrid(): NavigationGrid {
+    const clearance = GP.HUMAN_NAV_CLEARANCE_CHEBYSHEV_TILES;
     return createNavigationGrid({
       width: this.map.width,
       height: this.map.height,
       tileSize: TILE_SIZE,
-      isBlocked: (tileX, tileY) => this.isExplorationCellBlocked(tileX, tileY),
+      isBlocked: (tileX, tileY) => {
+        if (this.isExplorationCellBlocked(tileX, tileY)) return true;
+        if (clearance <= 0) return false;
+        for (let dy = -clearance; dy <= clearance; dy += 1) {
+          for (let dx = -clearance; dx <= clearance; dx += 1) {
+            if (Math.max(Math.abs(dx), Math.abs(dy)) > clearance) continue;
+            const nx = tileX + dx;
+            const ny = tileY + dy;
+            if (this.isExplorationCellBlocked(nx, ny)) return true;
+          }
+        }
+        return false;
+      },
     });
   }
 
@@ -2572,6 +2585,12 @@ export class GameScene extends Phaser.Scene {
       path: routed?.path ?? config.path,
       waypointPauseMs: routed?.waypointPauseMs ?? config.waypointPauseMs,
       lingerWaypointIndex: routed?.lingerWaypointIndex ?? config.lingerWaypointIndex,
+      routeLocalDetour: (from, to) => {
+        const segment = routeHumanPath([from, to], navigationGrid);
+        if (segment.path.length <= 1) return null;
+        const hops = segment.path.slice(1, -1);
+        return hops.length > 0 ? hops : null;
+      },
       routeToExit: (from, exits) => {
         const nearest = this.nearestExitPoint(from, exits);
         if (!nearest) return [from];
@@ -3054,7 +3073,6 @@ export class GameScene extends Phaser.Scene {
         activePhases: ["dawn", "evening"],
         avoidanceRadius: 30,
         loopPauseSec: 5,
-        routePath: false,
         path: [
           { x: 16, y: 1392 }, // tile (0,43)  — SW spawn on diagonal sidewalk
           { x: 1008, y: 432 }, // tile (31,13) — NE turn onto main N walkway

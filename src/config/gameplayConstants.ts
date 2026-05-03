@@ -27,6 +27,23 @@ export const GP = {
    */
   CAMILLE_BEAT5_TOUCH_DIST: 40,
   TILE_SIZE: 32,
+  /**
+   * Chebyshev distance (max of |dx|,|dy| in tiles) from any colliding map cell
+   * for which a tile centre is treated as blocked for human A* routing. Keeps
+   * routed paths one tile away from building edges so Arcade body separation
+   * does not wedge actors against facades.
+   */
+  HUMAN_NAV_CLEARANCE_CHEBYSHEV_TILES: 1,
+  /** Human stuck: no meaningful position change for this long (ms) while trying to move. */
+  HUMAN_STUCK_NO_PROGRESS_MS: 450,
+  /** Human stuck: wall contact + low speed or no-progress must persist this long before detour. */
+  HUMAN_STUCK_TRIGGER_MS: 220,
+  /** Below this speed (px/s) while blocked counts as "pressing" a wall. */
+  HUMAN_STUCK_SPEED_THRESHOLD: 8,
+  /** Min position delta (px) between samples to reset the no-progress timer. */
+  HUMAN_STUCK_MIN_PROGRESS_PX: 0.35,
+  /** After this many failed detour requests, skip the current waypoint (last resort). */
+  HUMAN_STUCK_SKIP_WAYPOINT_AFTER_FAILURES: 3,
 } as const;
 
 /**

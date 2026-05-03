@@ -8,6 +8,7 @@ import {
   type SpriteProfile,
 } from "./SpriteProfiles";
 import { isFeederHumanType } from "../utils/humanSpawnPolicy";
+import { GP } from "../config/gameplayConstants";
 
 export type { HumanType } from "./SpriteProfiles";
 
@@ -79,6 +80,16 @@ export interface HumanConfig {
     from: { x: number; y: number },
     exits: ReadonlyArray<{ x: number; y: number }>,
   ) => Array<{ x: number; y: number }>;
+  /**
+   * Optional short reroute when the NPC is wedged against static geometry.
+   * Scene supplies A* on the same clearance grid as {@link routeToExit}.
+   * Return intermediate hops only: exclude both `from` and the current
+   * target `to` (the NPC continues toward `to` after the queue is drained).
+   */
+  routeLocalDetour?: (
+    from: { x: number; y: number },
+    to: { x: number; y: number },
+  ) => Array<{ x: number; y: number }> | null;
 }
 
 /**
@@ -175,6 +186,14 @@ export class HumanNPC extends BaseNPC {
   /** Per-waypoint crouch / greet dwell (see HumanConfig.waypointPauseMs). */
   private waypointPausing = false;
   private waypointPauseTimer = 0;
+
+  /** Short A* detour inserted ahead of the current macro waypoint when stuck. */
+  private detourQueue: Array<{ x: number; y: number }> = [];
+  private stuckTimerMs = 0;
+  private noProgressTimerMs = 0;
+  /** Last sampled distance to the active move target; negative = re-seed on next stuck tick. */
+  private lastProgressSampleDistance = -1;
+  private stuckDetourFailures = 0;
 
   constructor(scene: Phaser.Scene, config: HumanConfig) {
     const prof = profileForType(config.type);
@@ -358,7 +377,7 @@ export class HumanNPC extends BaseNPC {
     }
 
     if (this.exiting) {
-      this.updateExiting();
+      this.updateExiting(delta);
       return;
     }
 
@@ -408,7 +427,7 @@ export class HumanNPC extends BaseNPC {
       return;
     }
 
-    const target = this.waypointPath[this.currentWaypoint];
+    const target = this.getActivePathTarget();
     if (!target) {
       this.currentWaypoint = 0;
       return;
@@ -416,6 +435,11 @@ export class HumanNPC extends BaseNPC {
 
     const dist = Phaser.Math.Distance.Between(this.x, this.y, target.x, target.y);
     if (dist < 20) {
+      if (this.detourQueue.length > 0) {
+        this.detourQueue.shift();
+        this.resetStuckProgressTracking();
+        return;
+      }
       if (
         isFeederHumanType(this.humanType) &&
         this.config.lingerSec &&
@@ -459,10 +483,13 @@ export class HumanNPC extends BaseNPC {
       if (this.glanceTimer <= 0) {
         this.playWalkAnim(this.scratchVec);
       }
+      this.trackStuckAgainstTarget(delta, target, false);
     }
   }
 
   private advanceWaypoint(): void {
+    this.detourQueue = [];
+    this.resetStuckProgressTracking();
     const next = this.currentWaypoint + 1;
     if (next >= this.waypointPath.length) {
       if (this.config.exitAfterRoute) {
@@ -492,6 +519,8 @@ export class HumanNPC extends BaseNPC {
    * elapses.
    */
   private beginLoopPause(): void {
+    this.resetStuckProgressTracking();
+    this.detourQueue = [];
     this.loopPausing = true;
     this.loopPauseTimer = (this.config.loopPauseSec ?? 0) * 1000;
     this.setVelocity(0);
@@ -502,6 +531,8 @@ export class HumanNPC extends BaseNPC {
 
   private endLoopPause(): void {
     this.loopPausing = false;
+    this.resetStuckProgressTracking();
+    this.detourQueue = [];
     this.greetedCats = new WeakSet<object>();
     this.manuGreetWave = 0;
     const start = this.waypointPath[0]!;
@@ -545,6 +576,8 @@ export class HumanNPC extends BaseNPC {
       this.currentWaypoint = 0;
     }
     this.lingering = false;
+    this.resetStuckProgressTracking();
+    this.detourQueue = [];
   }
 
   private deactivate(): void {
@@ -561,6 +594,8 @@ export class HumanNPC extends BaseNPC {
     this.stationaryGreet = 0;
     this.feedingStationProp?.destroy();
     this.feedingStationProp = null;
+    this.detourQueue = [];
+    this.resetStuckProgressTracking();
     this.setVisible(false);
     this.setActive(false);
     this.setVelocity(0);
@@ -574,6 +609,8 @@ export class HumanNPC extends BaseNPC {
    */
   private startExiting(): void {
     this.exiting = true;
+    this.detourQueue = [];
+    this.resetStuckProgressTracking();
     this.greetingActive = false;
     this.lingering = false;
 
@@ -592,18 +629,25 @@ export class HumanNPC extends BaseNPC {
     this.exitTarget = this.exitPath[this.exitWaypoint] ?? nearest;
   }
 
-  private updateExiting(): void {
+  private updateExiting(delta: number): void {
     if (!this.exitTarget) {
       this.deactivate();
       return;
     }
 
-    const dist = Phaser.Math.Distance.Between(this.x, this.y, this.exitTarget.x, this.exitTarget.y);
+    const target = this.detourQueue[0] ?? this.exitTarget;
+    const dist = Phaser.Math.Distance.Between(this.x, this.y, target.x, target.y);
     if (dist < 24) {
+      if (this.detourQueue.length > 0) {
+        this.detourQueue.shift();
+        this.resetStuckProgressTracking();
+        return;
+      }
       this.exitWaypoint += 1;
       const nextTarget = this.exitPath[this.exitWaypoint];
       if (nextTarget) {
         this.exitTarget = nextTarget;
+        this.resetStuckProgressTracking();
         return;
       }
       this.deactivate();
@@ -612,9 +656,153 @@ export class HumanNPC extends BaseNPC {
     }
 
     const speed = this.config.speed * 1.2;
-    this.scratchVec.set(this.exitTarget.x - this.x, this.exitTarget.y - this.y).normalize();
+    this.scratchVec.set(target.x - this.x, target.y - this.y).normalize();
     this.setVelocity(this.scratchVec.x * speed, this.scratchVec.y * speed);
     this.playWalkAnim(this.scratchVec);
+    this.trackStuckAgainstTarget(delta, target, true);
+  }
+
+  private getActivePathTarget(): { x: number; y: number } | null {
+    const head = this.detourQueue[0];
+    if (head) return head;
+    return this.waypointPath[this.currentWaypoint] ?? null;
+  }
+
+  /** Resets stuck / no-progress sampling after teleport, phase change, or detour hop. */
+  private resetStuckProgressTracking(): void {
+    this.stuckTimerMs = 0;
+    this.noProgressTimerMs = 0;
+    this.lastProgressSampleDistance = -1;
+    this.stuckDetourFailures = 0;
+  }
+
+  /**
+   * When wedged against static geometry or not making progress toward the
+   * active target, request a short A* detour from the scene. Falls back to
+   * skipping the current macro waypoint / exit segment after repeated failures.
+   */
+  private trackStuckAgainstTarget(
+    delta: number,
+    target: { x: number; y: number },
+    isExiting: boolean,
+  ): void {
+    const body = this.body as Phaser.Physics.Arcade.Body | undefined;
+    if (!body) return;
+
+    const vx = body.velocity.x;
+    const vy = body.velocity.y;
+    const speed = Math.hypot(vx, vy);
+
+    const currentDistance = Phaser.Math.Distance.Between(this.x, this.y, target.x, target.y);
+    if (this.lastProgressSampleDistance < 0) {
+      this.lastProgressSampleDistance = currentDistance;
+      return;
+    }
+    const towardTarget =
+      this.lastProgressSampleDistance - currentDistance >= GP.HUMAN_STUCK_MIN_PROGRESS_PX;
+    if (towardTarget) {
+      this.noProgressTimerMs = 0;
+      this.lastProgressSampleDistance = currentDistance;
+      this.stuckTimerMs = 0;
+      this.stuckDetourFailures = 0;
+      return;
+    }
+
+    this.noProgressTimerMs += delta;
+
+    const blocked = body.blocked;
+    const touchingWall = Boolean(
+      blocked.up || blocked.down || blocked.left || blocked.right,
+    );
+    const pressingWall = touchingWall && speed < GP.HUMAN_STUCK_SPEED_THRESHOLD;
+    const longNoProgress = this.noProgressTimerMs >= GP.HUMAN_STUCK_NO_PROGRESS_MS;
+
+    if (pressingWall || longNoProgress) {
+      this.stuckTimerMs += delta;
+    } else {
+      this.stuckTimerMs = Math.max(0, this.stuckTimerMs - delta * 2);
+    }
+
+    if (this.stuckTimerMs < GP.HUMAN_STUCK_TRIGGER_MS) return;
+
+    this.stuckTimerMs = 0;
+    this.noProgressTimerMs = 0;
+    this.lastProgressSampleDistance = currentDistance;
+
+    const detour = this.config.routeLocalDetour?.({ x: this.x, y: this.y }, target);
+    if (detour && detour.length > 0) {
+      const newHead = detour[0]!;
+      const sameHeadAsCurrent =
+        this.detourQueue.length > 0 &&
+        newHead.x === this.detourQueue[0]!.x &&
+        newHead.y === this.detourQueue[0]!.y;
+      if (sameHeadAsCurrent) {
+        const tail = this.detourQueue.slice(1);
+        let merged = [...detour];
+        if (
+          merged.length > 0 &&
+          tail.length > 0 &&
+          merged[merged.length - 1]!.x === tail[0]!.x &&
+          merged[merged.length - 1]!.y === tail[0]!.y
+        ) {
+          merged = [...merged, ...tail.slice(1)];
+        } else {
+          merged = [...merged, ...tail];
+        }
+        this.detourQueue = merged;
+      } else {
+        this.detourQueue = detour;
+      }
+      this.stuckDetourFailures = 0;
+      const head = this.detourQueue[0]!;
+      this.lastProgressSampleDistance = Phaser.Math.Distance.Between(this.x, this.y, head.x, head.y);
+      return;
+    }
+
+    this.stuckDetourFailures += 1;
+    if (this.stuckDetourFailures >= GP.HUMAN_STUCK_SKIP_WAYPOINT_AFTER_FAILURES) {
+      this.stuckDetourFailures = 0;
+      this.detourQueue = [];
+      if (isExiting) {
+        this.skipStuckExitSegment();
+      } else {
+        this.advanceWaypoint();
+      }
+    }
+  }
+
+  /** Last-resort: skip the current exit polyline vertex when no detour exists. */
+  private skipStuckExitSegment(): void {
+    this.exitWaypoint += 1;
+    const next = this.exitPath[this.exitWaypoint];
+    if (next) {
+      this.exitTarget = next;
+      this.resetStuckProgressTracking();
+    } else {
+      this.deactivate();
+      this.config.onExitParkComplete?.();
+    }
+  }
+
+  /**
+   * If {@link Phaser.Physics.Arcade.Body.blocked} shows contact on a side,
+   * reject steering that pushes into that facade (neighbour avoidance must
+   * not bend runners through buildings). Uses velocity sign vs Arcade axes
+   * (negative Y is up).
+   */
+  private isSteeringIntoBlockedFacade(
+    body: Phaser.Physics.Arcade.Body,
+    newVx: number,
+    newVy: number,
+  ): boolean {
+    const b = body.blocked;
+    if (!b.up && !b.down && !b.left && !b.right) return false;
+    const eps = 1;
+    if (b.left && newVx < -eps) return true;
+    if (b.right && newVx > eps) return true;
+    if (b.up && newVy < -eps) return true;
+    if (b.down && newVy > eps) return true;
+    return false;
   }
 
   /**
@@ -681,7 +869,12 @@ export class HumanNPC extends BaseNPC {
     const newFx = fx * forwardScale + rx * nudge;
     const newFy = fy * forwardScale + ry * nudge;
     const mag = Math.hypot(newFx, newFy) || 1;
-    this.setVelocity((newFx / mag) * speed, (newFy / mag) * speed);
+    const newVx = (newFx / mag) * speed;
+    const newVy = (newFy / mag) * speed;
+    if (this.isSteeringIntoBlockedFacade(body, newVx, newVy)) {
+      return;
+    }
+    this.setVelocity(newVx, newVy);
     this.scratchVec.set(newFx, newFy).normalize();
     if (this.glanceTimer <= 0) {
       this.playWalkAnim(this.scratchVec);

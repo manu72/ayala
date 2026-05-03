@@ -2,7 +2,78 @@ import { describe, expect, it } from "vitest";
 import atgMap from "../../public/assets/tilemaps/atg.json";
 import { CAMILLE_CARE_ROUTE_ENTRY_BLACKY_PAUSE_MS } from "../../src/config/gameplayConstants";
 import { buildCamilleEraCareRoutes } from "../../src/utils/camilleCareRoute";
-import { createNavigationGrid, routeHumanPath, type NavigationGrid, type RoutePoint } from "../../src/utils/humanRoutePath";
+import {
+  createNavigationGrid,
+  isCellLineWalkableOnGrid,
+  routeHumanPath,
+  type NavigationGrid,
+  type RoutePoint,
+} from "../../src/utils/humanRoutePath";
+
+describe("isCellLineWalkableOnGrid", () => {
+  it("returns true when every supercover cell on the segment is walkable", () => {
+    const grid = createNavigationGrid({
+      width: 5,
+      height: 1,
+      tileSize: 10,
+      isBlocked: () => false,
+    });
+    expect(isCellLineWalkableOnGrid(grid, { x: 0, y: 0 }, { x: 4, y: 0 })).toBe(true);
+  });
+
+  it("returns false when the straight tile line crosses a blocked cell", () => {
+    const grid = createNavigationGrid({
+      width: 3,
+      height: 3,
+      tileSize: 10,
+      isBlocked: (x, y) => x === 1 && y === 1,
+    });
+    expect(isCellLineWalkableOnGrid(grid, { x: 0, y: 0 }, { x: 2, y: 2 })).toBe(false);
+  });
+
+  it("returns false on a diagonal when only the grazed axial corner cells are blocked (supercover)", () => {
+    const grid = createNavigationGrid({
+      width: 2,
+      height: 2,
+      tileSize: 10,
+      isBlocked: (x, y) => (x === 1 && y === 0) || (x === 0 && y === 1),
+    });
+    // (0,0) and (1,1) are walkable; integer Bresenham only visits those two,
+    // but the segment touches blocked (1,0) and (0,1).
+    expect(isCellLineWalkableOnGrid(grid, { x: 0, y: 0 }, { x: 1, y: 1 })).toBe(false);
+  });
+
+  it("returns false on shallow diagonal (0,0)-(2,1) when (1,0) is blocked (supercover, not only 45°)", () => {
+    const grid = createNavigationGrid({
+      width: 3,
+      height: 2,
+      tileSize: 10,
+      isBlocked: (x, y) => x === 1 && y === 0,
+    });
+    expect(isCellLineWalkableOnGrid(grid, { x: 0, y: 0 }, { x: 2, y: 1 })).toBe(false);
+  });
+
+  it("returns false on shallow diagonal (0,0)-(2,1) when (0,1) is blocked — other axial supercover neighbour", () => {
+    const grid = createNavigationGrid({
+      width: 3,
+      height: 2,
+      tileSize: 10,
+      isBlocked: (x, y) => x === 0 && y === 1,
+    });
+    // Same segment as above: supercover visits (0,1) as well as (1,0), not only Bresenham cells.
+    expect(isCellLineWalkableOnGrid(grid, { x: 0, y: 0 }, { x: 2, y: 1 })).toBe(false);
+  });
+
+  it("returns true on shallow diagonal (0,0)-(2,1) when only a cell off the supercover envelope is blocked", () => {
+    const grid = createNavigationGrid({
+      width: 3,
+      height: 2,
+      tileSize: 10,
+      isBlocked: (x, y) => x === 2 && y === 0,
+    });
+    expect(isCellLineWalkableOnGrid(grid, { x: 0, y: 0 }, { x: 2, y: 1 })).toBe(true);
+  });
+});
 
 describe("routeHumanPath", () => {
   it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])(

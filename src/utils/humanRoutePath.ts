@@ -48,6 +48,23 @@ export function createNavigationGrid(input: NavigationGridInput): NavigationGrid
   return { width, height, tileSize: input.tileSize, cells };
 }
 
+/**
+ * Returns true if every grid cell the continuous segment between the two cell
+ * indices touches (supercover line — includes axial neighbours on diagonal
+ * steps) lies on walkable cells in {@link grid}. Used so simplified paths do
+ * not graze blocked corners after A* has found a safe polyline.
+ */
+export function isCellLineWalkableOnGrid(
+  grid: NavigationGrid,
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+): boolean {
+  for (const cell of supercoverLineCells(from.x, from.y, to.x, to.y)) {
+    if (!isWalkable(grid, cell.x, cell.y)) return false;
+  }
+  return true;
+}
+
 export function routeHumanPath(
   waypoints: RoutePoint[],
   grid: NavigationGrid,
@@ -88,7 +105,7 @@ export function routeHumanPath(
       break;
     }
 
-    const simplifiedSegment = simplifyTileSegment(segment);
+    const simplifiedSegment = simplifySegmentGreedyVisible(grid, segment);
     for (let j = 1; j < simplifiedSegment.length; j += 1) {
       routedPath.push(cellToWorld(simplifiedSegment[j]!, grid));
       if (pauseByIndex) pauseByIndex.push(0);
@@ -141,29 +158,79 @@ function findTilePath(
   return result ?? null;
 }
 
-function simplifyTileSegment(segment: Array<{ x: number; y: number }>): Array<{ x: number; y: number }> {
+/**
+ * Collapse an A* cell polyline to a shorter sequence where each consecutive pair
+ * has a fully walkable straight segment in tile space (see
+ * {@link supercoverLineCells}). Avoids diagonal shortcuts across blocked
+ * corners that only appeared after turn-point reduction.
+ */
+function simplifySegmentGreedyVisible(
+  grid: NavigationGrid,
+  segment: Array<{ x: number; y: number }>,
+): Array<{ x: number; y: number }> {
   if (segment.length <= 2) return segment;
-
-  const simplified: Array<{ x: number; y: number }> = [segment[0]!];
-  let previousDirection = directionBetween(segment[0]!, segment[1]!);
-
-  for (let i = 1; i < segment.length - 1; i += 1) {
-    const currentDirection = directionBetween(segment[i]!, segment[i + 1]!);
-    if (currentDirection.x !== previousDirection.x || currentDirection.y !== previousDirection.y) {
-      simplified.push(segment[i]!);
-      previousDirection = currentDirection;
+  const out: Array<{ x: number; y: number }> = [segment[0]!];
+  let anchorIndex = 0;
+  while (anchorIndex < segment.length - 1) {
+    let best = anchorIndex + 1;
+    for (let j = segment.length - 1; j > anchorIndex; j -= 1) {
+      if (isCellLineWalkableOnGrid(grid, segment[anchorIndex]!, segment[j]!)) {
+        best = j;
+        break;
+      }
     }
+    out.push(segment[best]!);
+    anchorIndex = best;
   }
-
-  simplified.push(segment[segment.length - 1]!);
-  return simplified;
+  return out;
 }
 
-function directionBetween(from: { x: number; y: number }, to: { x: number; y: number }): { x: number; y: number } {
-  return {
-    x: Math.sign(to.x - from.x),
-    y: Math.sign(to.y - from.y),
+/**
+ * Supercover line in tile indices: every cell the segment from (x0,y0) to
+ * (x1,y1) touches, inclusive. Whenever a Bresenham step advances **both** axes
+ * in one iteration (`movX && movY`), also include the two axial neighbours
+ * sharing that grid corner so walkability checks cannot approve lines that
+ * graze blocked corners (including shallow diagonals, not only `e2 === 0` ties).
+ * The local `push` helper dedupes via a set so revisiting a cell is harmless.
+ */
+function supercoverLineCells(x0: number, y0: number, x1: number, y1: number): Array<{ x: number; y: number }> {
+  const cells: Array<{ x: number; y: number }> = [];
+  const seen = new Set<string>();
+  const push = (cx: number, cy: number) => {
+    const k = `${cx},${cy}`;
+    if (seen.has(k)) return;
+    seen.add(k);
+    cells.push({ x: cx, y: cy });
   };
+
+  let x = x0;
+  let y = y0;
+  const dx = Math.abs(x1 - x0);
+  const dy = -Math.abs(y1 - y0);
+  const sx = x0 < x1 ? 1 : -1;
+  const sy = y0 < y1 ? 1 : -1;
+  let err = dx + dy;
+
+  for (;;) {
+    push(x, y);
+    if (x === x1 && y === y1) break;
+    const e2 = 2 * err;
+    const movX = e2 >= dy;
+    const movY = e2 <= dx;
+    if (movX && movY) {
+      push(x + sx, y);
+      push(x, y + sy);
+    }
+    if (movX) {
+      err += dy;
+      x += sx;
+    }
+    if (movY) {
+      err += dx;
+      y += sy;
+    }
+  }
+  return cells;
 }
 
 function nearestWalkableCell(grid: NavigationGrid, cell: { x: number; y: number }): { x: number; y: number } {
