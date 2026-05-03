@@ -826,7 +826,7 @@ export class GameScene extends Phaser.Scene {
   private placeStarbucksLogo(): void {
     const waterPoint = this.map.findObject("spawns", (obj) => obj.name === "poi_starbucks_water");
     const logoX = (waterPoint?.x ?? 74 * TILE_SIZE) + TILE_SIZE * 2;
-    const logoY = waterPoint?.y ?? 2 * TILE_SIZE;
+    const logoY = (waterPoint?.y ?? 2 * TILE_SIZE) - TILE_SIZE;
 
     this.add.image(logoX, logoY, "starbucks_logo").setOrigin(0.5, 0.5).setScale(0.3).setDepth(4);
   }
