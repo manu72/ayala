@@ -16,20 +16,18 @@ import { ScoringSystem, type ScoreBreakdown } from "../systems/ScoringSystem";
 import { EmoteSystem, type EmoteType } from "../systems/EmoteSystem";
 import { ChapterSystem } from "../systems/ChapterSystem";
 import { TerritorySystem } from "../systems/TerritorySystem";
+import { ColonyDynamicsSystem } from "../systems/ColonyDynamicsSystem";
+import { SnatcherSystem } from "../systems/SnatcherSystem";
 import type { HUDScene } from "./HUDScene";
 import {
   GP,
   REST_HOLD_MS,
   COLLAPSE_RECOVERY_MS,
-  INITIAL_COLONY_TOTAL,
-  NAMED_AND_MAMMA_COUNT,
-  VISIBLE_BACKGROUND_CAP,
   CAMILLE_BEAT5_DECISION_MS,
   STATIONARY_GREET_CAP,
   STATIONARY_MOVE_THRESHOLD_PX,
 } from "../config/gameplayConstants";
 import { StoryKeys, migrateLegacyIntroFlag } from "../registry/storyKeys";
-import { computeBackgroundSpawnCount, decrementColonyTotal } from "../utils/colonySpawn";
 import {
   ScriptedDialogueService,
   findUnplayedDialogueScript,
@@ -61,7 +59,6 @@ import {
   mergeCamilleBeatSteps,
   type EncounterStep,
 } from "../data/camille-encounter-beats";
-import { resolveSnatcherSpawnAction } from "../systems/SnatcherSystem";
 import { AudioSystem } from "../systems/AudioSystem";
 import { hasLineOfSightTiles } from "../utils/lineOfSight";
 import { shouldUseHumanAiBubble, shouldUseNamedHumanScriptedBubble } from "../utils/humanAiBubbleEligibility";
@@ -72,7 +69,7 @@ import { createNavigationGrid, routeHumanPath, type NavigationGrid } from "../ut
 import { computeReachableCells, getCellKey } from "../utils/mapExploration";
 import { applyLifeLoss, MAX_LIVES } from "../utils/lifeFlow";
 import { markGameOver } from "../utils/gameOverState";
-import { consumeSnatchedThisNight, markSnatchedThisNight, restoreSnatchedThisNight } from "../utils/snatcherNightState";
+import { consumeSnatchedThisNight, restoreSnatchedThisNight } from "../utils/snatcherNightState";
 import { EMPTY_MOVEMENT_INTENT, type MovementIntent } from "../input/playerIntent";
 
 const INTERACTION_DISTANCE = GP.INTERACTION_DIST;
@@ -106,7 +103,6 @@ const DEFAULT_ZOOM = 2.5;
 const PEEK_ZOOM = 0.8;
 const ZOOM_DURATION = 500;
 const HUMAN_ENGAGEMENT_COOLDOWN_MS = 5_000;
-const DUMPED_COMFORT_WINDOW_MS = 5_000;
 const DROPOFF_SUV_TEXTURE = "suv_small";
 const DROPOFF_COROLLA_TEXTURE = "corolla_small";
 const DROPOFF_SUV_DISPLAY_WIDTH = 72;
@@ -122,7 +118,7 @@ const DROPOFF_SUV_TINT_CYCLE: ReadonlyArray<number | null> = [
   null,
 ];
 
-interface DropoffVehicleOptions {
+export interface DropoffVehicleOptions {
   texture?: string;
   displayWidth?: number;
   displayHeight?: number;
@@ -141,7 +137,7 @@ interface CatDialoguePersistenceSnapshot {
   trustBefore: number;
 }
 
-interface NPCEntry {
+export interface NPCEntry {
   cat: NPCCat;
   indicator: ThreatIndicator;
 }
@@ -165,7 +161,8 @@ export class GameScene extends Phaser.Scene {
   private introTimerEvents: Phaser.Time.TimerEvent[] = [];
   private introCinematicTweens: Phaser.Tweens.Tween[] = [];
 
-  private npcs: NPCEntry[] = [];
+  /** NPC cat roster, shared with {@link ColonyDynamicsSystem} + {@link SnatcherSystem}. */
+  npcs: NPCEntry[] = [];
   private guard!: GuardNPC;
   private guardIndicator!: ThreatIndicator;
   private foodSources!: FoodSourceManager;
@@ -184,8 +181,10 @@ export class GameScene extends Phaser.Scene {
   private touchPauseQueued = false;
   private journalToggleLocked = false;
   journalOpenedFromPause = false;
-  private groundLayer: Phaser.Tilemaps.TilemapLayer | null = null;
-  private objectsLayer: Phaser.Tilemaps.TilemapLayer | null = null;
+  /** Ground collision layer, shared with {@link ColonyDynamicsSystem} + {@link SnatcherSystem}. */
+  groundLayer: Phaser.Tilemaps.TilemapLayer | null = null;
+  /** Objects collision layer, shared with {@link ColonyDynamicsSystem} + {@link SnatcherSystem}. */
+  objectsLayer: Phaser.Tilemaps.TilemapLayer | null = null;
   private overheadLayer!: Phaser.Tilemaps.TilemapLayer | null;
   private map!: Phaser.Tilemaps.Tilemap;
   private knownCats: Set<string> = new Set();
@@ -205,15 +204,21 @@ export class GameScene extends Phaser.Scene {
    * witness was in range, or between collapses.
    */
   private collapseWitness: NPCCat | null = null;
-  private emotes!: EmoteSystem;
+  /** Shared with {@link SnatcherSystem} for scripted-sighting flee emotes. */
+  emotes!: EmoteSystem;
   chapters!: ChapterSystem;
   private chapterCheckTimer = 0;
-  private humans: HumanNPC[] = [];
+  /** Human NPC roster, shared with {@link SnatcherSystem} + Camille-era spawns. */
+  humans: HumanNPC[] = [];
   private dogs: DogNPC[] = [];
   /** Tracks which cats have already shown narration this approach, to avoid repeating. */
   private narrationShown = new Set<string>();
   private dialogueService!: DialogueService;
   territory!: TerritorySystem;
+  /** Owns dumping events + dynamic colony population (mirrors `StoryKeys.COLONY_COUNT`). */
+  colony!: ColonyDynamicsSystem;
+  /** Owns nightly snatcher spawn/detect/capture + colony-cat grab sweep. */
+  snatcher!: SnatcherSystem;
   /**
    * Owns the looping background music (ambient ↔ danger crossfade) and
    * one-shot SFX. Public so HUDScene can hook the mute toggle.
@@ -275,21 +280,9 @@ export class GameScene extends Phaser.Scene {
   private lastDialoguePartnerAt = 0;
   private static readonly LAST_PARTNER_HOLD_MS = 1500;
 
-  // Snatcher tracking
-  private snatchers: HumanNPC[] = [];
-  private snatcherSpawnChecked = false;
-
-  // Colony dynamics. `colonyCount` mirrors `StoryKeys.COLONY_COUNT` in the
-  // registry — total cat population (named + Mamma + background). See
-  // gameplayConstants.ts for the model. Source of truth is the registry;
-  // the field is a cache read on load and written alongside every registry
-  // mutation so code paths that already reference `this.colonyCount` keep
-  // working without a second registry round-trip each frame.
-  private colonyCount = INITIAL_COLONY_TOTAL;
-  private dumpingArmed = 0;
-  private dumpingInProgress = false;
-  private dumpedCatEventIds = new WeakMap<NPCCat, number>();
-  private dumpedComfortWindowUntil: Record<number, number> = {};
+  // Snatcher + colony dynamics state now live on `this.snatcher` and
+  // `this.colony` respectively (see extracted systems above). The scene
+  // retains only cross-system orchestration state.
   private pendingCamilleEncounter = 0;
 
   /**
@@ -320,7 +313,6 @@ export class GameScene extends Phaser.Scene {
   private previousPlayerX = 0;
   private previousPlayerY = 0;
   private reachableCells = new Set<number>();
-  private snatchedThisNight = false;
   private trustEventUnsubscribe: (() => void) | null = null;
   private pendingGameOverReason: "collapse" | "snatched" | null = null;
   private gameOverTriggered = false;
@@ -342,7 +334,7 @@ export class GameScene extends Phaser.Scene {
   };
 
   /** Dialogue lives in HUDScene (1x zoom) so it's always visible. */
-  private get dialogue(): {
+  get dialogue(): {
     isActive: boolean;
     show: (lines: string[], onComplete?: () => void, hooks?: DialogueHooks) => void;
     advance: () => void;
@@ -415,6 +407,13 @@ export class GameScene extends Phaser.Scene {
     // Stop music + release sound instances so a scene restart (e.g. after a
     // snatcher capture at GameScene.ts:3750) doesn't stack overlapping loops.
     this.audio?.stop();
+
+    // Tear down extracted systems. Phaser does not auto-invoke `shutdown()`
+    // on our subsystems; it only fires the scene-level SHUTDOWN event, which
+    // we chain into these (WORKING_MEMORY "Scene Lifecycle — shutdown is
+    // NOT auto-wired").
+    this.snatcher?.shutdown();
+    this.colony?.shutdown();
   }
 
   /** Remove pending intro delayed calls and tweens (idempotent). */
@@ -508,13 +507,15 @@ export class GameScene extends Phaser.Scene {
     this.lives = MAX_LIVES;
     this.pendingGameOverReason = null;
     this.gameOverTriggered = false;
-    this.snatchedThisNight = data?.snatcherCapture === true;
-    this.dumpedComfortWindowUntil = {};
     this.lastHumanEngagementAt = -Infinity;
     this.emotes = new EmoteSystem();
     this.chapters = new ChapterSystem();
     this.audio = new AudioSystem();
     this.audio.start(this);
+    this.colony = new ColonyDynamicsSystem(this);
+    this.colony.resetTransient();
+    this.snatcher = new SnatcherSystem(this);
+    this.snatcher.snatchedThisNight = data?.snatcherCapture === true;
     this.chapterCheckTimer = 0;
     this.narrationShown = new Set();
     const scripted = new ScriptedDialogueService(NPC_DIALOGUE_SCRIPTS);
@@ -541,9 +542,6 @@ export class GameScene extends Phaser.Scene {
     this.kishNPC = null;
     this.camilleEncounterActive = false;
     this.camilleRollDay = 0;
-    this.snatchers = [];
-    this.snatcherSpawnChecked = false;
-    this.colonyCount = INITIAL_COLONY_TOTAL;
 
     // Clear story state from any prior session before restoring
     for (const key of [
@@ -587,9 +585,10 @@ export class GameScene extends Phaser.Scene {
     // Seed the colony total so a fresh game has a well-defined starting value
     // in the registry (not just the field). If a save is loaded below, the
     // `Object.entries(save.variables)` loop overwrites this with the persisted
-    // value. Keeping field + registry in lockstep is the invariant used by
-    // `spawnColonyCats`, `JournalScene`, and the decrement/increment paths.
-    this.registry.set(StoryKeys.COLONY_COUNT, INITIAL_COLONY_TOTAL);
+    // value, then `colony.reconcileFromSave` clamps / defaults it. Keeping
+    // field + registry in lockstep is the invariant used by the background
+    // roster spawn, `JournalScene`, and the decrement/increment paths.
+    this.colony.seedFreshGame();
 
     let savedSourceStates: Array<{ type: SourceType; x: number; y: number; lastUsedAt: number }> | undefined;
     if (data?.loadSave) {
@@ -607,7 +606,7 @@ export class GameScene extends Phaser.Scene {
         for (const [key, val] of Object.entries(save.variables)) {
           this.registry.set(key, val);
         }
-        this.snatchedThisNight = restoreSnatchedThisNight(this.registry, this.snatchedThisNight);
+        this.snatcher.snatchedThisNight = restoreSnatchedThisNight(this.registry, this.snatcher.snatchedThisNight);
         const savedChapter = save.variables.CHAPTER;
         if (typeof savedChapter === "number") {
           this.chapters.restore(savedChapter);
@@ -615,22 +614,12 @@ export class GameScene extends Phaser.Scene {
         // Reconcile `COLONY_COUNT` defensively. The `for ([key, val])` loop
         // above restored `save.variables` blindly, so a corrupt save (e.g. a
         // string, null, NaN, Infinity) has already overwritten the seed in
-        // the registry. If we only re-write the field here, field and
-        // registry drift — and `SaveSystem.save` reads the registry directly
-        // on the next autosave, persisting the garbage back to disk.
-        //
-        // Valid numeric saves are clamped to the floor (unchanged behaviour).
-        // Invalid / missing saves fall back to the fresh-game seed rather
-        // than the floor, because the floor would collapse the visible
-        // background roster to zero on what may otherwise be a mostly-healthy
-        // save with a single corrupt field.
-        const savedColony = save.variables[StoryKeys.COLONY_COUNT];
-        if (typeof savedColony === "number" && Number.isFinite(savedColony)) {
-          this.colonyCount = Math.max(NAMED_AND_MAMMA_COUNT, Math.floor(savedColony));
-        } else {
-          this.colonyCount = INITIAL_COLONY_TOTAL;
-        }
-        this.registry.set(StoryKeys.COLONY_COUNT, this.colonyCount);
+        // the registry. Valid numeric saves are clamped to the named+Mamma
+        // floor; invalid / missing saves fall back to the fresh-game seed
+        // (not the floor, which would collapse the visible background
+        // roster to zero on an otherwise-healthy save with one corrupt
+        // field). See {@link ColonyDynamicsSystem.reconcileFromSave}.
+        this.colony.reconcileFromSave(save.variables as Record<string, unknown>);
       }
     }
 
@@ -666,7 +655,7 @@ export class GameScene extends Phaser.Scene {
     this.spawnNPC("Fluffy", "fluffy", "spawn_fluffy", "neutral", 180, 1500, 900);
     this.spawnNPC("Pedigree", "fluffy", "spawn_pedigree", "neutral", 150, 2500, 1700);
     this.spawnGingerTwins();
-    this.spawnColonyCats();
+    this.colony.spawnInitialBackgroundCats();
 
     this.restoreDispositions();
 
@@ -728,9 +717,9 @@ export class GameScene extends Phaser.Scene {
 
     this.dayNight.on("newDay", () => {
       this.trust.survivedDay();
-      const { clean } = consumeSnatchedThisNight(this.registry, this.snatchedThisNight);
+      const { clean } = consumeSnatchedThisNight(this.registry, this.snatcher.snatchedThisNight);
       this.scoring.recordNightSurvived({ clean });
-      this.snatchedThisNight = false;
+      this.snatcher.onNewDay();
     });
 
     // New Game+ setup: full trust, all cats known, territory claimed
@@ -835,7 +824,8 @@ export class GameScene extends Phaser.Scene {
     return DROPOFF_SUV_TINT_CYCLE[(sequenceIndex - 1) % DROPOFF_SUV_TINT_CYCLE.length] ?? null;
   }
 
-  private vehicleOptionsForDumpingEvent(eventNum: number): DropoffVehicleOptions {
+  /** Called by the intro cinematic (this scene) and {@link ColonyDynamicsSystem} dumping events. */
+  vehicleOptionsForDumpingEvent(eventNum: number): DropoffVehicleOptions {
     if (eventNum === 1) {
       return {
         texture: DROPOFF_COROLLA_TEXTURE,
@@ -847,7 +837,8 @@ export class GameScene extends Phaser.Scene {
     return { tint: this.tintForSuvDropoff(eventNum - 1) };
   }
 
-  private addDropoffVehicle(x: number, y: number, options: DropoffVehicleOptions = {}): Phaser.GameObjects.Image {
+  /** Called by the intro cinematic (this scene) and {@link ColonyDynamicsSystem} dumping events. */
+  addDropoffVehicle(x: number, y: number, options: DropoffVehicleOptions = {}): Phaser.GameObjects.Image {
     const texture = options.texture ?? DROPOFF_SUV_TEXTURE;
     const displayWidth = options.displayWidth ?? DROPOFF_SUV_DISPLAY_WIDTH;
     const displayHeight = options.displayHeight ?? DROPOFF_SUV_DISPLAY_HEIGHT;
@@ -1433,8 +1424,8 @@ export class GameScene extends Phaser.Scene {
       this.recheckTerritoryEligibility();
       this.checkCamilleEncounter();
       this.checkCamilleProximity();
-      this.checkSnatcherSpawn();
-      this.checkColonyDynamics();
+      this.snatcher.updateSpawnCheck();
+      this.colony.tick();
       this.checkTerritoryBenefits();
     }
   }
@@ -2508,13 +2499,14 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private loseLife(): boolean {
+  /** Called by {@link SnatcherSystem} via `scene.loseLife()`. */
+  loseLife(): boolean {
     const result = applyLifeLoss(this.lives);
     this.lives = result.lives;
     return result.gameOver;
   }
 
-  private triggerGameOver(reason: "collapse" | "snatched"): void {
+  triggerGameOver(reason: "collapse" | "snatched"): void {
     if (this.gameOverTriggered) return;
     this.gameOverTriggered = true;
     this.pendingGameOverReason = reason;
@@ -2560,7 +2552,8 @@ export class GameScene extends Phaser.Scene {
     return Boolean(groundTile?.collides || objectTile?.collides);
   }
 
-  private createHumanNavigationGrid(): NavigationGrid {
+  /** Exposed so {@link SnatcherSystem} can route snatcher patrol paths. */
+  createHumanNavigationGrid(): NavigationGrid {
     const clearance = GP.HUMAN_NAV_CLEARANCE_CHEBYSHEV_TILES;
     return createNavigationGrid({
       width: this.map.width,
@@ -2582,7 +2575,8 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  private routeHumanConfig(config: HumanConfig, navigationGrid: NavigationGrid): HumanConfig {
+  /** Exposed so {@link SnatcherSystem} can route snatcher patrol paths. */
+  routeHumanConfig(config: HumanConfig, navigationGrid: NavigationGrid): HumanConfig {
     const shouldRoutePath = config.routePath !== false;
     const routed = shouldRoutePath
       ? routeHumanPath(config.path, navigationGrid, {
@@ -2983,67 +2977,6 @@ export class GameScene extends Phaser.Scene {
     gingerB.setTint(0xffaa44);
   }
 
-  private spawnColonyCats(): void {
-    const sprites = ["mammacat", "blacky", "tiger", "jayco", "fluffy"];
-    const dispositions: Array<"neutral" | "wary" | "friendly" | "territorial"> = [
-      "neutral",
-      "neutral",
-      "neutral",
-      "neutral",
-      "wary",
-      "wary",
-      "wary",
-      "friendly",
-      "friendly",
-      "territorial",
-    ];
-
-    // Scatter across distinct zones matching the new ATG map layout
-    const zones = [
-      { cx: 1400, cy: 800, radius: 250 }, // Central Gardens north
-      { cx: 1600, cy: 1100, radius: 300 }, // Central Gardens south
-      { cx: 900, cy: 1000, radius: 200 }, // Western gardens / fountain area
-      { cx: 2200, cy: 600, radius: 200 }, // Eastern gardens near Shops
-      { cx: 2400, cy: 1500, radius: 200 }, // Southeast / Blackbird approach
-    ];
-
-    // Visible background roster is derived from the registry's dynamic
-    // `COLONY_COUNT` (total cat population), minus the named roster + Mamma
-    // Cat, capped for performance/readability. On a healthy colony this
-    // returns the cap (12); once enough cats have been snatched that
-    // `COLONY_COUNT` drops below named+mamma+cap, the visible roster
-    // shrinks in lockstep. Reads `this.colonyCount` which is kept in
-    // lockstep with the registry by the seed/load/dumping/snatch paths.
-    const count = computeBackgroundSpawnCount(this.colonyCount, NAMED_AND_MAMMA_COUNT, VISIBLE_BACKGROUND_CAP);
-    for (let i = 0; i < count; i++) {
-      const zone = zones[i % zones.length]!;
-      const angle = Math.random() * Math.PI * 2;
-      const r = Math.random() * zone.radius * 0.6;
-      const x = zone.cx + Math.cos(angle) * r;
-      const y = zone.cy + Math.sin(angle) * r;
-      const sprite = sprites[Math.floor(Math.random() * sprites.length)]!;
-      const disp = dispositions[Math.floor(Math.random() * dispositions.length)]!;
-      const homeRadius = 80 + Math.random() * 80;
-
-      const cat = new NPCCat(this, {
-        name: `Colony Cat ${i + 1}`,
-        spriteKey: sprite,
-        x,
-        y,
-        homeZone: { cx: x, cy: y, radius: homeRadius },
-        disposition: disp,
-      });
-      if (this.groundLayer) {
-        this.physics.add.collider(cat, this.groundLayer);
-      }
-      if (this.objectsLayer) {
-        this.physics.add.collider(cat, this.objectsLayer);
-      }
-      const indicator = new ThreatIndicator(this, cat, "???", disp, false);
-      this.npcs.push({ cat, indicator });
-    }
-  }
-
   // ──────────── Humans ────────────
 
   private spawnHumans(): void {
@@ -3357,17 +3290,17 @@ export class GameScene extends Phaser.Scene {
 
     // Snatcher detection during night
     if (this.dayNight.currentPhase === "night") {
-      this.checkSnatcherDetection();
+      this.snatcher.checkDetection();
     }
 
     // Crossfade background music to the danger theme whenever any snatcher
     // exists in the park. setDanger() is idempotent, so calling it every
     // frame is cheap.
-    this.audio.setDanger(this.snatchers.length > 0);
+    this.audio.setDanger(this.snatcher.hasAnyActive);
 
     // NPC cats flee from snatchers
-    if (this.snatchers.length > 0) {
-      for (const snatcher of this.snatchers) {
+    if (this.snatcher.hasAnyActive) {
+      for (const snatcher of this.snatcher.activeSnatchers) {
         if (!snatcher.visible) continue;
         for (const { cat } of this.npcs) {
           if (cat.state === "sleeping" || cat.state === "alert" || cat.state === "fleeing") continue;
@@ -3682,12 +3615,12 @@ export class GameScene extends Phaser.Scene {
   // ──────────── Environment ────────────
 
   /** True when Mamma Cat is within radial distance of the Makati Ave road centreline. */
-  private isNearMakatiAve(worldX: number, worldY: number): boolean {
+  isNearMakatiAve(worldX: number, worldY: number): boolean {
     return Phaser.Math.Distance.Between(worldX, worldY, GP.MAKATI_AVE_CENTER_X, worldY) <= GP.MAKATI_AVE_WITNESS_DIST;
   }
 
   /** Approximate line-of-sight check by raymarching through collision tiles. */
-  private hasLineOfSight(ax: number, ay: number, bx: number, by: number): boolean {
+  hasLineOfSight(ax: number, ay: number, bx: number, by: number): boolean {
     if (!this.objectsLayer) return true;
     return hasLineOfSightTiles(ax, ay, bx, by, TILE_SIZE, (wx, wy) => {
       const tileX = Math.floor(wx / TILE_SIZE);
@@ -3896,7 +3829,7 @@ export class GameScene extends Phaser.Scene {
     const name = cat.npcName;
 
     if (name.startsWith("Colony Cat")) {
-      this.tryCreditDumpedPetComfort(cat);
+      this.colony.tryCreditDumpedPetComfort(cat);
       this.dialogue.show([getRandomColonyLine()]);
       return;
     }
@@ -3904,15 +3837,6 @@ export class GameScene extends Phaser.Scene {
     void this.requestCatDialogue(cat).catch(() => {
       /* Errors are logged and cleaned up inside requestCatDialogue */
     });
-  }
-
-  private tryCreditDumpedPetComfort(cat: NPCCat): void {
-    const eventId = this.dumpedCatEventIds.get(cat);
-    if (!eventId) return;
-    const deadline = this.dumpedComfortWindowUntil[eventId] ?? 0;
-    if (this.time.now > deadline) return;
-    this.scoring.recordDumpedPetComforted(eventId);
-    delete this.dumpedComfortWindowUntil[eventId];
   }
 
   /**
@@ -4202,258 +4126,27 @@ export class GameScene extends Phaser.Scene {
     return mammaCatCue ? `${base} ${mammaCatCue}` : base;
   }
 
-  // ──────────── Snatchers (Task 4) ────────────
-
-  private checkSnatcherSpawn(): void {
-    const action = resolveSnatcherSpawnAction({
-      isNight: this.dayNight.currentPhase === "night",
-      snatcherSpawnChecked: this.snatcherSpawnChecked,
-      firstSnatcherSeen: this.registry.get(StoryKeys.FIRST_SNATCHER_SEEN) as boolean | undefined,
-      chapter: this.chapters.chapter,
-      isResting: this.player.isResting,
-      isNearShelter: this.isNearShelter(this.player.x, this.player.y),
-    });
-
-    if (action.type === "not_night") {
-      this.snatcherSpawnChecked = false;
-      this.despawnSnatchers();
-      return;
-    }
-    if (action.type === "already_checked") return;
-    if (action.type === "defer_first_sighting") return;
-
-    if (action.type === "first_sighting") {
-      this.snatcherSpawnChecked = true;
-      this.playFirstSnatcherSighting();
-      return;
-    }
-
-    this.snatcherSpawnChecked = true;
-    if (Math.random() > 0.4) return;
-    const snatcherCount = 1 + (Math.random() > 0.5 ? 1 : 0);
-    const navigationGrid = this.createHumanNavigationGrid();
-    for (let i = 0; i < snatcherCount; i++) {
-      this.spawnSnatcher(i, false, navigationGrid);
-    }
-  }
+  // ──────────── Snatchers + Colony (extracted) ────────────
+  // Snatcher lifecycle (spawn/detect/capture) lives in SnatcherSystem.
+  // Dumping events + dynamic colony total + background roster spawn
+  // live in ColonyDynamicsSystem. The scene keeps the narrow bridge
+  // below for removing a colony cat entity: both systems share the
+  // `npcs[]` roster with cat dialogue / chapter progression code that
+  // stays on the scene until Commit D.
 
   /**
-   * The first snatcher sighting is scripted: a snatcher walks into view,
-   * nearby NPC cats flee visibly, then narration fires.
+   * Remove a colony-cat entity when it's captured by a snatcher. Splices
+   * the roster, destroys the indicator + sprite, and clears the dialogue
+   * chaining guard if it pointed at this cat (WORKING_MEMORY "Input
+   * Guards — Dialogue State"). Called from
+   * {@link SnatcherSystem.handleColonyCatSnatch}.
    *
-   * All player-facing effects (edge pulse, narration) and the persistent
-   * `FIRST_SNATCHER_SEEN` flag fire only once the player passes the
-   * proximity + LOS gate below. If any of them fired up-front, a player
-   * who is awake but across the map (or behind an obstacle) would either
-   * see a mysterious red screen pulse with no visible cause (Phase 4.5
-   * "effects only fire when Mamma Cat can perceive the source") or
-   * silently burn their scripted first sighting — on subsequent nights
-   * `firstEligible` would be false and `resolveSnatcherSpawnAction` would
-   * return `random_spawn`, so the narrative beat would never play for
-   * that save. Shelter-rest players are handled earlier via
-   * `defer_first_sighting`.
+   * The witness gate + registry bookkeeping (CATS_SNATCHED counter,
+   * narration) is owned by {@link SnatcherSystem} so the pre-destroy
+   * `cat.x/y` position is captured before this helper runs — see
+   * WORKING_MEMORY "Position-dependent checks across a teleport".
    */
-  private playFirstSnatcherSighting(): void {
-    this.spawnSnatcher(0, true);
-
-    const snatcher = this.snatchers[0];
-    if (!snatcher) return;
-
-    this.time.delayedCall(2000, () => {
-      for (const { cat } of this.npcs) {
-        if (cat.state === "sleeping") continue;
-        const dist = Phaser.Math.Distance.Between(snatcher.x, snatcher.y, cat.x, cat.y);
-        if (dist < GP.SNATCHER_WITNESS_DIST) {
-          this.emotes.show(this, cat, "alert");
-          cat.triggerFlee(snatcher.x, snatcher.y);
-        }
-      }
-
-      this.time.delayedCall(1000, () => {
-        // Gate the full player-facing beat — edge pulse, narration, and the
-        // persistent "seen" flag — behind the same proximity + LOS check used
-        // elsewhere for snatcher sightings (see spawnSnatcher). Without it,
-        // distant players get a "you see the cats run" line AND a mysterious
-        // red screen pulse for an event they cannot perceive. Matches the
-        // Phase 4.5 convention followed by `playCamilleEncounterNarrative`
-        // (gated upstream by `checkCamilleProximity`) and `playDumpingSequence`
-        // (gated upstream by `isNearMakatiAve`).
-        if (!snatcher.active) return;
-        const near =
-          Phaser.Math.Distance.Between(this.player.x, this.player.y, snatcher.x, snatcher.y) <=
-          GP.SNATCHER_WITNESS_DIST;
-        const los = this.hasLineOfSight(this.player.x, this.player.y, snatcher.x, snatcher.y);
-        if (!near || !los) return;
-        const hud = this.scene.get("HUDScene") as HUDScene | undefined;
-        hud?.pulseEdge(0x220000, 0.35, 3000);
-        hud?.showNarration("Something moves in the dark. The other cats run. You should too.");
-        // Only persist the "seen" flag once the player has actually perceived
-        // the scripted beat. Missed first sightings retry on the next eligible
-        // night instead of locking the save into random-spawn mode forever.
-        this.registry.set(StoryKeys.FIRST_SNATCHER_SEEN, true);
-      });
-    });
-  }
-
-  private spawnSnatcher(index: number, silent = false, navigationGrid = this.createHumanNavigationGrid()): void {
-    // Snatchers patrol garden paths
-    const patrolPaths = [
-      [
-        { x: 600, y: 1100 },
-        { x: 1200, y: 800 },
-        { x: 1800, y: 600 },
-        { x: 2200, y: 700 },
-        { x: 1600, y: 1200 },
-      ],
-      [
-        { x: 2400, y: 1000 },
-        { x: 1900, y: 1000 },
-        { x: 1400, y: 1100 },
-        { x: 900, y: 1000 },
-        { x: 1200, y: 700 },
-      ],
-    ];
-    const path = patrolPaths[index % patrolPaths.length]!;
-    const snatcherType = index % 2 === 0 ? "snatcher" : "snatcher2";
-
-    // Snatcher patrol speed must be slow and stealthy
-    const config: HumanConfig = {
-      type: snatcherType,
-      speed: 20,
-      activePhases: ["night"],
-      path,
-    };
-    const snatcher = new HumanNPC(this, this.routeHumanConfig(config, navigationGrid));
-    if (this.groundLayer) this.physics.add.collider(snatcher, this.groundLayer);
-    if (this.objectsLayer) this.physics.add.collider(snatcher, this.objectsLayer);
-    this.snatchers.push(snatcher);
-    this.humans.push(snatcher);
-
-    if (!silent) {
-      const hud = this.scene.get("HUDScene") as HUDScene | undefined;
-      const near =
-        Phaser.Math.Distance.Between(this.player.x, this.player.y, snatcher.x, snatcher.y) <= GP.SNATCHER_WITNESS_DIST;
-      const los = this.hasLineOfSight(this.player.x, this.player.y, snatcher.x, snatcher.y);
-      if (near && los) {
-        hud?.showNarration("Something moves in the dark...");
-      }
-    }
-  }
-
-  private despawnSnatchers(): void {
-    for (const snatcher of this.snatchers) {
-      const idx = this.humans.indexOf(snatcher);
-      if (idx !== -1) this.humans.splice(idx, 1);
-      snatcher.destroy();
-    }
-    this.snatchers = [];
-  }
-
-  /**
-   * Check if a snatcher has detected and caught Mamma Cat, and sweep for
-   * colony cats (named or unnamed) that wandered into grab range. Called
-   * from updateHumans during night phase.
-   *
-   * Eligibility rules (mirror Mamma Cat's shelter-immunity rule):
-   *   - Cat must be `active`.
-   *   - Cats sleeping *near a shelter POI* are immune (didn't get ambushed;
-   *     the narrative "safe sleeping spot" protection that Mamma Cat also
-   *     enjoys). Cats sleeping anywhere else are vulnerable — this is the
-   *     "didn't wake from rest in time" case.
-   *   - Named cats (Blacky, Tiger, Jayco, etc.) are NOT automatically immune.
-   *     They are less often caught because they mostly stay inside their home
-   *     zones near shelter, but a named cat caught napping in the wrong spot
-   *     can be taken. The `COLONY_COUNT` floor (`NAMED_AND_MAMMA_COUNT`)
-   *     prevents total narrative annihilation; geography keeps named-cat
-   *     snatches rare in practice.
-   *
-   * KNOWN LIMITATION: named-cat snatches remove the live entity within the
-   * current session (destroy + splice from `this.npcs`) and decrement
-   * `COLONY_COUNT`, but the next scene boot (player capture reload or fresh
-   * `create()`) unconditionally re-runs the named spawn list and brings the
-   * cat back visually while the counter stays decremented. Tracking
-   * persistently-removed named cats needs a dedicated registry list + spawn
-   * guards + chapter-progression review (e.g. `JAYCO_TALKS` gating); see
-   * WORKING_MEMORY.md "Follow-ups" for the proposed shape.
-   */
-  private checkSnatcherDetection(): void {
-    if (this.snatchers.length === 0) return;
-
-    // Collect colony-cat victims during the sweep, then apply removals after
-    // the nested loop so we don't splice `this.npcs` mid-iteration.
-    const colonyVictims: NPCCat[] = [];
-    const PLAYER_CAPTURE_RANGE = 16;
-    const COLONY_CAT_CAPTURE_RANGE = 16;
-
-    for (const snatcher of this.snatchers) {
-      if (!snatcher.visible) continue;
-
-      for (const { cat } of this.npcs) {
-        if (!cat.active) continue;
-        // Sleeping near shelter = sheltered (mirrors the player rule below).
-        // Sleeping elsewhere remains eligible — "didn't wake in time".
-        if (cat.state === "sleeping" && this.isNearShelter(cat.x, cat.y)) continue;
-        if (colonyVictims.includes(cat)) continue;
-        const catDist = Phaser.Math.Distance.Between(snatcher.x, snatcher.y, cat.x, cat.y);
-        if (catDist < COLONY_CAT_CAPTURE_RANGE) {
-          colonyVictims.push(cat);
-        }
-      }
-
-      const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, snatcher.x, snatcher.y);
-
-      // Detection radius: 128px normal, 32px if crouching near cover
-      let detectionRadius = 128;
-      if (this.player.isCrouching && this.isUnderCanopy(this.player.x, this.player.y)) {
-        detectionRadius = 32;
-      } else if (this.player.isCrouching) {
-        detectionRadius = 64;
-      } else if (this.player.isRunning) {
-        detectionRadius = 192;
-      }
-
-      // Safe sleeping spots are invisible to snatchers
-      if (this.player.isResting && this.isNearShelter(this.player.x, this.player.y)) {
-        continue;
-      }
-
-      if (dist < detectionRadius) {
-        // Snatcher detected the player — move toward them
-        const angle = Phaser.Math.Angle.Between(snatcher.x, snatcher.y, this.player.x, this.player.y);
-        const chaseSpeed = 35;
-        snatcher.setVelocity(Math.cos(angle) * chaseSpeed, Math.sin(angle) * chaseSpeed);
-
-        if (dist < PLAYER_CAPTURE_RANGE) {
-          // Apply any pending colony captures before the scene restart so
-          // the counter bump reaches the save file alongside the player's.
-          for (const victim of colonyVictims) this.handleColonyCatSnatch(victim);
-          this.handleSnatcherCapture();
-          return;
-        }
-      }
-    }
-
-    for (const victim of colonyVictims) this.handleColonyCatSnatch(victim);
-  }
-
-  /**
-   * Remove a colony cat that a snatcher caught (named or unnamed), increment
-   * the lifetime `CATS_SNATCHED` counter, decrement the dynamic
-   * `COLONY_COUNT` total (clamped at `NAMED_AND_MAMMA_COUNT`), and narrate
-   * only if the player could actually perceive the event (proximity +
-   * line-of-sight, matching the Phase 4.5 witness-gate convention used
-   * elsewhere for snatcher beats). Unperceived captures happen silently —
-   * the cat is simply gone next time the player looks.
-   *
-   * Named cats: within-session removal is effective (entity destroyed,
-   * spliced from `this.npcs`). Cross-session persistence is NOT yet
-   * implemented — see the comment on `checkSnatcherDetection` and the
-   * "Follow-ups" block in WORKING_MEMORY.md.
-   */
-  private handleColonyCatSnatch(cat: NPCCat): void {
-    const near = Phaser.Math.Distance.Between(this.player.x, this.player.y, cat.x, cat.y) <= GP.SNATCHER_WITNESS_DIST;
-    const los = near && this.hasLineOfSight(this.player.x, this.player.y, cat.x, cat.y);
-
+  removeColonyCat(cat: NPCCat): void {
     const idx = this.npcs.findIndex((entry) => entry.cat === cat);
     if (idx !== -1) {
       const entry = this.npcs[idx]!;
@@ -4464,236 +4157,10 @@ export class GameScene extends Phaser.Scene {
       cat.destroy();
     }
 
-    // Defensive clear of the dialogue-chaining guard (see WORKING_MEMORY
-    // "Input Guards — Dialogue State"). Colony cats don't normally engage
-    // dialogue, but named cats do — and a rare named-cat snatch while the
-    // player is mid-dialogue with that cat would otherwise leave a stale
-    // partner pointer.
     if (this.lastDialoguePartner === cat) {
       this.lastDialoguePartner = null;
       this.lastDialoguePartnerAt = 0;
     }
-
-    const prev = this.registry.get(StoryKeys.CATS_SNATCHED);
-    const prevCount = typeof prev === "number" && Number.isFinite(prev) && prev >= 0 ? Math.floor(prev) : 0;
-    this.registry.set(StoryKeys.CATS_SNATCHED, prevCount + 1);
-
-    // Decrement the dynamic colony total, clamped at the named+Mamma floor
-    // so the colony can't be narratively counted out. Keep the field and
-    // registry in lockstep (the field is the cache used by the dumping
-    // path and `spawnColonyCats`).
-    this.colonyCount = decrementColonyTotal(this.colonyCount, NAMED_AND_MAMMA_COUNT);
-    this.registry.set(StoryKeys.COLONY_COUNT, this.colonyCount);
-
-    if (near && los) {
-      const hud = this.scene.get("HUDScene") as HUDScene | undefined;
-      hud?.showNarration("A cat was here. Now it's gone.");
-    }
-  }
-
-  private handleSnatcherCapture(): void {
-    const finalLife = this.loseLife();
-    this.scoring.recordSnatch();
-    this.snatchedThisNight = true;
-    markSnatchedThisNight(this.registry);
-
-    // Increment the lifetime capture counter and persist it *before* the
-    // scene restart. `snatcherCapture` reloads via `SaveSystem.load()` which
-    // overwrites in-memory registry state from localStorage, so a mere
-    // `registry.set` here would be discarded on reload. Saving first ensures
-    // the new value is in the save payload when it's read back.
-    const prev = this.registry.get(StoryKeys.PLAYER_SNATCHED_COUNT);
-    const prevCount = typeof prev === "number" && Number.isFinite(prev) && prev >= 0 ? Math.floor(prev) : 0;
-    this.registry.set(StoryKeys.PLAYER_SNATCHED_COUNT, prevCount + 1);
-    if (!finalLife) {
-      this.autoSave();
-    } else {
-      SaveSystem.clear();
-      markGameOver(this.registry);
-    }
-
-    this.cameras.main.fade(100, 0, 0, 0, false, (_cam: Phaser.Cameras.Scene2D.Camera, progress: number) => {
-      if (progress >= 1) {
-        this.dialogue.show(["Hands. Darkness. You can't move. You can't breathe.", "..."], () => {
-          if (finalLife) {
-            this.cameras.main.resetFX();
-            this.triggerGameOver("snatched");
-            return;
-          }
-          const hasSave = SaveSystem.load() !== null;
-          if (hasSave) {
-            this.cameras.main.resetFX();
-            this.scene.restart({ loadSave: true, snatcherCapture: true });
-          } else {
-            this.cameras.main.resetFX();
-          }
-        });
-      }
-    });
-  }
-
-  // ──────────── Colony Dynamics (Task 5) ────────────
-
-  /**
-   * Arm dumping events based on chapter thresholds.
-   * The event only triggers when Mamma Cat is near the Makati Ave road.
-   */
-  private checkColonyDynamics(): void {
-    if (this.dialogue.isActive || this.dumpingInProgress) return;
-    const dumpingSeen = (this.registry.get(StoryKeys.DUMPING_EVENTS_SEEN) as number) ?? 0;
-    const chapter = this.chapters.chapter;
-
-    if (this.dumpingArmed === 0) {
-      if (dumpingSeen === 0 && chapter >= 2) this.dumpingArmed = 1;
-      else if (dumpingSeen === 1 && chapter >= 3) this.dumpingArmed = 2;
-      else if (dumpingSeen === 2 && chapter >= 4) this.dumpingArmed = 3;
-    }
-
-    if (this.dumpingArmed > 0 && this.dumpingArmed === dumpingSeen + 1) {
-      if (this.isNearMakatiAve(this.player.x, this.player.y)) {
-        this.playDumpingSequence(this.dumpingArmed);
-        this.dumpingArmed = 0;
-      }
-    }
-  }
-
-  /**
-   * Play a visible dumping event: vehicle drives up, cat is placed near the road,
-   * vehicle leaves, then narration fires because Mamma Cat witnessed it.
-   *
-   * `DUMPING_EVENTS_SEEN` and the colony count are persisted only inside
-   * `showDumpingNarration`'s witness gate below. The sequence runs for
-   * ~5s, and `MAKATI_AVE_WITNESS_DIST` is only 300px — a player who
-   * wanders off mid-animation would otherwise burn a scripted progression
-   * slot (and receive a modal "you witnessed a dumping" dialogue out of
-   * thin air). Persisting at reveal means a missed dumping simply re-arms
-   * on the next approach via `checkColonyDynamics`. Trade-off: the
-   * dumped colony cat added mid-sequence stays in the world even on a
-   * miss, so a subsequent successful retry adds a second cat for the
-   * same event slot. Bounded (3 dumping events total) and requires
-   * deliberate walk-away-then-return play; accepted as a minor artefact.
-   */
-  private playDumpingSequence(eventNum: number): void {
-    this.dumpingInProgress = true;
-
-    const hud = this.scene.get("HUDScene") as HUDScene | undefined;
-    hud?.pulseEdge(0x221100, 0.3, 2500);
-
-    const MAKATI_AVE_X = 2800;
-    const roadX = MAKATI_AVE_X;
-    const roadY = Math.min(Math.max(this.player.y, 400), 1900);
-    const carStartX = roadX + 400;
-
-    const car = this.addDropoffVehicle(carStartX, roadY, this.vehicleOptionsForDumpingEvent(eventNum));
-
-    this.tweens.add({
-      targets: car,
-      x: roadX,
-      duration: 2000,
-      ease: "Cubic.easeOut",
-      onComplete: () => {
-        this.time.delayedCall(500, () => {
-          const dumpedCat = this.addBackgroundCat(roadX - 20, roadY - 4);
-          if (dumpedCat) {
-            dumpedCat.setAlpha(0.9);
-            this.dumpedCatEventIds.set(dumpedCat, eventNum);
-          }
-
-          this.time.delayedCall(500, () => {
-            this.time.delayedCall(300, () => {
-              this.tweens.add({
-                targets: car,
-                x: carStartX + 200,
-                duration: 2500,
-                ease: "Cubic.easeIn",
-                onComplete: () => car.destroy(),
-              });
-
-              this.time.delayedCall(1500, () => {
-                this.showDumpingNarration(eventNum, dumpedCat);
-              });
-            });
-          });
-        });
-      },
-    });
-  }
-
-  /**
-   * Reveal/completion handler. Re-checks proximity + LOS against the
-   * dumped cat because the trigger-time `isNearMakatiAve` check is ~5s
-   * stale by now. Only persists `DUMPING_EVENTS_SEEN` / `COLONY_COUNT`
-   * and fires narration when the player is actually positioned to
-   * witness the event; otherwise the slot re-arms on the next approach.
-   */
-  private showDumpingNarration(eventNum: number, source: NPCCat | null): void {
-    this.dumpingInProgress = false;
-
-    const witnessed =
-      !!source &&
-      source.active &&
-      this.isNearMakatiAve(this.player.x, this.player.y) &&
-      this.hasLineOfSight(this.player.x, this.player.y, source.x, source.y);
-    if (!witnessed) return;
-
-    this.registry.set(StoryKeys.DUMPING_EVENTS_SEEN, eventNum);
-    const hud = this.scene.get("HUDScene") as HUDScene | undefined;
-    this.colonyCount++;
-    this.registry.set(StoryKeys.COLONY_COUNT, this.colonyCount);
-    const armComfortWindow = () => {
-      this.dumpedComfortWindowUntil[eventNum] = this.time.now + DUMPED_COMFORT_WINDOW_MS;
-    };
-
-    switch (eventNum) {
-      case 1:
-        this.dialogue.show(
-          ["A car. A door. A cat.", "You remember."],
-          () => {
-            hud?.showNarration("A new cat has appeared in the gardens.");
-          },
-          { onHide: armComfortWindow },
-        );
-        break;
-      case 2:
-        this.dialogue.show(
-          [
-            "This one wasn't thrown away. This one was... left.",
-            "With love, and grief, and no choice.",
-            "You sit beside her. You don't speak. There's nothing to say.",
-          ],
-          undefined,
-          { onHide: armComfortWindow },
-        );
-        break;
-      case 3:
-        this.dialogue.show(["Another one. How many of us started this way?"], undefined, { onHide: armComfortWindow });
-        break;
-    }
-  }
-
-  /**
-   * Spawn an additional background colony cat.
-   * Optional position for dumping event placement near the road.
-   */
-  private addBackgroundCat(atX?: number, atY?: number): NPCCat {
-    const sprites = ["mammacat", "blacky", "tiger", "jayco", "fluffy"];
-    const sprite = sprites[Math.floor(Math.random() * sprites.length)]!;
-    const x = atX ?? 600 + Math.random() * 200;
-    const y = atY ?? 1100 + Math.random() * 200;
-
-    const cat = new NPCCat(this, {
-      name: `Colony Cat ${this.npcs.length + 1}`,
-      spriteKey: sprite,
-      x,
-      y,
-      homeZone: { cx: x, cy: y, radius: 100 },
-      disposition: "wary",
-    });
-    if (this.groundLayer) this.physics.add.collider(cat, this.groundLayer);
-    if (this.objectsLayer) this.physics.add.collider(cat, this.objectsLayer);
-    const indicator = new ThreatIndicator(this, cat, "???", "wary", false);
-    this.npcs.push({ cat, indicator });
-    return cat;
   }
 
   // ──────────── Territory Benefits ────────────

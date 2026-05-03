@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import bootSceneSource from "../../src/scenes/BootScene.ts?raw";
 import gameSceneSource from "../../src/scenes/GameScene.ts?raw";
+import colonyDynamicsSystemSource from "../../src/systems/ColonyDynamicsSystem.ts?raw";
 
 describe("static world props", () => {
   it("preloads the carabao playground sculpture as a plain image", () => {
@@ -65,38 +66,43 @@ describe("static world props", () => {
   });
 
   it("uses the SUV image helper instead of generated placeholder car textures", () => {
+    // Intro cinematic stays on GameScene; dumping sequence moved to
+    // ColonyDynamicsSystem in commit A but continues to call back into
+    // `scene.addDropoffVehicle` so both paths share the same helper.
     const introStart = gameSceneSource.indexOf("private startIntroCinematic(");
     const introEnd = gameSceneSource.indexOf("\n  private ", introStart + 1);
     const introSource = gameSceneSource.slice(introStart, introEnd);
-    const dumpingStart = gameSceneSource.indexOf("private playDumpingSequence(");
-    const dumpingEnd = gameSceneSource.indexOf("\n  private ", dumpingStart + 1);
-    const dumpingSource = gameSceneSource.slice(dumpingStart, dumpingEnd);
+    const dumpingStart = colonyDynamicsSystemSource.indexOf("private playDumpingSequence(");
+    const dumpingEnd = colonyDynamicsSystemSource.indexOf("\n  private ", dumpingStart + 1);
+    const dumpingSource = colonyDynamicsSystemSource.slice(dumpingStart, dumpingEnd);
 
     expect(introStart).toBeGreaterThanOrEqual(0);
     expect(dumpingStart).toBeGreaterThanOrEqual(0);
     expect(gameSceneSource).toContain('const DROPOFF_SUV_TEXTURE = "suv_small";');
     expect(gameSceneSource).toContain('const DROPOFF_COROLLA_TEXTURE = "corolla_small";');
-    expect(gameSceneSource).toContain("private addDropoffVehicle(");
+    expect(gameSceneSource).toContain("addDropoffVehicle(x: number, y: number, options: DropoffVehicleOptions");
     expect(gameSceneSource).not.toContain("generateCarTextures");
     expect(gameSceneSource).not.toContain("car_closed");
     expect(gameSceneSource).not.toContain("car_open");
     expect(introSource).toContain("this.addDropoffVehicle(carOffscreenX, roadY)");
-    expect(dumpingSource).toContain("this.addDropoffVehicle(carStartX, roadY, this.vehicleOptionsForDumpingEvent(eventNum))");
+    expect(dumpingSource).toContain(
+      "this.scene.addDropoffVehicle(carStartX, roadY, this.scene.vehicleOptionsForDumpingEvent(eventNum))",
+    );
   });
 
   it("uses the Corolla for the first dumping event and then cycles SUV tints", () => {
     const helperStart = gameSceneSource.indexOf("private tintForSuvDropoff(");
     const helperEnd = gameSceneSource.indexOf("\n  private ", helperStart + 1);
     const helperSource = gameSceneSource.slice(helperStart, helperEnd);
-    const optionsStart = gameSceneSource.indexOf("private vehicleOptionsForDumpingEvent(");
-    const optionsEnd = gameSceneSource.indexOf("\n  private ", optionsStart + 1);
+    const optionsStart = gameSceneSource.indexOf("vehicleOptionsForDumpingEvent(eventNum: number)");
+    const optionsEnd = gameSceneSource.indexOf("\n  /**", optionsStart + 1);
     const optionsSource = gameSceneSource.slice(optionsStart, optionsEnd);
     const introStart = gameSceneSource.indexOf("private startIntroCinematic(");
     const introEnd = gameSceneSource.indexOf("\n  private ", introStart + 1);
     const introSource = gameSceneSource.slice(introStart, introEnd);
-    const dumpingStart = gameSceneSource.indexOf("private playDumpingSequence(");
-    const dumpingEnd = gameSceneSource.indexOf("\n  private ", dumpingStart + 1);
-    const dumpingSource = gameSceneSource.slice(dumpingStart, dumpingEnd);
+    const dumpingStart = colonyDynamicsSystemSource.indexOf("private playDumpingSequence(");
+    const dumpingEnd = colonyDynamicsSystemSource.indexOf("\n  private ", dumpingStart + 1);
+    const dumpingSource = colonyDynamicsSystemSource.slice(dumpingStart, dumpingEnd);
 
     expect(helperStart).toBeGreaterThanOrEqual(0);
     expect(optionsStart).toBeGreaterThanOrEqual(0);
@@ -112,6 +118,8 @@ describe("static world props", () => {
     expect(optionsSource).toContain("return { tint: this.tintForSuvDropoff(eventNum - 1) };");
     expect(introSource).toContain("this.addDropoffVehicle(carOffscreenX, roadY)");
     expect(introSource).not.toContain("vehicleOptionsForDumpingEvent");
-    expect(dumpingSource).toContain("this.addDropoffVehicle(carStartX, roadY, this.vehicleOptionsForDumpingEvent(eventNum))");
+    expect(dumpingSource).toContain(
+      "this.scene.addDropoffVehicle(carStartX, roadY, this.scene.vehicleOptionsForDumpingEvent(eventNum))",
+    );
   });
 });
