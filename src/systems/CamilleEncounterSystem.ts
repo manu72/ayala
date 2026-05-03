@@ -84,14 +84,14 @@ export class CamilleEncounterSystem {
 
   /** Camille lines when she recognises a named colony cat (Phase 4.5). */
   private readonly personalLines: Record<string, string[]> = {
-    Blacky: ["Hello, shadow.", "Such a quiet soul."],
-    Tiger: ["Hey, hey — easy.", "You don't have to growl at me."],
-    Jayco: ["I see you, brave one."],
-    "Jayco Jr": ["Oh, you're a little bundle of energy.", "Easy there, little one."],
-    Fluffy: ["Hello, sweet thing."],
-    Pedigree: ["I see you, lovely one.", "You are so elegant."],
-    Ginger: ["The twins.", "I know you two."],
-    "Ginger B": ["The twins.", "I know you two."],
+    Blacky: ["Blacky, you handsome boy.", "Hey, Blacky.", "There's my boy."],
+    Tiger: ["Tiger, not hissing today?", "Hi, Tiger.", "Easy, Tiger."],
+    Jayco: ["Jayco. Good to see you.", "Hey, Jayco."],
+    "Jayco Jr": ["Hey, little one.", "Jayco Jr — you're getting big."],
+    Fluffy: ["Fluffy. How's the fountain?", "Hi, Fluffy."],
+    Pedigree: ["Well, look at you.", "Hello, beautiful."],
+    Ginger: ["Ginger. Hey, sweetie.", "Hi, Ginger."],
+    "Ginger B": ["There you are, Ginger B.", "Hey, you."],
   };
 
   constructor(scene: GameScene) {
