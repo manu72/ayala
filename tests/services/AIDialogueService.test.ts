@@ -8,7 +8,7 @@ import {
   parseAIJson,
 } from "../../src/services/AIDialogueService";
 import { FallbackDialogueService } from "../../src/services/FallbackDialogueService";
-import type { DialogueRequest } from "../../src/services/DialogueService";
+import { ScriptedDialogueService, type DialogueRequest } from "../../src/services/DialogueService";
 
 const baseReq = (): DialogueRequest => ({
   speaker: "Blacky",
@@ -545,6 +545,74 @@ describe("AIDialogueService human dialogue", () => {
 });
 
 describe("FallbackDialogueService", () => {
+  it("returns unplayed scripted dialogue before calling AI", async () => {
+    const primary = {
+      getDialogue: vi.fn().mockResolvedValue({ lines: ["ai"] }),
+    };
+    const secondary = new ScriptedDialogueService({
+      Blacky: [
+        {
+          id: "blacky_first",
+          condition: (req) => req.conversationHistory.length === 0,
+          response: { lines: ["Scripted first."], event: "blacky_first" },
+        },
+      ],
+    });
+    const fb = new FallbackDialogueService(primary, secondary);
+
+    const out = await fb.getDialogue(baseReq());
+
+    expect(out.lines).toEqual(["Scripted first."]);
+    expect(primary.getDialogue).not.toHaveBeenCalled();
+  });
+
+  it("calls AI after the matching scripted dialogue has already rendered", async () => {
+    const primary = {
+      getDialogue: vi.fn().mockResolvedValue({ lines: ["ai"] }),
+    };
+    const secondary = new ScriptedDialogueService({
+      Blacky: [
+        {
+          id: "blacky_return",
+          condition: () => true,
+          response: { lines: ["Scripted return."] },
+        },
+      ],
+    });
+    const fb = new FallbackDialogueService(primary, secondary);
+    const req = baseReq();
+    req.conversationHistory = [{ timestamp: 1, speaker: "Blacky", text: "Scripted return." }];
+
+    const out = await fb.getDialogue(req);
+
+    expect(out.lines).toEqual(["ai"]);
+    expect(primary.getDialogue).toHaveBeenCalled();
+  });
+
+  it("does not replay an exhausted script when AI fails", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const primary = {
+      getDialogue: vi.fn().mockRejectedValue(new Error("network")),
+    };
+    const secondary = new ScriptedDialogueService({
+      Blacky: [
+        {
+          id: "blacky_return",
+          condition: () => true,
+          response: { lines: ["Scripted return."] },
+        },
+      ],
+    });
+    const fb = new FallbackDialogueService(primary, secondary);
+    const req = baseReq();
+    req.conversationHistory = [{ timestamp: 1, speaker: "Blacky", text: "Scripted return." }];
+
+    const out = await fb.getDialogue(req);
+
+    expect(out.lines).toEqual(["*The cat regards you warily.*"]);
+    warn.mockRestore();
+  });
+
   it("uses secondary when primary throws", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const primary = {

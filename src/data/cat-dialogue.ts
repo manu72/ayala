@@ -195,7 +195,7 @@ const fluffyScripts: DialogueScript[] = [
   },
   {
     id: "fluffy_cautious_return",
-    condition: () => true,
+    condition: (req) => req.gameState.trustWithSpeaker < 20,
     response: {
       lines: ["*The cat watches you from the bushes, keeping a safe distance.*"],
       speakerPose: "wary",
@@ -264,7 +264,7 @@ const gingerScripts: DialogueScript[] = [
   },
   {
     id: "ginger_hostile_return",
-    condition: () => true,
+    condition: (req) => req.gameState.trustWithSpeaker < 30,
     response: {
       lines: ["*The ginger cat hisses softly.*"],
       speakerPose: "hostile",

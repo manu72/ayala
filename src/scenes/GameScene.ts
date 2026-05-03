@@ -32,6 +32,7 @@ import { StoryKeys, migrateLegacyIntroFlag } from "../registry/storyKeys";
 import { computeBackgroundSpawnCount, decrementColonyTotal } from "../utils/colonySpawn";
 import {
   ScriptedDialogueService,
+  findUnplayedDialogueScript,
   type DialogueService,
   type DialogueRequest,
   type DialogueResponse,
@@ -49,7 +50,8 @@ import {
   addNpcMemory,
 } from "../services/ConversationStore";
 import { AI_PERSONAS } from "../ai/personas";
-import { CAT_DIALOGUE_SCRIPTS, getRandomColonyLine } from "../data/cat-dialogue";
+import { getRandomColonyLine } from "../data/cat-dialogue";
+import { NPC_DIALOGUE_SCRIPTS } from "../data/npc-dialogue";
 import {
   CAMILLE_ENCOUNTER_BEATS,
   CAMILLE_ENCOUNTER_5_PREDECISION_STEPS,
@@ -514,7 +516,7 @@ export class GameScene extends Phaser.Scene {
     this.audio.start(this);
     this.chapterCheckTimer = 0;
     this.narrationShown = new Set();
-    const scripted = new ScriptedDialogueService(CAT_DIALOGUE_SCRIPTS);
+    const scripted = new ScriptedDialogueService(NPC_DIALOGUE_SCRIPTS);
     const proxyUrl = import.meta.env.VITE_AI_PROXY_URL;
     const primary = import.meta.env.VITE_AI_PRIMARY === "openai" ? ("openai" as const) : ("deepseek" as const);
     const fb = import.meta.env.VITE_AI_FALLBACK;
@@ -3380,13 +3382,14 @@ export class GameScene extends Phaser.Scene {
 
   /**
    * Show a single greeting bubble above `human` using the best available
-   * source in priority order: caller-forced line > AI persona > scripted pool.
+   * source in priority order: caller-forced line > unplayed named-human script
+   * > AI persona > scripted pool.
    *
-   * AI path: eligible only for close Mamma Cat proximity greetings when the
-   * human has an `identityName` registered in `AI_PERSONAS`, its per-human
-   * cooldown has elapsed, no other AI bubble is in flight, and no caller-forced
-   * line was passed. Greetings aimed at other NPC cats stay scripted so they
-   * do not create Mamma Cat conversation history from offscreen encounters.
+   * Named-human script/AI path: eligible only for close Mamma Cat proximity
+   * greetings when the human has an `identityName` registered in `AI_PERSONAS`,
+   * no other AI bubble is in flight, and no caller-forced line was passed.
+   * Greetings aimed at other NPC cats stay scripted so they do not create
+   * Mamma Cat conversation history from offscreen encounters.
    *
    * Timing: AI path uses a 3.5s budget (vs 8s for engaged cat dialogue) so
    * ambient bubbles never stall the scene. Caller's emote + greeting animation
@@ -3413,12 +3416,15 @@ export class GameScene extends Phaser.Scene {
       distanceToMammaCat,
       maxMammaCatDistance: GP.CAT_PERSON_PLAYER_GREET_DIST,
     });
+    const namedHumanDialogueEligible =
+      hasPersona &&
+      this.dialogueService instanceof FallbackDialogueService &&
+      !this.humanAiBubbleInFlight &&
+      opts?.nearNpcCat === undefined &&
+      distanceToMammaCat <= GP.CAT_PERSON_PLAYER_GREET_DIST;
 
-    if (aiEligible && identity !== null) {
-      // Per-human cooldown is set up front (regardless of success) so a burst
-      // of proximity events can't fire multiple AI calls for the same speaker.
-      this.humanAiBubbleCooldownUntil.set(human, now + GameScene.HUMAN_AI_BUBBLE_COOLDOWN_MS);
-      void this.requestHumanBubbleLine(human, identity, opts?.nearNpcCat).catch(() => {
+    if (namedHumanDialogueEligible && identity !== null) {
+      void this.requestHumanBubbleLine(human, identity, opts?.nearNpcCat, { aiAllowed: aiEligible }).catch(() => {
         /* fallbackLine branch inside already renders scripted on failure */
       });
       return;
@@ -3437,6 +3443,7 @@ export class GameScene extends Phaser.Scene {
     human: HumanNPC,
     speaker: string,
     nearNpcCat: NPCCat | undefined,
+    opts: { aiAllowed: boolean },
   ): Promise<void> {
     this.humanAiBubbleInFlight = true;
     const abort = new AbortController();
@@ -3484,16 +3491,29 @@ export class GameScene extends Phaser.Scene {
         nearbyCat: nearNpcCat?.npcName,
       };
 
-      const response = await (this.dialogueService as FallbackDialogueService).getDialogue(request, {
-        timeoutMs: GameScene.HUMAN_AI_BUBBLE_TIMEOUT_MS,
-        signal: abort.signal,
-      });
+      const scripted = findUnplayedDialogueScript(NPC_DIALOGUE_SCRIPTS, request);
+      let line = scripted?.response.lines[0]?.trim();
+
+      if (!line) {
+        if (!opts.aiAllowed) {
+          renderFallback();
+          return;
+        }
+        // Per-human cooldown is set immediately before the AI call so bursts
+        // cannot spam the model, while pending scripted lines can still play
+        // during the cooldown.
+        this.humanAiBubbleCooldownUntil.set(human, this.time.now + GameScene.HUMAN_AI_BUBBLE_COOLDOWN_MS);
+        const response = await (this.dialogueService as FallbackDialogueService).getDialogue(request, {
+          timeoutMs: GameScene.HUMAN_AI_BUBBLE_TIMEOUT_MS,
+          signal: abort.signal,
+        });
+        line = response.lines[0]?.trim();
+      }
 
       if (abort.signal.aborted || !human.active || !human.visible || !this.isHumanCloseToMammaCat(human)) {
         return;
       }
-      const line = response.lines[0]?.trim();
-      if (!line) {
+      if (!line || line === "...") {
         renderFallback();
         return;
       }

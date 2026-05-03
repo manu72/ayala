@@ -104,4 +104,59 @@ describe('ScriptedDialogueService', () => {
     const result = await svc.getDialogue(makeRequest())
     expect(result).toEqual(earlyResponse)
   })
+
+  it('returns an unplayed matching script before repeated fallback dialogue', async () => {
+    const svc = new ScriptedDialogueService({
+      TestCat: [
+        {
+          id: 'test_first',
+          condition: (req) => req.conversationHistory.length === 0,
+          response: { lines: ['First scripted line.'] },
+        },
+        {
+          id: 'test_trust',
+          condition: (req) => req.gameState.trustWithSpeaker >= 20,
+          response: { lines: ['Trust scripted line.'] },
+        },
+        {
+          id: 'test_cautious',
+          condition: (req) => req.gameState.trustWithSpeaker < 20,
+          response: { lines: ['Cautious scripted line.'] },
+        },
+      ],
+    })
+    const req = makeRequest({
+      gameState: {
+        chapter: 1,
+        timeOfDay: 'day',
+        trustGlobal: 20,
+        trustWithSpeaker: 20,
+        hunger: 80,
+        thirst: 80,
+        energy: 80,
+        daysSurvived: 1,
+        knownCats: [],
+        recentEvents: [],
+      },
+      conversationHistory: [
+        { timestamp: 1, speaker: 'TestCat', text: 'First scripted line.' },
+        { timestamp: 2, speaker: 'TestCat', text: 'AI line after scripts started.' },
+      ],
+    })
+
+    const result = await svc.getUnplayedDialogue(req)
+
+    expect(result?.lines).toEqual(['Trust scripted line.'])
+  })
+
+  it('does not replay a matching script once its rendered text is in history', async () => {
+    const svc = new ScriptedDialogueService(testScripts)
+    const req = makeRequest({
+      conversationHistory: [{ timestamp: 1, speaker: 'TestCat', text: 'Welcome back.' }],
+    })
+
+    const result = await svc.getUnplayedDialogue(req)
+
+    expect(result).toBeNull()
+  })
 })

@@ -3,6 +3,11 @@ import type {
 } from "./AIDialogueService";
 import type { DialogueRequest, DialogueResponse, DialogueService } from "./DialogueService";
 
+type ScriptedFirstDialogueService = DialogueService & {
+  getUnplayedDialogue?: (request: DialogueRequest) => Promise<DialogueResponse | null>;
+  getFallbackDialogue?: (request: DialogueRequest) => Promise<DialogueResponse>;
+};
+
 /**
  * Tries the primary service (AI); on any failure, uses the secondary (scripted).
  *
@@ -21,6 +26,10 @@ export class FallbackDialogueService implements DialogueService {
     request: DialogueRequest,
     callOpts?: AIDialogueCallOptions,
   ): Promise<DialogueResponse> {
+    const scripted = this.secondary as ScriptedFirstDialogueService;
+    const unplayedScripted = await scripted.getUnplayedDialogue?.(request);
+    if (unplayedScripted) return unplayedScripted;
+
     try {
       // Narrow: only AIDialogueService consumes callOpts. ScriptedDialogueService's
       // signature ignores extras; passing unknown args is harmless.
@@ -58,7 +67,7 @@ export class FallbackDialogueService implements DialogueService {
       } else {
         console.warn("[Dialogue] AI failed; using scripted fallback", err);
       }
-      return this.secondary.getDialogue(request);
+      return scripted.getFallbackDialogue ? scripted.getFallbackDialogue(request) : this.secondary.getDialogue(request);
     }
   }
 }

@@ -8,7 +8,7 @@
 
 ## Backstory
 
-Manu is Camille's partner. He was not a cat person when they met. He is now — quietly, practically, the way he is with most things. He comes on the evening circuit because Camille does, and because the cats have started to recognise him. Manu has made friends with Fluffy, and Fluffy, in turn, has decided that Manu is her human.
+Manu is Camille's partner. He was not a cat person when they met. He is now — quietly, practically, the way he is with most things. He comes on the evening circuit because Camille does, and because the cats have started to recognise him. Manu has made friends with Fluffy, and Fluffy, in turn, has decided that Manu is her human. Manu also rescued Jayco many months ago when Jayco was just a starving kitten. So he is especially friendly to Jayco and Jayco Junior.
 
 ## Personality
 
