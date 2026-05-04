@@ -569,12 +569,24 @@ export class CamilleEncounterSystem {
    * Drive a paired narrator+spoken sequence. See the extensive docstring
    * on the pre-refactor `GameScene.playPairedBeat` for the pause-lifecycle
    * contract; unchanged here.
+   *
+   * `opts.completeOnDismiss` — when true, an early dismiss (player closes
+   * the modal before the final line) still fires the caller's onComplete
+   * after releasing the pause. Used by Beat-5 journey, which cannot
+   * tolerate an early dismiss: the pickup tween has already been kicked
+   * off from `onStepShown(0)` (Mamma is fading + getting body-disabled,
+   * Camille is walking off-screen) and `playerInputFrozen = true` is set
+   * outside this helper. Without the completion running, the scene
+   * would be left with a frozen invisible player, ENCOUNTER_5_COMPLETE
+   * unset, and no chapter transition — a permanent soft-lock until the
+   * user reloads. For all other beats the existing "resume only" dismiss
+   * semantics apply.
    */
   private playPairedBeat(
     steps: ReadonlyArray<EncounterStep>,
     speaker: HumanNPC | null,
     onComplete: () => void,
-    opts?: { onStepShown?: (index: number) => void },
+    opts?: { onStepShown?: (index: number) => void; completeOnDismiss?: boolean },
   ): void {
     if (steps.length === 0) {
       onComplete();
@@ -602,6 +614,12 @@ export class CamilleEncounterSystem {
     this.scene.dialogue.show(
       narratorLines,
       () => {
+        // Idempotency guard: when `completeOnDismiss` is set, onHide runs
+        // onComplete synchronously and then this doneHook still fires from
+        // DialogueSystem.advance() (captured before hide()). Short-circuit
+        // the second invocation so story-critical callbacks never double-
+        // fire Chapter 6 / autoSave / registry writes.
+        if (completed) return;
         completed = true;
         clearBubble();
         onComplete();
@@ -617,15 +635,19 @@ export class CamilleEncounterSystem {
         },
         onHide: (): void => {
           clearBubble();
-          // Only auto-release pause on EARLY dismiss (player closed the
-          // modal before the final line). Natural completion hands control
-          // to onComplete, which owns the pause lifecycle from there.
-          if (!completed) {
-            if (isCamilleBeat) {
-              this.resumeEraHumans();
-            } else if (speaker) {
-              speaker.resumeFromEncounter();
-            }
+          if (completed) return;
+          if (isCamilleBeat) {
+            this.resumeEraHumans();
+          } else if (speaker) {
+            speaker.resumeFromEncounter();
+          }
+          // Beat-5 journey opts into completion-on-dismiss so the player
+          // can't soft-lock the scene by closing the modal mid-pickup.
+          // The idempotency guard above ensures the doneHook captured in
+          // DialogueSystem.advance() becomes a no-op afterwards.
+          if (opts?.completeOnDismiss) {
+            completed = true;
+            onComplete();
           }
         },
       },
@@ -816,6 +838,12 @@ export class CamilleEncounterSystem {
         onStepShown: (index) => {
           if (index === 0) this.runBeat5Pickup();
         },
+        // Pickup tween already kicked off from onStepShown(0); an early
+        // dismiss here would leave Mamma fading/invisible, player input
+        // frozen, Chapter 6 never starting. Treat dismiss as "continue
+        // the sequence" — startChapter6Sequence's 2s camera fade covers
+        // any remaining tween timeline visually.
+        completeOnDismiss: true,
       },
     );
   }
