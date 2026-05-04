@@ -57,6 +57,23 @@ import {
  *   - Conversation history persists the *rendered* merged lines, not
  *     the raw AI payload (WORKING_MEMORY 5.1a lesson).
  */
+
+/**
+ * Normalise a persisted registry value that must be a non-negative integer
+ * count or day index. All encounter/ambient-day registry keys
+ * ({@link StoryKeys.CAMILLE_ENCOUNTER}, `_DAY`, `AMBIENT_*_DAY`) are saved
+ * through {@link SaveSystem} and restored on load, so a corrupt save, a
+ * hand-edited LocalStorage entry, or a future save-schema change can inject
+ * NaN, a fractional number, a negative, a string, or `undefined`. The whole
+ * encounter ladder (comparisons, branching, `Math.min(currentEncounter + 1, 5)`
+ * arithmetic) assumes a finite non-negative integer, so we fall back to 0 on
+ * anything else. Matches the normalisation pattern used in `SnatcherSystem`,
+ * `CollapseSystem`, and `ColonyDynamicsSystem`.
+ */
+function readCount(raw: unknown): number {
+  return typeof raw === "number" && Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : 0;
+}
+
 export class CamilleEncounterSystem {
   private readonly scene: GameScene;
 
@@ -184,7 +201,7 @@ export class CamilleEncounterSystem {
     }
     if (this.encounterActive) return;
 
-    const currentEncounter = (scene.registry.get(StoryKeys.CAMILLE_ENCOUNTER) as number) ?? 0;
+    const currentEncounter = readCount(scene.registry.get(StoryKeys.CAMILLE_ENCOUNTER));
     const encounter5Complete = scene.registry.get(StoryKeys.ENCOUNTER_5_COMPLETE) === true;
     const awaitingEncounter5Completion = currentEncounter >= 5 && !encounter5Complete;
     if (currentEncounter >= 5) {
@@ -194,7 +211,7 @@ export class CamilleEncounterSystem {
       }
     }
 
-    const lastDay = (scene.registry.get(StoryKeys.CAMILLE_ENCOUNTER_DAY) as number) ?? 0;
+    const lastDay = readCount(scene.registry.get(StoryKeys.CAMILLE_ENCOUNTER_DAY));
     if (lastDay >= scene.dayNight.dayCount) return;
 
     if (this.rollDay >= scene.dayNight.dayCount) {
@@ -221,9 +238,9 @@ export class CamilleEncounterSystem {
     if (!scene.map || !scene.dayNight || !scene.chapters || scene.chapters.chapter < 5) return;
     if (scene.dayNight.currentPhase !== "dawn") return;
     if (this.camilleNPC) return;
-    const last = (scene.registry.get(StoryKeys.CAMILLE_AMBIENT_DAWN_DAY) as number) ?? 0;
+    const last = readCount(scene.registry.get(StoryKeys.CAMILLE_AMBIENT_DAWN_DAY));
     if (last >= scene.dayNight.dayCount) return;
-    const completedEnc = (scene.registry.get(StoryKeys.CAMILLE_ENCOUNTER) as number) ?? 0;
+    const completedEnc = readCount(scene.registry.get(StoryKeys.CAMILLE_ENCOUNTER));
     const encounter5Complete = scene.registry.get(StoryKeys.ENCOUNTER_5_COMPLETE) === true;
     if (completedEnc >= 5 && !encounter5Complete) return;
     this.spawnCareRouteNPCs({
@@ -242,9 +259,9 @@ export class CamilleEncounterSystem {
     if (!scene.map || !scene.dayNight || !scene.chapters || scene.chapters.chapter < 5) return;
     if (scene.dayNight.currentPhase !== "evening") return;
     if (this.camilleNPC) return;
-    const last = (scene.registry.get(StoryKeys.CAMILLE_AMBIENT_EVENING_DAY) as number) ?? 0;
+    const last = readCount(scene.registry.get(StoryKeys.CAMILLE_AMBIENT_EVENING_DAY));
     if (last >= scene.dayNight.dayCount) return;
-    const completedEnc = (scene.registry.get(StoryKeys.CAMILLE_ENCOUNTER) as number) ?? 0;
+    const completedEnc = readCount(scene.registry.get(StoryKeys.CAMILLE_ENCOUNTER));
     this.spawnCareRouteNPCs({
       includeManu: completedEnc >= 1,
       includeKish: completedEnc >= 2,
