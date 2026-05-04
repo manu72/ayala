@@ -366,11 +366,43 @@ export class CamilleEncounterSystem {
     this.pendingEncounter = encounterNum;
   }
 
-  /** Called from {@link GameScene.shutdown}. Clears frozen input + NPCs. */
+  /**
+   * Called from {@link GameScene.shutdown}. Self-contained teardown of
+   * every Camille-owned runtime state so the next scene start is always
+   * playable, even if the player was mid-Beat-5-pickup. In particular:
+   *
+   *  - The two tweens launched by {@link runBeat5Pickup} (Mamma fading
+   *    toward Camille's feet; Camille walking off-screen) are stopped
+   *    explicitly. Without this, a shutdown that races the tween can
+   *    leave the player at partial alpha when the tween gets killed by
+   *    Phaser's own lifecycle, and — critically — the `onComplete` that
+   *    would otherwise re-enable the physics body + restore visibility
+   *    never fires on a killed tween.
+   *  - `scene.player.{body.enable, alpha, visible}` are reset directly so
+   *    this method is safe to call outside a full scene teardown (e.g. a
+   *    future mid-session reset path) without depending on
+   *    `GameScene.shutdown()`'s scene-level restore at lines 255-261.
+   *    GameScene also restores the same flags (the scene-level restore
+   *    exists because `playerInputFrozen` is a scene-owned flag); both
+   *    together are belt-and-suspenders.
+   */
   shutdownCamilleState(): void {
     this.cancelBeat5Decision();
     this.beat5DecisionActive = false;
     this.scene.playerInputFrozen = false;
+
+    const scene = this.scene;
+    if (scene.player) {
+      scene.tweens.killTweensOf(scene.player);
+      const body = scene.player.body as Phaser.Physics.Arcade.Body | undefined;
+      body?.setEnable(true);
+      scene.player.setAlpha(1);
+      scene.player.setVisible(true);
+    }
+    if (this.camilleNPC) {
+      scene.tweens.killTweensOf(this.camilleNPC);
+    }
+
     this.resumeEraHumans();
   }
 
