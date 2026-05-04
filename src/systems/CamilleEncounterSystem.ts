@@ -89,6 +89,15 @@ export class CamilleEncounterSystem {
   private beat5DecisionActive = false;
   private beat5DecisionTimer: Phaser.Time.TimerEvent | null = null;
   private kishSlowDownShown = false;
+  /**
+   * Cancellation token for the in-flight `requestEncounterLines` LLM call.
+   * Mirrors `CatDialogueController.requestAbort` /
+   * `HumanPresenceSystem.humanAiBubbleAbort`. Aborted from
+   * {@link shutdownCamilleState}; the `runEncounterBeat` orchestrator
+   * checks `signal.aborted` before calling `playPairedBeat` so an
+   * orphaned `.then` cannot render dialogue on a torn-down scene.
+   */
+  private encounterRequestAbort: AbortController | null = null;
 
   /**
    * Paired narrator + spoken beats for Camille's 2–4th encounters.
@@ -390,6 +399,17 @@ export class CamilleEncounterSystem {
     this.cancelBeat5Decision();
     this.beat5DecisionActive = false;
     this.scene.playerInputFrozen = false;
+
+    // Abort any in-flight `requestEncounterLines` LLM call so (a) the
+    // fetch is cancelled (no wasted bandwidth), and (b) the orchestrator
+    // in `runEncounterBeat` skips `runBeatWith` via its `abort.signal.
+    // aborted` guards, so `playPairedBeat` / `scene.dialogue.show` never
+    // runs against a torn-down scene. Matches the sibling shutdowns in
+    // `HumanPresenceSystem` and `CatDialogueController`.
+    if (this.encounterRequestAbort) {
+      this.encounterRequestAbort.abort();
+      this.encounterRequestAbort = null;
+    }
 
     const scene = this.scene;
     if (scene.player) {
@@ -732,9 +752,29 @@ export class CamilleEncounterSystem {
       }
     };
 
-    void this.requestEncounterLines(n, beat.objective)
-      .then((lines) => runBeatWith(lines))
-      .catch(() => runBeatWith(null));
+    // Abort + signal-check pattern required for every LLM caller — see the
+    // WORKING_MEMORY "In-flight LLM requests carry an AbortController"
+    // lesson. If the scene tears down (e.g. snatcher capture during a
+    // Camille beat) while the LLM call is in flight, aborting here both
+    // cancels the fetch AND prevents the orphaned `.then`/`.catch`
+    // continuation from calling `runBeatWith` → `playPairedBeat` →
+    // `scene.dialogue.show` against a destroyed scene.
+    const abort = new AbortController();
+    this.encounterRequestAbort = abort;
+    void this.requestEncounterLines(n, beat.objective, abort.signal)
+      .then((lines) => {
+        if (abort.signal.aborted) return;
+        runBeatWith(lines);
+      })
+      .catch(() => {
+        if (abort.signal.aborted) return;
+        runBeatWith(null);
+      })
+      .finally(() => {
+        if (this.encounterRequestAbort === abort) {
+          this.encounterRequestAbort = null;
+        }
+      });
   }
 
   /**
@@ -945,8 +985,18 @@ export class CamilleEncounterSystem {
    * in {@link persistBeatHistory} after the caller has merged the AI
    * lines with the authored beat so the stored record reflects what
    * Camille actually said on screen.
+   *
+   * `signal` — caller's abort signal, forwarded to the LLM service so a
+   * scene shutdown / system reset cancels the in-flight fetch. Internal
+   * awaits don't need explicit `.aborted` checks because this function
+   * is side-effect-free; the orchestrator in `runEncounterBeat` guards
+   * the `.then`/`.catch` boundary where state mutation actually happens.
    */
-  private async requestEncounterLines(n: 2 | 3 | 4, objective: string): Promise<string[] | null> {
+  private async requestEncounterLines(
+    n: 2 | 3 | 4,
+    objective: string,
+    signal?: AbortSignal,
+  ): Promise<string[] | null> {
     const scene = this.scene;
     if (!(scene.dialogueService instanceof FallbackDialogueService)) {
       return null;
@@ -994,6 +1044,7 @@ export class CamilleEncounterSystem {
         // Engaged-style budget: encounters are modal beats, the player is
         // committed and can tolerate a longer wait than an ambient bubble.
         timeoutMs: 5000,
+        signal,
       });
 
       const lines = response.lines.map((l) => l.trim()).filter((l) => l.length > 0);
