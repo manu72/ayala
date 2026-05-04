@@ -633,12 +633,23 @@ export class CamilleEncounterSystem {
    * unset, and no chapter transition — a permanent soft-lock until the
    * user reloads. For all other beats the existing "resume only" dismiss
    * semantics apply.
+   *
+   * `opts.onDismiss` — fires when the player closes the modal before the
+   * final line AND `completeOnDismiss` is not set. Runs after the pause
+   * release so callers can re-arm retry state (e.g. `runEncounterBeat`
+   * puts `pendingEncounter` back so the player can re-approach Camille
+   * and retry within the same evening). Mutually exclusive with
+   * `completeOnDismiss` in the current codebase.
    */
   private playPairedBeat(
     steps: ReadonlyArray<EncounterStep>,
     speaker: HumanNPC | null,
     onComplete: () => void,
-    opts?: { onStepShown?: (index: number) => void; completeOnDismiss?: boolean },
+    opts?: {
+      onStepShown?: (index: number) => void;
+      completeOnDismiss?: boolean;
+      onDismiss?: () => void;
+    },
   ): void {
     if (steps.length === 0) {
       onComplete();
@@ -700,6 +711,11 @@ export class CamilleEncounterSystem {
           if (opts?.completeOnDismiss) {
             completed = true;
             onComplete();
+          } else {
+            // Caller-owned dismiss hook (e.g. runEncounterBeat re-arms
+            // `pendingEncounter`). Mutually exclusive with
+            // `completeOnDismiss` above.
+            opts?.onDismiss?.();
           }
         },
       },
@@ -707,18 +723,34 @@ export class CamilleEncounterSystem {
   }
 
   /**
-   * Execute one of Camille's middle encounter beats (2/3/4). Registry
-   * side-effects are pinned *before* any async work so pause/resume
-   * cannot re-trigger the beat.
+   * Execute one of Camille's middle encounter beats (2/3/4).
+   *
+   * Registry advance policy: `CAMILLE_ENCOUNTER` and
+   * `CAMILLE_ENCOUNTER_DAY` are written only when the beat reaches
+   * natural completion (player reads through all lines and `onComplete`
+   * fires), so an early dismiss, a caller-initiated abort (scene
+   * shutdown), or an AI request failure that fails before rendering
+   * leaves saved progress unchanged and the encounter retriable on the
+   * next eligible evening. Within the SAME evening, re-entry is still
+   * blocked by the existing `encounterActive` (set in `startEncounter`)
+   * + `rollDay` (set in `checkEncounter`) gates, so the design intent
+   * of "pause/resume cannot re-trigger the beat" is preserved without
+   * needing to advance the registry up-front. On dismiss the orchestrator
+   * re-arms `pendingEncounter = n` via the new `onDismiss` hook on
+   * `playPairedBeat`, so the player can re-approach Camille and retry
+   * within the same evening after the scheduled 8–10 s delay.
    */
   private runEncounterBeat(n: 2 | 3 | 4, hud: HUDScene | undefined): void {
     const scene = this.scene;
-    scene.registry.set(StoryKeys.CAMILLE_ENCOUNTER, n);
-    scene.registry.set(StoryKeys.CAMILLE_ENCOUNTER_DAY, scene.dayNight.dayCount);
     this.camilleNPC?.playCrouchToward(scene.player.x);
 
     const beat = this.beats[n];
     const onComplete = (): void => {
+      // Advance saved progress only on successful completion of the
+      // rendered beat. See the docstring on this method for the rationale
+      // and the retry-on-dismiss/abort contract.
+      scene.registry.set(StoryKeys.CAMILLE_ENCOUNTER, n);
+      scene.registry.set(StoryKeys.CAMILLE_ENCOUNTER_DAY, scene.dayNight.dayCount);
       scene.humans.recordHumanEngagement();
       switch (n) {
         case 2:
@@ -746,7 +778,16 @@ export class CamilleEncounterSystem {
 
     const runBeatWith = (spokenOverrides: string[] | null): void => {
       const { steps, spokenRendered } = mergeCamilleBeatSteps(beat.steps, spokenOverrides);
-      this.playPairedBeat(steps, this.camilleNPC, onComplete);
+      this.playPairedBeat(steps, this.camilleNPC, onComplete, {
+        // Early dismiss → re-arm so the player can re-approach Camille
+        // and retry within the same evening. `checkProximity` consumed
+        // `pendingEncounter` when this beat fired; putting it back
+        // un-consumes that edge. Next evening's retry is separately
+        // covered by leaving `CAMILLE_ENCOUNTER_DAY` unchanged above.
+        onDismiss: () => {
+          this.pendingEncounter = n;
+        },
+      });
       if (spokenRendered.length > 0) {
         void this.persistBeatHistory(n, spokenRendered);
       }
@@ -758,16 +799,26 @@ export class CamilleEncounterSystem {
     // Camille beat) while the LLM call is in flight, aborting here both
     // cancels the fetch AND prevents the orphaned `.then`/`.catch`
     // continuation from calling `runBeatWith` → `playPairedBeat` →
-    // `scene.dialogue.show` against a destroyed scene.
+    // `scene.dialogue.show` against a destroyed scene. On abort we also
+    // re-arm `pendingEncounter` so a non-shutdown caller (hypothetical
+    // future mid-session reset) can retry via `checkProximity`; during
+    // a real shutdown this gets cleared again by `cleanupNPCs`, which
+    // makes the re-arm a safe no-op.
     const abort = new AbortController();
     this.encounterRequestAbort = abort;
     void this.requestEncounterLines(n, beat.objective, abort.signal)
       .then((lines) => {
-        if (abort.signal.aborted) return;
+        if (abort.signal.aborted) {
+          this.pendingEncounter = n;
+          return;
+        }
         runBeatWith(lines);
       })
       .catch(() => {
-        if (abort.signal.aborted) return;
+        if (abort.signal.aborted) {
+          this.pendingEncounter = n;
+          return;
+        }
         runBeatWith(null);
       })
       .finally(() => {
