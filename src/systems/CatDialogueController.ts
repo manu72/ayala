@@ -11,6 +11,7 @@ import type { EmoteType } from "./EmoteSystem";
 import { calculateRelationshipStage } from "../services/DialogueRelationship";
 import { buildDialogueRecencyContext } from "../utils/dialogueRecency";
 import { getRandomColonyLine } from "../data/cat-dialogue";
+import { FallbackDialogueService } from "../services/FallbackDialogueService";
 import {
   storeConversation,
   getRecentConversations,
@@ -110,6 +111,13 @@ export class CatDialogueController {
   private dialogueRequestInFlight = false;
   private lastDialoguePartner: NPCCat | null = null;
   private lastDialoguePartnerAt = 0;
+  /**
+   * Cancellation token for the currently in-flight LLM dialogue request.
+   * Mirrors `HumanPresenceSystem.humanAiBubbleAbort` so scene shutdown /
+   * transient reset aborts the fetch instead of letting it resolve and
+   * race against post-reset state.
+   */
+  private requestAbort: AbortController | null = null;
 
   constructor(scene: GameScene) {
     this.scene = scene;
@@ -131,6 +139,19 @@ export class CatDialogueController {
     this.aiThinkingTimer?.remove(false);
     this.aiThinkingTimer = null;
     this.dialogueRequestInFlight = false;
+    // Abort any in-flight LLM request so (a) shutdown doesn't waste
+    // bandwidth waiting for a response we'd discard via the post-await
+    // `!cat.active` gate, and (b) a future mid-session reset cannot let
+    // a stale continuation mutate scene/UI state after this call
+    // returns. Matches `HumanPresenceSystem.shutdown()` (sibling AI flow).
+    // `FallbackDialogueService` distinguishes caller-aborts from internal
+    // timeouts and rethrows the AbortError; `requestDialogue`'s catch
+    // detects the aborted signal and bails without emitting the usual
+    // "Words fail" fallback narration.
+    if (this.requestAbort) {
+      this.requestAbort.abort();
+      this.requestAbort = null;
+    }
   }
 
   /**
@@ -245,8 +266,10 @@ export class CatDialogueController {
     if (this.dialogueRequestInFlight) return;
     const scene = this.scene;
     this.dialogueRequestInFlight = true;
+    const abort = new AbortController();
+    this.requestAbort = abort;
     this.aiThinkingTimer = scene.time.delayedCall(400, () => {
-      if (!this.dialogueRequestInFlight) return;
+      if (abort.signal.aborted || !this.dialogueRequestInFlight) return;
       scene.emotes.show(scene, cat, "curious");
     });
 
@@ -270,6 +293,7 @@ export class CatDialogueController {
         getConversationCount(name),
         getNpcMemories(name, 20),
       ]);
+      if (abort.signal.aborted) return;
       const conversationHistory: ConversationEntry[] = history.map((r) => ({
         timestamp: r.timestamp,
         speaker: r.speaker,
@@ -317,13 +341,22 @@ export class CatDialogueController {
         conversationRecency,
       };
 
-      const response = await scene.dialogueService.getDialogue(request);
+      // Pass the abort signal through when the concrete service supports
+      // it (FallbackDialogueService does; the base DialogueService interface
+      // does not). Matches the pattern used by HumanPresenceSystem's
+      // ambient human-bubble flow, so shutdown cleanly cancels the fetch.
+      const response =
+        scene.dialogueService instanceof FallbackDialogueService
+          ? await scene.dialogueService.getDialogue(request, { signal: abort.signal })
+          : await scene.dialogueService.getDialogue(request);
 
-      // Revalidate after async gap: cat may have fled or another dialogue
-      // opened, the player may have walked out of range, or line-of-sight
-      // may have been lost (e.g. they slipped behind an obstacle). Failing
-      // any of these checks means engaging would feel teleport-y, so we
-      // bail quietly.
+      // Revalidate after async gap: controller may have been reset (scene
+      // shutdown or a future mid-session reset), cat may have fled or
+      // another dialogue opened, the player may have walked out of range,
+      // or line-of-sight may have been lost (e.g. they slipped behind an
+      // obstacle). Failing any of these checks means engaging would feel
+      // teleport-y, so we bail quietly.
+      if (abort.signal.aborted) return;
       if (scene.dialogue.isActive || cat.state === "fleeing" || !cat.active) return;
       const distToCat = Phaser.Math.Distance.Between(scene.player.x, scene.player.y, cat.x, cat.y);
       if (distToCat > DIALOGUE_BREAK_DISTANCE) return;
@@ -366,6 +399,18 @@ export class CatDialogueController {
         this.processResponse(cat, name, persistenceSnapshot, response);
       });
     } catch (err) {
+      // Caller-initiated aborts (our `resetTransient` fired during scene
+      // shutdown or a reset) rethrow as AbortError from
+      // FallbackDialogueService. Treat them as a silent bail: do NOT log,
+      // touch cat state, dismiss other dialogues, or emit the fallback
+      // HUD narration — the scene is tearing down around us and all of
+      // those would be misleading or actively harmful.
+      const isAbort =
+        (err instanceof DOMException && err.name === "AbortError") ||
+        (err instanceof Error && err.name === "AbortError");
+      if (isAbort && abort.signal.aborted) {
+        return;
+      }
       console.error("[CatDialogueController] requestDialogue failed:", err);
       // Only disengage + dismiss the dialogue if WE own the engagement. The
       // error may have fired BEFORE `engageDialogue` (e.g. during the
@@ -389,6 +434,12 @@ export class CatDialogueController {
       this.aiThinkingTimer?.remove(false);
       this.aiThinkingTimer = null;
       this.dialogueRequestInFlight = false;
+      // Only clear the slot if we still own it. `resetTransient()` nulls
+      // `requestAbort` eagerly, and a subsequent request could have
+      // claimed the slot; don't stomp on it.
+      if (this.requestAbort === abort) {
+        this.requestAbort = null;
+      }
     }
   }
 
