@@ -212,6 +212,18 @@ export class CatDialogueController {
     if (name.startsWith("Colony Cat")) {
       scene.colony.tryCreditDumpedPetComfort(cat);
       scene.dialogue.show([getRandomColonyLine()]);
+      // Arm the anti-chain guard. Phaser delivers key events before
+      // `update()`, so without this the same Space press that closes this
+      // scripted line can re-enter `tryInteract` on the next frame and
+      // fire another colony line for the same cat (see the note in
+      // `GameScene.tryInteract` where `isSkippedPartner` is consulted).
+      // The named-cat path sets these fields from the `dialogue.show`
+      // close callback, but `dialogue.show([line])` is called with no
+      // `onComplete` here, so we arm the guard synchronously at show
+      // time — tryInteract is gated on `!dialogue.isActive` upstream,
+      // so the guard only matters after this dialogue closes.
+      this.lastDialoguePartner = cat;
+      this.lastDialoguePartnerAt = scene.time.now;
       return;
     }
 
