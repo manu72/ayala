@@ -725,59 +725,80 @@ export class CamilleEncounterSystem {
   /**
    * Execute one of Camille's middle encounter beats (2/3/4).
    *
-   * Registry advance policy: `CAMILLE_ENCOUNTER` and
-   * `CAMILLE_ENCOUNTER_DAY` are written only when the beat reaches
+   * Saved-progress advance policy: `CAMILLE_ENCOUNTER`,
+   * `CAMILLE_ENCOUNTER_DAY`, AND the conversation-store record of the
+   * rendered spoken lines are all written only when the beat reaches
    * natural completion (player reads through all lines and `onComplete`
-   * fires), so an early dismiss, a caller-initiated abort (scene
-   * shutdown), or an AI request failure that fails before rendering
-   * leaves saved progress unchanged and the encounter retriable on the
-   * next eligible evening. Within the SAME evening, re-entry is still
-   * blocked by the existing `encounterActive` (set in `startEncounter`)
-   * + `rollDay` (set in `checkEncounter`) gates, so the design intent
-   * of "pause/resume cannot re-trigger the beat" is preserved without
-   * needing to advance the registry up-front. On dismiss the orchestrator
-   * re-arms `pendingEncounter = n` via the new `onDismiss` hook on
-   * `playPairedBeat`, so the player can re-approach Camille and retry
-   * within the same evening after the scheduled 8–10 s delay.
+   * fires). An early dismiss, a caller-initiated abort (scene shutdown),
+   * or an AI request failure that fails before rendering leaves both the
+   * registry AND the conversation history unchanged, so the encounter is
+   * retriable on the next eligible evening and the AI's memory of
+   * previous Camille turns stays truthful (persisting lines Mamma Cat
+   * never actually heard would poison subsequent dialogue). Within the
+   * SAME evening, re-entry is still blocked by the existing
+   * `encounterActive` (set in `startEncounter`) + `rollDay` (set in
+   * `checkEncounter`) gates, so the design intent of "pause/resume
+   * cannot re-trigger the beat" is preserved without needing to advance
+   * the registry up-front. On dismiss the orchestrator re-arms
+   * `pendingEncounter = n` via the `onDismiss` hook on `playPairedBeat`,
+   * so the player can re-approach Camille and retry within the same
+   * evening after the scheduled 8–10 s delay.
    */
   private runEncounterBeat(n: 2 | 3 | 4, hud: HUDScene | undefined): void {
     const scene = this.scene;
     this.camilleNPC?.playCrouchToward(scene.player.x);
 
     const beat = this.beats[n];
-    const onComplete = (): void => {
-      // Advance saved progress only on successful completion of the
-      // rendered beat. See the docstring on this method for the rationale
-      // and the retry-on-dismiss/abort contract.
-      scene.registry.set(StoryKeys.CAMILLE_ENCOUNTER, n);
-      scene.registry.set(StoryKeys.CAMILLE_ENCOUNTER_DAY, scene.dayNight.dayCount);
-      scene.humans.recordHumanEngagement();
-      switch (n) {
-        case 2:
-          hud?.showNarration("She watches you eat. She doesn't reach for you. She understands.");
-          scene.stats.restore("hunger", 30);
-          break;
-        case 3:
-          scene.emotes.show(scene, scene.player, "heart");
-          if (this.camilleNPC) scene.emotes.show(scene, this.camilleNPC, "heart");
-          hud?.showNarration("Something shifts between you. A thread, invisible but real.");
-          break;
-        case 4:
-          scene.emotes.show(scene, scene.player, "heart");
-          if (this.camilleNPC) scene.emotes.show(scene, this.camilleNPC, "heart");
-          hud?.showNarration("The small one is loud. But Camille keeps her still. She understands you.");
-          break;
-      }
-      // Release the encounter pause so Camille (and Manu / Kish during the
-      // later beats) resume their circuits. playPairedBeat intentionally
-      // leaves the pause engaged through onComplete so callers like the
-      // beat-5 state machine can chain into a follow-up phase without a
-      // one-frame "resume then re-pause" flicker.
-      this.resumeEraHumans();
-    };
 
     const runBeatWith = (spokenOverrides: string[] | null): void => {
       const { steps, spokenRendered } = mergeCamilleBeatSteps(beat.steps, spokenOverrides);
+      // `onComplete` is declared inside `runBeatWith` so it can close over
+      // the per-run `spokenRendered` — we persist the conversation history
+      // (and all other saved-progress side effects) only on natural
+      // completion of the rendered beat, never on early dismiss / abort.
+      // The conversation store is the AI's memory for future Camille
+      // turns; writing lines Mamma Cat didn't actually hear would poison
+      // subsequent dialogue ("as I was saying yesterday…" about a beat
+      // the player never finished).
+      const onComplete = (): void => {
+        // Advance saved progress only on successful completion of the
+        // rendered beat. See the docstring on this method for the
+        // rationale and the retry-on-dismiss/abort contract.
+        scene.registry.set(StoryKeys.CAMILLE_ENCOUNTER, n);
+        scene.registry.set(StoryKeys.CAMILLE_ENCOUNTER_DAY, scene.dayNight.dayCount);
+        scene.humans.recordHumanEngagement();
+        switch (n) {
+          case 2:
+            hud?.showNarration("She watches you eat. She doesn't reach for you. She understands.");
+            scene.stats.restore("hunger", 30);
+            break;
+          case 3:
+            scene.emotes.show(scene, scene.player, "heart");
+            if (this.camilleNPC) scene.emotes.show(scene, this.camilleNPC, "heart");
+            hud?.showNarration("Something shifts between you. A thread, invisible but real.");
+            break;
+          case 4:
+            scene.emotes.show(scene, scene.player, "heart");
+            if (this.camilleNPC) scene.emotes.show(scene, this.camilleNPC, "heart");
+            hud?.showNarration("The small one is loud. But Camille keeps her still. She understands you.");
+            break;
+        }
+        // Release the encounter pause so Camille (and Manu / Kish during
+        // the later beats) resume their circuits. playPairedBeat
+        // intentionally leaves the pause engaged through onComplete so
+        // callers like the beat-5 state machine can chain into a
+        // follow-up phase without a one-frame "resume then re-pause"
+        // flicker.
+        this.resumeEraHumans();
+        // Persist the rendered spoken lines so the conversation store's
+        // record matches what Mamma Cat actually witnessed. Fire-and-
+        // forget: best-effort IndexedDB write, failures are swallowed
+        // inside `persistBeatHistory`.
+        if (spokenRendered.length > 0) {
+          void this.persistBeatHistory(n, spokenRendered);
+        }
+      };
+
       this.playPairedBeat(steps, this.camilleNPC, onComplete, {
         // Early dismiss → re-arm so the player can re-approach Camille
         // and retry within the same evening. `checkProximity` consumed
@@ -788,9 +809,6 @@ export class CamilleEncounterSystem {
           this.pendingEncounter = n;
         },
       });
-      if (spokenRendered.length > 0) {
-        void this.persistBeatHistory(n, spokenRendered);
-      }
     };
 
     // Abort + signal-check pattern required for every LLM caller — see the
