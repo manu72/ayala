@@ -6,9 +6,23 @@
  * Inputs are kept loose (`unknown` registry value, raw current day) on
  * purpose — the registry is read from a long-lived save store that may
  * round-trip through hand-edited LocalStorage or a future schema bump.
- * NaN, negative, fractional, and non-numeric reads collapse to "no
- * event" rather than asserting false history at the LLM. Mirrors the
- * `readCount` defensive pattern used in {@link CamilleEncounterSystem}.
+ * Defensive handling, mirroring the `readCount` pattern in
+ * {@link CamilleEncounterSystem}:
+ *
+ *   - Non-numeric, NaN, ±Infinity, and zero/negative reads → return
+ *     `null` so the prompt stays silent rather than asserting a visit
+ *     that never happened. (Fresh saves and pre-Chapter-5 runs leave
+ *     the key unset; the controller maps that to 0, which lands here.)
+ *   - Finite-positive fractional reads are NOT collapsed to "no event"
+ *     — they are floored via {@link Math.floor} and treated as the
+ *     floored integer day, consistent with `readCount`. So `raw=6.9`
+ *     on `currentDay=7` reads as "yesterday", and `raw=7.4` on
+ *     `currentDay=7` reads as "today".
+ *   - `currentDay` is also floored before the diff so a fractional
+ *     `dayCount` (impossible today, but defensive) cannot produce a
+ *     negative-days-ago string. The diff is additionally clamped at 0
+ *     to defend against a hand-edited save where the recorded day
+ *     sits in the future relative to `currentDay`.
  *
  * @param raw The raw registry value for `MANU_VISITED_FLUFFY_DAY`.
  *            Treated as the in-game day on which Manu last came within
