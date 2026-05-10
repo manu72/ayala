@@ -1487,6 +1487,25 @@ export class GameScene extends Phaser.Scene {
     this.time.delayedCall(3000, () => {
       if (this.dialogue.isActive) return;
       if (this.territory.isClaimed) return;
+      // Re-check proximity at decision time, not just trigger time. The
+      // 3 s window between arming and firing is more than enough for the
+      // player to walk away from the steps; without this guard the
+      // negotiation + claim would fire from anywhere, reintroducing the
+      // exact class of bug the v0.3.8 "must be at the steps" gate was
+      // meant to close. Trust is deliberately NOT re-checked here — it
+      // monotonically rises during play and can't drop below the
+      // threshold inside a 3 s window. {@link recheckTerritoryEligibility}
+      // re-arms the negotiation on the 5 s polling cadence when the
+      // player walks back into range.
+      const stepsAtFire = this.map.findObject("spawns", (o) => o.name === "poi_pyramid_steps");
+      if (!stepsAtFire) return;
+      const distAtFire = Phaser.Math.Distance.Between(
+        this.player.x,
+        this.player.y,
+        stepsAtFire.x ?? 0,
+        stepsAtFire.y ?? 0,
+      );
+      if (distAtFire > TERRITORY_NEGOTIATION_NEAR_STEPS_PX) return;
       this.dialogue.show(['"You want to stay? ...There\'s room. The steps are wide enough for all of us."'], () => {
         this.claimTerritory();
       });
