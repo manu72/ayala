@@ -421,23 +421,29 @@ export class HumanPresenceSystem {
             }
           }
         }
+      }
 
-        // Persist Manu's visits to Fluffy (one-shot per game day). Fluffy
-        // is attached to Manu in her persona ("she's decided Manu is her
-        // human"); without this, her dialogue with Mamma Cat asks after
-        // her human even when Manu has just walked past her on his
-        // circuit. The day stamp is surfaced into Fluffy's AI prompt via
-        // CatDialogueController.buildRecentDialogueEvents so the LLM
-        // knows "Manu visited today / yesterday / N days ago".
-        //
-        // Recorded BEFORE the Manu deferral check above is irrelevant
-        // here — we run after the cat-greet loop and gate solely on
-        // proximity, so Fluffy's notice of him is independent of whether
-        // Manu's reserved-greet skip fires. The early-out via day
-        // comparison makes the per-frame work O(1) once recorded.
-        if (human.humanType === "manu") {
-          this.tryRecordManuVisitToFluffy(human);
-        }
+      // Persist Manu's visits to Fluffy (one-shot per game day). Fluffy
+      // is attached to Manu in her persona ("she's decided Manu is her
+      // human"); without this, her dialogue with Mamma Cat asks after
+      // her human even when Manu has just walked past her on his
+      // circuit. The day stamp is surfaced into Fluffy's AI prompt via
+      // CatDialogueController.buildRecentDialogueEvents so the LLM
+      // knows "Manu visited today / yesterday / N days ago".
+      //
+      // Deliberately OUTSIDE the `isCatPerson && !isGreeting &&
+      // !isEncounterPaused` greet-guard above. Fluffy's awareness of
+      // Manu is independent of whether he is currently mid-greeting
+      // another cat (4-6 s cooldown) or paused for a Camille encounter
+      // beat — both of those states leave Manu standing inside Fluffy's
+      // proximity zone and counting as a visit she would notice. The
+      // helper is already idempotent (per-day registry stamp), already
+      // re-checks Manu's proximity to Fluffy, and already verifies
+      // Fluffy is active+visible, so it is safe to call every tick the
+      // human is visible (the outer `if (!human.visible) continue` at
+      // the top of the loop covers offstage manu).
+      if (human.humanType === "manu") {
+        this.tryRecordManuVisitToFluffy(human);
       }
 
       // Delegated to the Camille encounter system: at most one "Kish, slow
