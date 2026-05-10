@@ -20,6 +20,8 @@ import {
   addNpcMemory,
 } from "../services/ConversationStore";
 import { GP } from "../config/gameplayConstants";
+import { StoryKeys } from "../registry/storyKeys";
+import { buildManuVisitedFluffyMessage } from "../utils/manuVisitMessage";
 
 const DIALOGUE_BREAK_DISTANCE = GP.DIALOGUE_BREAK_DIST;
 const INTERACTION_DISTANCE = GP.INTERACTION_DIST;
@@ -326,7 +328,7 @@ export class CatDialogueController {
           energy: persistenceSnapshot.energy,
           daysSurvived: persistenceSnapshot.gameDay,
           knownCats: Array.from(scene.knownCats),
-          recentEvents: this.buildRecentDialogueEvents(lastConversation, gameDaysSinceLastTalk),
+          recentEvents: this.buildRecentDialogueEvents(name, lastConversation, gameDaysSinceLastTalk),
         },
         conversationHistory,
         isFirstConversation,
@@ -557,13 +559,50 @@ export class CatDialogueController {
   }
 
   private buildRecentDialogueEvents(
+    speakerName: string,
     lastConversation: { gameDay: number } | null,
     gameDaysSinceLastTalk: number | undefined,
   ): string[] {
-    if (!lastConversation || gameDaysSinceLastTalk === undefined) return [];
-    if (gameDaysSinceLastTalk === 0) return ["Mamma Cat already spoke with this NPC today."];
-    if (gameDaysSinceLastTalk === 1) return ["Mamma Cat last spoke with this NPC yesterday."];
-    return [`Mamma Cat last spoke with this NPC ${gameDaysSinceLastTalk} game days ago.`];
+    const events: string[] = [];
+
+    if (lastConversation && gameDaysSinceLastTalk !== undefined) {
+      if (gameDaysSinceLastTalk === 0) {
+        events.push("Mamma Cat already spoke with this NPC today.");
+      } else if (gameDaysSinceLastTalk === 1) {
+        events.push("Mamma Cat last spoke with this NPC yesterday.");
+      } else {
+        events.push(`Mamma Cat last spoke with this NPC ${gameDaysSinceLastTalk} game days ago.`);
+      }
+    }
+
+    // Speaker-specific awareness facts derived from the live registry.
+    // Currently only Fluffy → Manu, because Fluffy's persona has her
+    // attached to Manu and otherwise asks Mamma Cat after "her human"
+    // even on days he has just walked past her on the Camille care
+    // route (HumanPresenceSystem records that visit). Surfacing the
+    // last-visit day here lets the LLM speak truthfully about whether
+    // Manu was just here, was here yesterday, or has been gone for a
+    // while. Other named cats fall through unchanged.
+    const manuVisitEvent = this.buildManuVisitedFluffyEvent(speakerName);
+    if (manuVisitEvent) events.push(manuVisitEvent);
+
+    return events;
+  }
+
+  /**
+   * Render Fluffy's "Manu was here…" awareness line from the registry
+   * day stamp written by {@link HumanPresenceSystem.tryRecordManuVisitToFluffy}.
+   * Returns `null` when the speaker is not Fluffy, or when the day
+   * stamp is missing / invalid / 0 (existing saves and pre-Chapter-5
+   * runs), so the prompt stays silent rather than asserting false
+   * history. The day-arithmetic itself lives in
+   * {@link buildManuVisitedFluffyMessage} so it is unit-testable
+   * without spinning up a scene.
+   */
+  private buildManuVisitedFluffyEvent(speakerName: string): string | null {
+    if (speakerName !== "Fluffy") return null;
+    const raw = this.scene.registry.get(StoryKeys.MANU_VISITED_FLUFFY_DAY);
+    return buildManuVisitedFluffyMessage(raw, this.scene.dayNight.dayCount);
   }
 
   private buildMammaCatTurnForMemory(

@@ -11,6 +11,17 @@ export const StoryKeys = {
   CAMILLE_AMBIENT_DAWN_DAY: "CAMILLE_AMBIENT_DAWN_DAY",
   /** Last game day an ambient evening care visit was spawned (Chapter 5+). */
   CAMILLE_AMBIENT_EVENING_DAY: "CAMILLE_AMBIENT_EVENING_DAY",
+  /**
+   * Last in-game day Manu came within {@link CAT_PERSON_GREET_DIST} of
+   * Fluffy. Recorded one-shot per game day from {@link HumanPresenceSystem.tick}
+   * regardless of Manu's `shouldDeferManuGreet` skip, because Fluffy is
+   * attached to Manu (see `src/ai/personas/fluffy.md`) and notices him on
+   * every close pass. Surfaced into Fluffy's AI prompt via `recentEvents`
+   * by {@link CatDialogueController.buildRecentDialogueEvents} so Fluffy
+   * stops asking after Manu when he has just visited. Default `undefined` /
+   * 0 → message omitted (existing saves and pre-Chapter-5 runs).
+   */
+  MANU_VISITED_FLUFFY_DAY: "MANU_VISITED_FLUFFY_DAY",
   DUMPING_EVENTS_SEEN: "DUMPING_EVENTS_SEEN",
   ENCOUNTER_5_COMPLETE: "ENCOUNTER_5_COMPLETE",
   NEW_GAME_PLUS: "NEW_GAME_PLUS",
