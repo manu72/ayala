@@ -24,6 +24,9 @@ import type { HUDScene } from "./HUDScene";
 import {
   GP,
   REST_HOLD_MS,
+  CHAPTER_REARM_MOVE_PX,
+  TERRITORY_NEGOTIATION_NEAR_STEPS_PX,
+  TERRITORY_JAYCO_TRUST_REQUIRED,
 } from "../config/gameplayConstants";
 import { StoryKeys, migrateLegacyIntroFlag } from "../registry/storyKeys";
 import {
@@ -141,6 +144,17 @@ export class GameScene extends Phaser.Scene {
   emotes!: EmoteSystem;
   chapters!: ChapterSystem;
   private chapterCheckTimer = 0;
+  /**
+   * Chapter-cascade lock. After a chapter advance fires, this is set to
+   * `true` and `checkChapterProgression` will refuse to advance again
+   * until Mamma Cat has moved at least {@link CHAPTER_REARM_MOVE_PX}
+   * world pixels from {@link chapterAdvanceAnchor}. This stops the 5 s
+   * `chapterCheckTimer` from cascading 1→2→3→4 in fifteen seconds the
+   * moment the player wakes from a long sleep — chapter advances must
+   * be paced by deliberate player movement, not the polling cadence.
+   */
+  private chapterAdvanceLockedUntilMove = false;
+  private chapterAdvanceAnchor: { x: number; y: number } = { x: 0, y: 0 };
   /**
    * Owns the park's human NPC roster: ambient spawns (joggers, feeders,
    * dog walkers), AI bubble throttle, stationary-greet cap, and the
@@ -274,6 +288,12 @@ export class GameScene extends Phaser.Scene {
     this.humans?.shutdown();
     this.collapse?.shutdown();
     this.catDialogue?.shutdown();
+
+    // Chapter cascade lock is scene-scoped — clear so a scene restart
+    // doesn't carry a stale anchor across into the next session
+    // (WORKING_MEMORY "Scene Lifecycle — shutdown is NOT auto-wired").
+    this.chapterAdvanceLockedUntilMove = false;
+    this.chapterAdvanceAnchor = { x: 0, y: 0 };
   }
 
   /** Remove pending intro delayed calls and tweens (idempotent). */
@@ -576,7 +596,17 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.dayNight.on("newDay", () => {
-      this.trust.survivedDay();
+      // Survival trust is only awarded if Mamma Cat actually played the
+      // day — sleeping straight through it doesn't count as "surviving".
+      // Pre-v0.3.8 the +3 global trust per `newDay` fired even while she
+      // was rest-locked, which combined with passive proximity ticks
+      // could push global trust over chapter 2/3/4 thresholds during a
+      // long sleep with zero player engagement. Snatcher and scoring
+      // bookkeeping still runs — those are night-survival mechanics
+      // and shouldn't change when she sleeps through them.
+      if (!this.player?.isResting) {
+        this.trust.survivedDay();
+      }
       const { clean } = consumeSnatchedThisNight(this.registry, this.snatcher.snatchedThisNight);
       this.scoring.recordNightSurvived({ clean });
       this.snatcher.onNewDay();
@@ -1328,15 +1358,34 @@ export class GameScene extends Phaser.Scene {
     if (this.dialogue.isActive) return;
     if (this.camille.isEncounterActive) return;
 
-    const namedKnown = new Set([...this.knownCats].filter((name) => !name.startsWith("Colony Cat")));
+    // Cascade lock: only one chapter advance per "real player action".
+    // After an advance, we anchor on Mamma Cat's current position and
+    // refuse the next advance until she has moved at least
+    // `CHAPTER_REARM_MOVE_PX`. This prevents the 5 s polling cadence
+    // from firing 1→2→3→4 in fifteen seconds against a stationary
+    // (often just-woken) player. Movement is the chosen rearm signal
+    // because it covers walking to the next cat / location, doesn't
+    // require new event plumbing, and harmlessly self-clears under
+    // any normal play loop.
+    if (this.chapterAdvanceLockedUntilMove) {
+      const dx = this.player.x - this.chapterAdvanceAnchor.x;
+      const dy = this.player.y - this.chapterAdvanceAnchor.y;
+      if (Math.hypot(dx, dy) < CHAPTER_REARM_MOVE_PX) return;
+      this.chapterAdvanceLockedUntilMove = false;
+    }
+
+    const spokenCats = this.buildSpokenNamedCats();
     const triggered = this.chapters.check({
       trust: this.trust,
       dayNight: this.dayNight,
-      knownCats: namedKnown,
+      spokenCats,
       registry: this.registry,
       territory: this.territory,
     });
     if (triggered) {
+      this.chapterAdvanceLockedUntilMove = true;
+      this.chapterAdvanceAnchor = { x: this.player.x, y: this.player.y };
+
       const hud = this.scene.get("HUDScene") as HUDScene | undefined;
       hud?.showChapterTitle(this.chapters.titleCard);
 
@@ -1354,6 +1403,33 @@ export class GameScene extends Phaser.Scene {
         this.onChapter6Start();
       }
     }
+  }
+
+  /**
+   * Build the set of named cats Mamma Cat has actually conversed with at
+   * least once, derived from the per-cat dialogue registry flags written
+   * by {@link CatDialogueController.processResponse}. This is the
+   * authoritative "engagement" signal for chapter progression — it
+   * deliberately excludes proximity-only name reveals (those still drive
+   * `knownCats` for the journal / HUD), because chapters 2 and 3 are
+   * meant to gate on deliberate dialogue, not on having walked past a cat.
+   */
+  private buildSpokenNamedCats(): Set<string> {
+    const r = this.registry;
+    const spoken = new Set<string>();
+    const numAtLeast1 = (key: string): boolean => {
+      const v = r.get(key);
+      return typeof v === "number" && Number.isFinite(v) && v >= 1;
+    };
+    if (r.get("MET_BLACKY") === true) spoken.add("Blacky");
+    if (numAtLeast1("TIGER_TALKS")) spoken.add("Tiger");
+    if (numAtLeast1("JAYCO_TALKS")) spoken.add("Jayco");
+    if (numAtLeast1("JAYCO_JR_TALKS")) spoken.add("Jayco Jr");
+    if (numAtLeast1("FLUFFY_TALKS")) spoken.add("Fluffy");
+    if (numAtLeast1("PEDIGREE_TALKS")) spoken.add("Pedigree");
+    if (r.get("MET_GINGER_A") === true) spoken.add("Ginger");
+    if (r.get("MET_GINGER_B") === true) spoken.add("Ginger B");
+    return spoken;
   }
 
   // ──────────── Chapter 4: Territory ────────────
@@ -1376,42 +1452,58 @@ export class GameScene extends Phaser.Scene {
 
   private beginTerritoryNegotiation(): void {
     if (this.territory.isClaimed) return;
+    if (this.dialogue.isActive) return;
 
     const jaycoTrust = this.trust.getCatTrust("Jayco");
+    const stepsPOI = this.map.findObject("spawns", (o) => o.name === "poi_pyramid_steps");
+    const distToSteps = stepsPOI
+      ? Phaser.Math.Distance.Between(this.player.x, this.player.y, stepsPOI.x ?? 0, stepsPOI.y ?? 0)
+      : Infinity;
+    const nearSteps = distToSteps <= TERRITORY_NEGOTIATION_NEAR_STEPS_PX;
 
-    if (jaycoTrust >= 50 || this.trust.global >= 80) {
-      this.time.delayedCall(3000, () => {
-        if (this.dialogue.isActive) return;
-        this.dialogue.show(['"You want to stay? ...There\'s room. The steps are wide enough for all of us."'], () => {
-          this.claimTerritory();
-        });
-      });
-    } else {
-      this.time.delayedCall(3000, () => {
-        if (this.dialogue.isActive) return;
+    // Both gates are required: Mamma Cat must be physically near Jayco at
+    // the pyramid steps AND have actually built up Jayco's trust through
+    // dialogue. Pre-v0.3.8 either `jaycoTrust >= 50` OR `globalTrust >= 80`
+    // alone (and from anywhere on the map) would auto-claim — that bypassed
+    // both the "find Jayco at the steps" beat and the "earn his trust"
+    // beat. Now the negotiation only fires when the player has actually
+    // walked Mamma to Jayco's home turf and earned her welcome.
+    // {@link recheckTerritoryEligibility} polls every 5 s while in
+    // chapter 4, so missed conditions retry naturally as the player moves.
+    if (!nearSteps || jaycoTrust < TERRITORY_JAYCO_TRUST_REQUIRED) {
+      // Optional nudge: only fire the "Jayco watches you" line when Mamma
+      // is at the steps but hasn't earned his trust yet. Don't spam it
+      // when she's nowhere near him — that would be confusing narration.
+      if (nearSteps && jaycoTrust < TERRITORY_JAYCO_TRUST_REQUIRED) {
         const jayco = this.npcs.find((e) => e.cat.npcName === "Jayco")?.cat;
         this.narrateIfPerceivable(
           "Jayco watches you from the steps. You haven't earned his trust yet.",
           jayco ? { x: jayco.x, y: jayco.y } : undefined,
         );
-      });
+      }
+      return;
     }
+
+    this.time.delayedCall(3000, () => {
+      if (this.dialogue.isActive) return;
+      if (this.territory.isClaimed) return;
+      this.dialogue.show(['"You want to stay? ...There\'s room. The steps are wide enough for all of us."'], () => {
+        this.claimTerritory();
+      });
+    });
   }
 
   /**
    * Re-check territory eligibility periodically if Chapter 4 is active
-   * but territory hasn't been claimed yet.
+   * but territory hasn't been claimed yet. The eligibility logic itself
+   * lives in {@link beginTerritoryNegotiation}; this is just the polling
+   * trigger so the negotiation re-fires when Mamma walks back into range.
    */
   private recheckTerritoryEligibility(): void {
     if (this.chapters.chapter !== 4) return;
     if (this.territory.isClaimed) return;
     if (this.dialogue.isActive) return;
-    if (!this.isInTerritory(this.player.x, this.player.y) && !(this.player.x > 2100 && this.player.y < 700)) return;
-
-    const jaycoTrust = this.trust.getCatTrust("Jayco");
-    if (jaycoTrust >= 50 || this.trust.global >= 80) {
-      this.beginTerritoryNegotiation();
-    }
+    this.beginTerritoryNegotiation();
   }
 
   private claimTerritory(): void {
@@ -1753,8 +1845,12 @@ export class GameScene extends Phaser.Scene {
         }
       }
 
-      // Proximity trust: being near cats builds trust over time
-      if (dist < LEARN_NAME_DISTANCE && cat.state !== "sleeping") {
+      // Proximity trust: being near cats builds trust over time, but
+      // only when Mamma Cat is awake. A resting cat is not actively
+      // bonding — and pre-v0.3.8 this fired every 30 s while she slept
+      // by the underpass, silently pushing global trust over chapter
+      // thresholds without any player engagement.
+      if (dist < LEARN_NAME_DISTANCE && cat.state !== "sleeping" && !this.player.isResting) {
         this.trust.proximityTick(cat.npcName, now);
         this.syncTrustDisposition(cat.npcName);
       }
