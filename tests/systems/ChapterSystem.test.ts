@@ -21,7 +21,7 @@ interface StubDayNight {
 
 function createContext(overrides: Partial<{
   globalTrust: number
-  knownCats: string[]
+  spokenCats: string[]
   dayCount: number
   registryData: Record<string, unknown>
   territoryClaimed: boolean
@@ -46,7 +46,7 @@ function createContext(overrides: Partial<{
   return {
     trust,
     dayNight: dayNight as unknown as ChapterContext['dayNight'],
-    knownCats: new Set(overrides.knownCats ?? []),
+    spokenCats: new Set(overrides.spokenCats ?? []),
     registry,
     territory,
   }
@@ -111,7 +111,7 @@ describe('ChapterSystem', () => {
 
   describe('check — chapter 2 conditions', () => {
     it('does not advance without CH1_RESTED', () => {
-      const ctx = createContext({ globalTrust: 30, knownCats: ['Blacky', 'Tiger'] })
+      const ctx = createContext({ globalTrust: 30, spokenCats: ['Blacky', 'Tiger'] })
       expect(chapters.check(ctx)).toBe(false)
       expect(chapters.chapter).toBe(1)
     })
@@ -119,25 +119,41 @@ describe('ChapterSystem', () => {
     it('does not advance with low trust', () => {
       const ctx = createContext({
         globalTrust: 20,
-        knownCats: ['Blacky', 'Tiger'],
+        spokenCats: ['Blacky', 'Tiger'],
         registryData: { CH1_RESTED: true },
       })
       expect(chapters.check(ctx)).toBe(false)
     })
 
-    it('does not advance with fewer than 2 known cats', () => {
+    it('does not advance with fewer than 2 spoken cats', () => {
       const ctx = createContext({
         globalTrust: 30,
-        knownCats: ['Blacky'],
+        spokenCats: ['Blacky'],
         registryData: { CH1_RESTED: true },
       })
       expect(chapters.check(ctx)).toBe(false)
+    })
+
+    // Regression test for the v0.3.8 chapter-cascade-after-sleep bug.
+    // Pre-fix, `knownCats` was satisfied by proximity-only name reveals,
+    // so walking past two cats without speaking to either was enough to
+    // unlock chapter 2. The gate is now `spokenCats` — a set built only
+    // from the dialogue-event registry flags written by
+    // `CatDialogueController` — so passive proximity cannot advance.
+    it('does not advance when proximity-revealed cats have not been spoken to (spokenCats empty)', () => {
+      const ctx = createContext({
+        globalTrust: 30,
+        spokenCats: [],
+        registryData: { CH1_RESTED: true },
+      })
+      expect(chapters.check(ctx)).toBe(false)
+      expect(chapters.chapter).toBe(1)
     })
 
     it('advances to chapter 2 when all conditions met', () => {
       const ctx = createContext({
         globalTrust: 25,
-        knownCats: ['Blacky', 'Tiger'],
+        spokenCats: ['Blacky', 'Tiger'],
         registryData: { CH1_RESTED: true },
       })
       expect(chapters.check(ctx)).toBe(true)
@@ -147,7 +163,7 @@ describe('ChapterSystem', () => {
     it('sets pending narration on advance', () => {
       const ctx = createContext({
         globalTrust: 25,
-        knownCats: ['Blacky', 'Tiger'],
+        spokenCats: ['Blacky', 'Tiger'],
         registryData: { CH1_RESTED: true },
       })
       chapters.check(ctx)
@@ -159,7 +175,7 @@ describe('ChapterSystem', () => {
     it('sets CHAPTER in registry on advance', () => {
       const ctx = createContext({
         globalTrust: 25,
-        knownCats: ['Blacky', 'Tiger'],
+        spokenCats: ['Blacky', 'Tiger'],
         registryData: { CH1_RESTED: true },
       })
       chapters.check(ctx)
@@ -172,7 +188,7 @@ describe('ChapterSystem', () => {
       chapters.restore(2)
       const ctx = createContext({
         globalTrust: 50,
-        knownCats: ['Blacky', 'Tiger', 'Jayco', 'Fluffy'],
+        spokenCats: ['Blacky', 'Tiger', 'Jayco', 'Fluffy'],
         dayCount: 3,
       })
       expect(chapters.check(ctx)).toBe(true)
@@ -183,7 +199,7 @@ describe('ChapterSystem', () => {
       chapters.restore(2)
       const ctx = createContext({
         globalTrust: 50,
-        knownCats: ['Blacky', 'Tiger', 'Jayco', 'Fluffy'],
+        spokenCats: ['Blacky', 'Tiger', 'Jayco', 'Fluffy'],
         dayCount: 2,
       })
       expect(chapters.check(ctx)).toBe(false)
@@ -238,7 +254,7 @@ describe('ChapterSystem', () => {
     it('returns null after consuming', () => {
       const ctx = createContext({
         globalTrust: 25,
-        knownCats: ['Blacky', 'Tiger'],
+        spokenCats: ['Blacky', 'Tiger'],
         registryData: { CH1_RESTED: true },
       })
       chapters.check(ctx)

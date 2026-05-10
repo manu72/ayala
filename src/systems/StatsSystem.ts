@@ -25,8 +25,26 @@ export const STATS_REST_RATE_OPEN = 0.2;
 export const STATS_REST_RATE_SHADE = 0.5;
 export const STATS_REST_RATE_SAFE = 1.0;
 
-/** Hunger/thirst decay multiplier while deliberately resting (lower metabolic rate). */
-export const STATS_REST_DECAY_MULTIPLIER = 0.1;
+/**
+ * Hunger/thirst decay multiplier while deliberately resting.
+ *
+ * Resting represents lower metabolic activity, but a sleeping cat still
+ * needs food and water — she does not wake up days later fully refreshed.
+ * Pre-v0.3.8 this was 0.1 (effectively pausing hunger/thirst), which let
+ * the player sleep through multiple in-game days with no consequence and
+ * was a load-bearing part of the chapter-cascade-after-sleep bug. Set to
+ * 0.5 so a full day of rest costs roughly half a day's worth of stats.
+ */
+export const STATS_REST_DECAY_MULTIPLIER = 0.5;
+
+/**
+ * Minimum hunger/thirst required before deliberate rest can restore energy.
+ * A starving or dehydrated cat cannot recover by sleeping; she has to wake
+ * up and find food/water first. Below this threshold, rest decays hunger
+ * and thirst as normal but no energy is gained.
+ */
+export const STATS_REST_REGEN_HUNGER_MIN = 20;
+export const STATS_REST_REGEN_THIRST_MIN = 20;
 
 /** Stat multipliers for `speedMultiplier`.
  * Thresholds are hardcoded in the getter speedMultiplier function.
@@ -110,8 +128,15 @@ export class StatsSystem {
     this.thirst = Math.max(0, this.thirst - STATS_DECAY.thirst * heatMod * decayMod * deltaSec);
 
     if (isResting) {
-      const rate = inShelter ? STATS_REST_RATE_SAFE : inShade ? STATS_REST_RATE_SHADE : STATS_REST_RATE_OPEN;
-      this.energy = Math.min(100, this.energy + rate * deltaSec);
+      // Energy only restores when Mamma is well-fed and hydrated. A starving
+      // or dehydrated cat cannot recover by sleeping — she has to wake up,
+      // find food and water, then rest. Hunger/thirst still decay above
+      // (gated by STATS_REST_DECAY_MULTIPLIER) so a long sleep on a near-
+      // empty stomach actively pushes Mamma toward collapse.
+      if (this.hunger >= STATS_REST_REGEN_HUNGER_MIN && this.thirst >= STATS_REST_REGEN_THIRST_MIN) {
+        const rate = inShelter ? STATS_REST_RATE_SAFE : inShade ? STATS_REST_RATE_SHADE : STATS_REST_RATE_OPEN;
+        this.energy = Math.min(100, this.energy + rate * deltaSec);
+      }
     } else if (isRunning && this.canRun) {
       this.energy = Math.max(0, this.energy - STATS_DECAY.energyRunning * heatMod * deltaSec);
     } else if (isMoving) {
@@ -127,8 +152,13 @@ export class StatsSystem {
       }
     }
 
-    // Collapse check — resting cats don't collapse (they chose to stop and recover)
-    if (!isResting && (this.hunger <= 0 || this.thirst <= 0 || this.energy <= 0)) {
+    // Collapse check — applies whether or not Mamma is resting. Pre-v0.3.8
+    // resting cats were exempt from collapse, which combined with the old
+    // 0.1× rest decay meant the player could "rest forever" with zero
+    // gameplay consequence. Now a long sleep on an empty stomach trips
+    // collapse just like exhaustion in the open; the CollapseSystem handles
+    // the wake-up + recovery flow uniformly for both cases.
+    if (this.hunger <= 0 || this.thirst <= 0 || this.energy <= 0) {
       this.collapseTimer += deltaSec * 1000;
       if (this.collapseTimer >= COLLAPSE_THRESHOLD_MS) {
         this._collapsed = true;

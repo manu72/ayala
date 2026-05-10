@@ -184,6 +184,15 @@ export class CollapseSystem {
     scene.player.setPosition(safeX, safeY);
     scene.onCollapseTeleport(safeX, safeY);
     scene.stats.resetCollapse();
+    // Force-wake from rest if Mamma collapsed in her sleep. Without this,
+    // a player who slept through their hunger reaches resetCollapse with
+    // hunger/thirst at the reset minimums (15/15) — both below the
+    // STATS_REST_REGEN_*_MIN gate (20). Without a wake, energy never
+    // recovers via rest, hunger keeps draining toward zero, and the player
+    // collapses again. Waking returns control so they can find food/water.
+    if (scene.player.isResting) {
+      scene.player.wakeUp();
+    }
     this.collapseRecovering = false;
     this.collapseRecoveryTimer = 0;
 

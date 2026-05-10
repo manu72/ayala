@@ -238,6 +238,39 @@ describe('StatsSystem', () => {
       stats.update(100, false, false, false, false, true, true)
       expect(stats.energy).toBe(100)
     })
+
+    // Regression tests for the v0.3.8 sleep-mechanic fix. Mamma Cat can
+    // only restore energy from sleep when she is well-fed and hydrated;
+    // a starving or dehydrated cat cannot heal by lying down. Hunger
+    // and thirst still decay (gated by STATS_REST_DECAY_MULTIPLIER),
+    // pushing her toward collapse if she sleeps through her limits.
+    it('does not regenerate energy from rest when hunger is below the regen threshold', () => {
+      stats.hunger = 10
+      stats.thirst = 80
+      stats.energy = 50
+      const before = stats.energy
+      stats.update(10, false, false, false, false, true, true)
+      expect(stats.energy).toBe(before)
+    })
+
+    it('does not regenerate energy from rest when thirst is below the regen threshold', () => {
+      stats.hunger = 80
+      stats.thirst = 10
+      stats.energy = 50
+      const before = stats.energy
+      stats.update(10, false, false, false, false, true, true)
+      expect(stats.energy).toBe(before)
+    })
+
+    it('still decays hunger and thirst during rest even when below the regen threshold', () => {
+      stats.hunger = 10
+      stats.thirst = 10
+      stats.energy = 50
+      const deltaSec = 10
+      stats.update(deltaSec, false, false, false, false, false, true)
+      expect(stats.hunger).toBeLessThan(10)
+      expect(stats.thirst).toBeLessThan(10)
+    })
   })
 
   describe('update — passive shade/shelter regen (idle, not resting)', () => {
@@ -289,10 +322,17 @@ describe('StatsSystem', () => {
       expect(stats.collapsed).toBe(false)
     })
 
-    it('does not collapse while resting even at zero stats', () => {
+    // Regression test for the v0.3.8 sleep-mechanic fix. Pre-fix, resting
+    // cats were exempt from collapse (intent: "they chose to stop"). In
+    // practice that combined with the 0.1× rest decay multiplier to let
+    // the player sleep through depleted stats with no consequence at all,
+    // which broke the chapter-progression beat (a passively-rested cat
+    // with full stats walking into a Camille beat reads as cheating).
+    // Sleeping cats now collapse on the same threshold as awake cats.
+    it('collapses while resting once cumulative time crosses the grace period at zero stats', () => {
       stats.hunger = 0
-      stats.update(20, false, false, false, false, false, true)
-      expect(stats.collapsed).toBe(false)
+      stats.update(COLLAPSE_DELTA_SEC, false, false, false, false, false, true)
+      expect(stats.collapsed).toBe(true)
     })
   })
 

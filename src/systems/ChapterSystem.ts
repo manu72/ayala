@@ -20,7 +20,15 @@ export interface ChapterDef {
 export interface ChapterContext {
   trust: TrustSystem;
   dayNight: DayNightCycle;
-  knownCats: Set<string>;
+  /**
+   * Named cats Mamma Cat has actually conversed with at least once.
+   * Built from per-cat dialogue registry flags (`MET_BLACKY`, `TIGER_TALKS`,
+   * `JAYCO_TALKS`, …) — *not* from proximity-only name reveals. Chapter
+   * progression deliberately requires deliberate engagement, not passive
+   * sightings, so passively walking past the central area cannot satisfy
+   * a chapter gate. See `GameScene.buildSpokenNamedCats`.
+   */
+  spokenCats: Set<string>;
   registry: Phaser.Data.DataManager;
   territory: TerritorySystem;
 }
@@ -39,7 +47,7 @@ const CHAPTERS: ChapterDef[] = [
     id: 2,
     conditions: (ctx) => {
       const ch1Done = ctx.registry.get("CH1_RESTED") as boolean | undefined;
-      return !!ch1Done && ctx.trust.global >= 25 && ctx.knownCats.size >= 2;
+      return !!ch1Done && ctx.trust.global >= 25 && ctx.spokenCats.size >= 2;
     },
     narration: [
       "Days pass. The gardens have a rhythm. You're learning it.",
@@ -50,7 +58,7 @@ const CHAPTERS: ChapterDef[] = [
     conditions: (ctx) => {
       return (
         ctx.trust.global >= 50 &&
-        ctx.knownCats.size >= 4 &&
+        ctx.spokenCats.size >= 4 &&
         ctx.dayNight.dayCount >= 3
       );
     },

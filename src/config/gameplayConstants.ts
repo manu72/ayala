@@ -89,6 +89,39 @@ export const STATIONARY_MOVE_THRESHOLD_PX = 24;
 /** Duration (ms) the player must hold the rest key to enter resting state. */
 export const REST_HOLD_MS = 1000;
 
+/**
+ * After a chapter advance, Mamma Cat must move at least this many world
+ * pixels from her position at the moment of the advance before the next
+ * chapter is allowed to fire. Pre-v0.3.8 the 5 s `chapterCheckTimer`
+ * could cascade 1→2→3→4 in fifteen seconds the moment a player woke
+ * from a long sleep that had passively pushed trust over thresholds.
+ * The threshold is set tight (one tile is 32 px) so any deliberate
+ * exploration releases the lock, but a stationary or near-stationary
+ * player cannot rack up consecutive chapter advances on the timer alone.
+ */
+export const CHAPTER_REARM_MOVE_PX = 200;
+
+/**
+ * Maximum distance (world pixels) from `poi_pyramid_steps` at which
+ * Mamma Cat is considered "near the steps" for chapter 4 territory
+ * negotiation. Slightly larger than the {@link isInTerritory} radius
+ * (120 px) used post-claim so the trigger is forgiving — the player
+ * just has to walk up to Jayco at the steps, not stand on a single
+ * tile. Pre-v0.3.8 territory could be claimed from anywhere as soon
+ * as global trust crossed 80; that bypassed the entire "earn your
+ * place at the steps" beat.
+ */
+export const TERRITORY_NEGOTIATION_NEAR_STEPS_PX = 150;
+
+/**
+ * Per-cat trust required of Jayco before he will offer territory at the
+ * pyramid steps. Mirrors {@link TrustSystem.firstConversation} delta
+ * (10 trust per first conversation, +5 per return) so the player has
+ * to actually engage Jayco several times — proximity ticks alone
+ * cannot satisfy this gate.
+ */
+export const TERRITORY_JAYCO_TRUST_REQUIRED = 50;
+
 /** Radius (px) of the on-screen movement control in HUD space. */
 export const TOUCH_STICK_RADIUS_PX = 48;
 
