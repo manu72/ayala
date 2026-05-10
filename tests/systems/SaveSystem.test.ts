@@ -288,6 +288,30 @@ describe('SaveSystem.save / load / hasSave / clear', () => {
     expect(SaveSystem.load()?.variables[StoryKeys.SNATCHED_THIS_NIGHT]).toBe(true)
   })
 
+  // Regression: Fluffy's "Manu visited" awareness reads from the
+  // MANU_VISITED_FLUFFY_DAY registry key. The whole feature collapses
+  // silently if the key falls out of TRACKED_KEYS — Fluffy's prompt
+  // would forget Manu's last visit on every save/load — so lock the
+  // round-trip here.
+  it('round-trips MANU_VISITED_FLUFFY_DAY in tracked variables', () => {
+    const registry = stubRegistry({ [StoryKeys.MANU_VISITED_FLUFFY_DAY]: 6 })
+    expect(
+      SaveSystem.save(
+        1,
+        2,
+        { hunger: 50, thirst: 50, energy: 50 },
+        'evening',
+        1,
+        registry,
+        undefined,
+        { global: 0, cats: {} },
+        { claimed: false, claimedOnDay: 0 },
+      ),
+    ).toBe(true)
+
+    expect(SaveSystem.load()?.variables[StoryKeys.MANU_VISITED_FLUFFY_DAY]).toBe(6)
+  })
+
   it('round-trips core fields and tracked variables', () => {
     const stats = { hunger: 70, thirst: 65, energy: 80 }
     const registry = stubRegistry({ CHAPTER: 3, MET_BLACKY: true })

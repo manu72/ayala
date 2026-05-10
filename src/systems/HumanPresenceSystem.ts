@@ -421,6 +421,23 @@ export class HumanPresenceSystem {
             }
           }
         }
+
+        // Persist Manu's visits to Fluffy (one-shot per game day). Fluffy
+        // is attached to Manu in her persona ("she's decided Manu is her
+        // human"); without this, her dialogue with Mamma Cat asks after
+        // her human even when Manu has just walked past her on his
+        // circuit. The day stamp is surfaced into Fluffy's AI prompt via
+        // CatDialogueController.buildRecentDialogueEvents so the LLM
+        // knows "Manu visited today / yesterday / N days ago".
+        //
+        // Recorded BEFORE the Manu deferral check above is irrelevant
+        // here — we run after the cat-greet loop and gate solely on
+        // proximity, so Fluffy's notice of him is independent of whether
+        // Manu's reserved-greet skip fires. The early-out via day
+        // comparison makes the per-frame work O(1) once recorded.
+        if (human.humanType === "manu") {
+          this.tryRecordManuVisitToFluffy(human);
+        }
       }
 
       // Delegated to the Camille encounter system: at most one "Kish, slow
@@ -686,6 +703,41 @@ export class HumanPresenceSystem {
       Phaser.Math.Distance.Between(human.x, human.y, this.scene.player.x, this.scene.player.y) <=
       GP.CAT_PERSON_PLAYER_GREET_DIST
     );
+  }
+
+  /**
+   * Record Manu's daily visit to Fluffy. Fluffy is attached to Manu in
+   * her persona, so any close pass counts as "her human came by today"
+   * regardless of Manu's reserved-greet skip ({@link HumanNPC.shouldDeferManuGreet}).
+   * One-shot per game day via {@link StoryKeys.MANU_VISITED_FLUFFY_DAY}
+   * so the per-frame call is O(1) once recorded; the registry write is
+   * picked up by {@link SaveSystem} (the key is in TRACKED_KEYS) and
+   * surfaced into Fluffy's AI prompt by
+   * {@link CatDialogueController.buildRecentDialogueEvents} so the LLM
+   * stops making Fluffy ask after her human when he was just here.
+   *
+   * Defensive `readCount` semantics on the registry value match the
+   * pattern used in {@link CamilleEncounterSystem.readCount} — a corrupt
+   * save, hand-edited LocalStorage entry, or future schema change that
+   * injects NaN / negative / non-numeric reads as 0, opening the gate
+   * once and writing a clean integer day stamp.
+   */
+  private tryRecordManuVisitToFluffy(manu: HumanNPC): void {
+    const scene = this.scene;
+    const today = scene.dayNight.dayCount;
+    const raw = scene.registry.get(StoryKeys.MANU_VISITED_FLUFFY_DAY);
+    const lastDay =
+      typeof raw === "number" && Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : 0;
+    if (lastDay >= today) return;
+
+    const fluffyEntry = scene.npcs.find(({ cat }) => cat.npcName === "Fluffy");
+    const fluffy = fluffyEntry?.cat;
+    if (!fluffy || !fluffy.active || !fluffy.visible) return;
+
+    const dist = Phaser.Math.Distance.Between(manu.x, manu.y, fluffy.x, fluffy.y);
+    if (dist >= GP.CAT_PERSON_GREET_DIST) return;
+
+    scene.registry.set(StoryKeys.MANU_VISITED_FLUFFY_DAY, today);
   }
 
   /**
