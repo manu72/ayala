@@ -378,10 +378,21 @@ export class HumanPresenceSystem {
         const playerDist = Phaser.Math.Distance.Between(human.x, human.y, scene.player.x, scene.player.y);
         if (playerDist < GP.CAT_PERSON_PLAYER_GREET_DIST && human.stationaryGreetCount < STATIONARY_GREET_CAP) {
           let playerLine: string | undefined;
+          // Camille's canonical first-impression line is a one-shot per
+          // spawn. Without the latch the override fires on every
+          // proximity tick during the multi-day window between Encounter
+          // 1 ("A new human…" narrator beat) and Encounter 2, which made
+          // Camille parrot the same line over and over. After the line
+          // has played once on this spawn — or once Encounter 2 has
+          // landed — `playerLine` is left undefined so the existing
+          // AI/scripted greeting variety pool runs. The flag resets in
+          // HumanNPC.deactivate(), so each fresh evening visit gets the
+          // line again on first close approach (which reads naturally).
           if (human.humanType === "camille") {
             const enc = (scene.registry.get(StoryKeys.CAMILLE_ENCOUNTER) as number) ?? 0;
-            if (enc < 2) {
+            if (enc < 2 && !human.hasIntroducedToMammaCat) {
               playerLine = "And who are you, sweetheart?";
+              human.markIntroducedToMammaCat();
             }
           }
           human.startGreeting(scene.player.x, scene.player.y);

@@ -169,6 +169,16 @@ export class HumanNPC extends BaseNPC {
    */
   private stationaryGreet = 0;
 
+  /**
+   * One-shot latch for Camille's "stranger" first-impression line
+   * ("And who are you, sweetheart?"). Set once that line has been spoken
+   * on this human's current spawn so subsequent Mamma Cat proximity ticks
+   * fall through to the standard greeting variety pool instead of
+   * repeating the canonical line verbatim. Reset in {@link deactivate} so
+   * a fresh evening visit reads naturally on first close approach.
+   */
+  private mammaCatIntroduced = false;
+
   /** Manu greets only every 3rd eligible cat (Phase 4.5). */
   private manuGreetWave = 0;
   /** Simple bowl graphic while feeder lingers at a station. */
@@ -330,6 +340,22 @@ export class HumanNPC extends BaseNPC {
   /** Reset this human's stationary-greet counter (call when Mamma moves). */
   resetStationaryGreet(): void {
     this.stationaryGreet = 0;
+  }
+
+  /**
+   * True once Camille's "stranger" first-impression line has played on
+   * this spawn (see {@link mammaCatIntroduced}). Callers in
+   * {@link HumanPresenceSystem} use this to avoid repeating the canonical
+   * "And who are you, sweetheart?" line on every proximity tick during
+   * the multi-day window between Encounter 1 and Encounter 2.
+   */
+  get hasIntroducedToMammaCat(): boolean {
+    return this.mammaCatIntroduced;
+  }
+
+  /** Latch the introduction one-shot. Idempotent. */
+  markIntroducedToMammaCat(): void {
+    this.mammaCatIntroduced = true;
   }
 
   glanceAt(targetX: number, targetY: number): void {
@@ -592,6 +618,7 @@ export class HumanNPC extends BaseNPC {
     this.loopPauseTimer = 0;
     this.encounterPaused = false;
     this.stationaryGreet = 0;
+    this.mammaCatIntroduced = false;
     this.feedingStationProp?.destroy();
     this.feedingStationProp = null;
     this.detourQueue = [];

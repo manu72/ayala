@@ -1046,6 +1046,51 @@ describe('HumanNPC — stationary greet counter', () => {
   })
 })
 
+// ──────────────────────────────────────────────────────────────
+// Mamma Cat introduction one-shot (Camille stranger-line bug fix)
+// ──────────────────────────────────────────────────────────────
+//
+// Before the fix, Camille's "And who are you, sweetheart?" greeting
+// was forced from the ambient proximity branch in HumanPresenceSystem
+// on every tick while CAMILLE_ENCOUNTER < 2. Because that window
+// spans 1+ in-game days (the encounter ladder advances at most once
+// per evening), Camille parroted the same line on every close
+// approach. The fix latches the line as a one-shot per spawn via
+// markIntroducedToMammaCat, and resets the latch on full deactivate
+// so a fresh evening visit reads naturally.
+
+describe('HumanNPC — Mamma Cat introduction one-shot', () => {
+  it('starts unlatched on a fresh spawn', () => {
+    const { npc } = makeHuman({ type: 'camille' })
+    expect(npc.hasIntroducedToMammaCat).toBe(false)
+  })
+
+  it('latches once marked and stays latched until deactivate', () => {
+    const { npc } = makeHuman({ type: 'camille' })
+    npc.markIntroducedToMammaCat()
+    expect(npc.hasIntroducedToMammaCat).toBe(true)
+    npc.markIntroducedToMammaCat()
+    expect(npc.hasIntroducedToMammaCat).toBe(true)
+  })
+
+  it('resets on deactivate so the next evening spawn re-arms the line', () => {
+    const { npc } = makeHuman({ type: 'camille', activePhases: ['evening'] })
+    npc.setPhase('evening')
+    npc.markIntroducedToMammaCat()
+    expect(npc.hasIntroducedToMammaCat).toBe(true)
+
+    // Phase out → startExiting → deactivate. Walk the NPC to a park
+    // exit so the deactivate path actually runs (mirrors the existing
+    // stationary-counter reset test).
+    npc.setPhase('day')
+    for (let i = 0; i < 2000 && npc.active; i++) {
+      simulatePhysics(npc, 200)
+    }
+    expect(npc.active).toBe(false)
+    expect(npc.hasIntroducedToMammaCat).toBe(false)
+  })
+})
+
 describe('HumanNPC.identityName — persona wiring', () => {
   it('defaults named types to their canonical persona key', () => {
     const cases: Array<[HumanConfig['type'], string]> = [
