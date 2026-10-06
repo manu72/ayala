@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type Phaser from "phaser";
-import { buildCamilleEraCareRoutes } from "../../src/utils/camilleCareRoute";
+import { buildCamilleEraCareRoutes, canAdoptAmbientCareGroup } from "../../src/utils/camilleCareRoute";
 
 describe("buildCamilleEraCareRoutes", () => {
   it("includes the Manu-only branch so Manu's path is longer than Camille's", () => {
@@ -37,5 +37,19 @@ describe("buildCamilleEraCareRoutes", () => {
     expect(manu.length).toBeGreaterThan(camille.length);
     expect(manu.length - camille.length).toBe(3);
     expect(kish.length).toBe(camille.length);
+  });
+});
+
+describe("canAdoptAmbientCareGroup", () => {
+  const walking = { visible: true, isExitingPark: false };
+  it("adopts an ambient care visit that is still on its rounds", () => {
+    expect(canAdoptAmbientCareGroup({ camille: walking, encounterActive: false, teardownPending: false })).toBe(true);
+  });
+  it("respawns when there is no visit, it is leaving, already a story visit, or being torn down", () => {
+    expect(canAdoptAmbientCareGroup({ camille: null, encounterActive: false, teardownPending: false })).toBe(false);
+    expect(canAdoptAmbientCareGroup({ camille: { visible: true, isExitingPark: true }, encounterActive: false, teardownPending: false })).toBe(false);
+    expect(canAdoptAmbientCareGroup({ camille: { visible: false, isExitingPark: false }, encounterActive: false, teardownPending: false })).toBe(false);
+    expect(canAdoptAmbientCareGroup({ camille: walking, encounterActive: true, teardownPending: false })).toBe(false);
+    expect(canAdoptAmbientCareGroup({ camille: walking, encounterActive: false, teardownPending: true })).toBe(false);
   });
 });

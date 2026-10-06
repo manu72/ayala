@@ -34,15 +34,17 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 
 ### What exists now
 
-- 100x80 tile map of Ayala Triangle Gardens with 7 distinct zones, roads, and landmarks
+- 290x229 tile map (2 m per tile, north up) of the real Ayala Triangle Gardens, built from OpenStreetMap: the triangle inside Paseo de Roxas, Makati Avenue and Ayala Avenue, with its real walkways, buildings, underpasses, steps, pond, fountains and landmarks
 - Mamma Cat player character with walk, run, crouch, and rest animations
 - **Survival system:** hunger, thirst, and energy stats with environmental modifiers and collapse mechanics
 - **Food and water sources** scattered across the map with cooldowns and time-of-day availability
 - **Day/night cycle** (dawn, day, evening, night) with smooth colour transitions and a game clock
 - **8 named NPC cats** (Blacky, Tiger, Jayco, Jayco Jr, Fluffy, Pedigree, Ginger, Ginger B) with unique dispositions and multi-stage dialogue
-- **12 background colony cats** with randomised appearances and behaviours
-- **Guard NPC** that patrols and chases the player away from food scraps
-- **Human NPCs** (joggers, feeders, dog walkers) following waypoint paths on time-of-day schedules
+- **Up to 24 background colony cats** with randomised appearances and behaviours
+- **Guard NPC** that patrols and chases the player away from food scraps, plus **10 more security guards** at real posts (mostly passive, three friendly who stop and look at Mamma Cat, one more hostile; a smaller night shift)
+- **Human NPCs** (joggers, feeders, dog walkers) following routes along the real walkways on time-of-day schedules
+- **Park crowd:** walkers, office workers on breaks, tourists taking selfies, joggers, diners at the restaurant row and Starbucks, picnickers, bench sitters, lunch eaters and smokers, busiest at lunch and after work and almost gone at night (`AmbientCrowdSystem`, tuned in `src/data/ambient-roles.ts`; no story effects)
+- **Traffic** on Paseo de Roxas, Makati Avenue and Ayala Avenue in their real lanes and directions, with morning and evening rush hours (`TrafficSystem`; roads are impassable, cars never hit anything)
 - **Dogs** that follow dog walkers, bark and lunge when the player gets close
 - **Trust and reputation system** tracking global colony trust and per-cat relationships
 - **Emote system** showing floating mood indicators above cats
@@ -108,7 +110,7 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 | [Vitest](https://vitest.dev)                 | 3.x     | Unit testing with V8 coverage                  |
 | [pngjs](https://github.com/lukeapage/pngjs)  | 7.x     | Dev-only procedural tileset and map generation |
 
-Maps are generated programmatically via Node.js scripts (not via the Tiled GUI), exported as Tiled-compatible JSON consumed by Phaser's tilemap loader.
+Maps are generated programmatically via Node.js scripts from OpenStreetMap data (not via the Tiled GUI), exported as Tiled-compatible JSON consumed by Phaser's tilemap loader.
 
 ## Getting Started
 
@@ -479,14 +481,18 @@ ayala/
 │   │   ├── ginger-RUN.png             #     Ginger cat strip
 │   │   └── Black-*.png                #     Additional black cat animation strips
 │   ├── tilemaps/
-│   │   └── atg.json                    #   100x80 Tiled JSON map (generated)
+│   │   └── atg.json                    #   290x229 Tiled JSON map, 2 m/tile (generated from OSM)
 │   └── tilesets/
 │       └── park-tiles.png              #   40-tile textured tileset (generated)
 │
 ├── scripts/                             # Dev-time asset generators + CI helpers (Node.js)
 │   ├── generate-tileset.mjs            #   Generates park-tiles.png + tile-indices.json
-│   ├── generate-map.mjs               #   Generates atg.json from tile indices
+│   ├── generate-map.mjs               #   Generates atg.json from the OSM extract + PLACES table
 │   ├── tile-indices.json               #   Named tile ID map (generated output)
+│   ├── fetch-osm.mjs                   #   Pulls the OpenStreetMap extract (Overpass → GeoJSON)
+│   ├── atg-osm.geojson                 #   Saved OSM extract of ATG (© OpenStreetMap contributors)
+│   ├── atg-stamps.json                 #   Tree/plant stamps (trees-pale, plants) reused by the generator
+│   ├── render-map.mjs                  #   Renders atg.json to a PNG overview for review
 │   └── check-dist-leaks.mjs            #   CI: fail if secret-like patterns in dist/
 │
 ├── src/                                 # Game source (TypeScript)
@@ -561,14 +567,27 @@ ayala/
 
 ## Asset Generation
 
-The tileset and map are generated procedurally, not drawn in a GUI. To regenerate after editing the scripts:
+The tileset is generated procedurally and the map is generated from real OpenStreetMap geometry; neither is drawn in a GUI. Don't hand-edit the committed PNG or JSON — change the scripts and regenerate:
 
 ```bash
 node scripts/generate-tileset.mjs   # Regenerates park-tiles.png and tile-indices.json
-node scripts/generate-map.mjs       # Regenerates atg.json (reads tile-indices.json)
+node scripts/generate-map.mjs       # Regenerates atg.json from atg-osm.geojson (reads tile-indices.json, atg-stamps.json)
+node scripts/render-map.mjs         # Optional: PNG overview of atg.json (default: your temp dir) for review
 ```
 
-Both scripts use `pngjs` (dev dependency) and write to `public/assets/`. The generated files are committed to git so the game runs without needing to regenerate them.
+Both generators use `pngjs` (dev dependency) and write to `public/assets/`. The generated files are committed to git so the game runs without needing to regenerate them.
+
+`generate-map.mjs` works at 2 m per 32 px tile, north up. It rasterises the extract onto the existing park-tiles indices: the three bounding roads (and every street in frame) collide, so the park is sealed; footways become stone paths, buildings and towers become solid blocks, the PSE pond and fountains become water. Places OSM doesn't map are in the `PLACES` table at the top of the script (the sunken plaza with the northern Starbucks and its waterfall, the steps down to the mall and up to the towers, the triangular cat shelter, the playground, smoking areas). Trees and plants are scattered from `scripts/atg-stamps.json`, stamps extracted from the earlier hand-made map. Every spawn/POI is snapped to reachable ground with one tile of clearance for human routing, and a `places` object layer is emitted for the game (traffic lanes, park exits, the chapter-4 shops zone, benches, dining tables, picnic spots, smoking areas, selfie spots, guard posts, ambient/snatcher routes, colony zones), read through `src/utils/mapPlaces.ts`. The script fails loudly if the park is not sealed or a POI is unreachable, and `tests/map/atgGeography.test.ts` pins the key places (Blacky's underpass, Starbucks beside the mall steps, the pyramid steps by the glass, …).
+
+Real-world ground plan comes from OpenStreetMap. `scripts/atg-osm.geojson` is a saved extract (park, footways, roads, buildings, steps, underpasses, everything tagged in the bbox) so the generators run offline. Refresh it only when you want newer OSM data:
+
+```bash
+node scripts/fetch-osm.mjs          # Overpass API → scripts/atg-osm.geojson
+```
+
+[docs/atg-osm-preview.svg](docs/atg-osm-preview.svg) is the baseline ground plan drawn from that extract, with the key places numbered (underpasses, the pond, Openbook, the restaurant row, the steps, the monuments).
+
+Map data © OpenStreetMap contributors, available under the [Open Database License](https://www.openstreetmap.org/copyright). The credit also appears in the in-game end credits (`EpilogueScene`).
 
 Cat spritesheets use a mix of 32x32 grid sheets (mammacat, blacky, tiger, jayco, fluffy) and 64x64 strip sheets (ginger cats, though ginger cats currently use fluffy with an orange tint in-game). Human NPCs use per-type spritesheets: `girl.png` for joggers, `dogwalker.png` for dog walkers, and the guard spritesheet with a green tint for feeders. Dog walkers are accompanied by dog sprites (`SmallDog.png`, `BrownDog.png`, `WhiteDog.png`).
 
@@ -618,6 +637,8 @@ Read the full document: [docs/Ayala_GDD_v0.1.md](docs/Ayala_GDD_v0.1.md)
 ## License
 
 TBD
+
+Map data © OpenStreetMap contributors (ODbL) — see [openstreetmap.org/copyright](https://www.openstreetmap.org/copyright).
 
 ---
 

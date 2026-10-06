@@ -19,6 +19,8 @@ import { ColonyDynamicsSystem } from "../systems/ColonyDynamicsSystem";
 import { SnatcherSystem } from "../systems/SnatcherSystem";
 import { HumanPresenceSystem } from "../systems/HumanPresenceSystem";
 import { CollapseSystem } from "../systems/CollapseSystem";
+import { TrafficSystem } from "../systems/TrafficSystem";
+import { AmbientCrowdSystem } from "../systems/AmbientCrowdSystem";
 import { CatDialogueController } from "../systems/CatDialogueController";
 import type { HUDScene } from "./HUDScene";
 import {
@@ -27,6 +29,8 @@ import {
   CHAPTER_REARM_MOVE_PX,
   TERRITORY_NEGOTIATION_NEAR_STEPS_PX,
   TERRITORY_JAYCO_TRUST_REQUIRED,
+  TERRITORY_RADIUS_PX,
+  SHELTER_RADIUS_PX,
 } from "../config/gameplayConstants";
 import { StoryKeys, migrateLegacyIntroFlag } from "../registry/storyKeys";
 import {
@@ -42,6 +46,17 @@ import { AudioSystem } from "../systems/AudioSystem";
 import { CamilleEncounterSystem } from "../systems/CamilleEncounterSystem";
 import { hasLineOfSightTiles } from "../utils/lineOfSight";
 import { createNavigationGrid, routeHumanPath, type NavigationGrid } from "../utils/humanRoutePath";
+import {
+  closestOnPolyline,
+  placeNamed,
+  placesOfType,
+  pointInRect,
+  readPlaces,
+  tiledProps,
+  type MapPlace,
+  type Pt,
+} from "../utils/mapPlaces";
+import { planKerbsideDropoff, type DropoffPlan } from "../utils/kerbsideDropoff";
 import { applyLifeLoss, MAX_LIVES } from "../utils/lifeFlow";
 import { markGameOver } from "../utils/gameOverState";
 import { consumeSnatchedThisNight, restoreSnatchedThisNight } from "../utils/snatcherNightState";
@@ -56,7 +71,7 @@ const TILE_SIZE = GP.TILE_SIZE;
 // `CatDialogueController` now (Commit D).
 
 const DEFAULT_ZOOM = 2.5;
-const PEEK_ZOOM = 0.8;
+const PEEK_ZOOM = 0.5;
 const ZOOM_DURATION = 500;
 const DROPOFF_SUV_TEXTURE = "suv_small";
 const DROPOFF_COROLLA_TEXTURE = "corolla_small";
@@ -128,6 +143,14 @@ export class GameScene extends Phaser.Scene {
   groundLayer: Phaser.Tilemaps.TilemapLayer | null = null;
   /** Objects collision layer, shared with {@link ColonyDynamicsSystem} + {@link SnatcherSystem}. */
   objectsLayer: Phaser.Tilemaps.TilemapLayer | null = null;
+  /** The map's `places` layer (traffic lanes, exits, zones, crowd anchors, routes) in world px. */
+  places: MapPlace[] = [];
+  /** Park exits for ambient humans (underpass mouths, mall, towers, crossing) from the map. */
+  parkExits: Pt[] = [];
+  /** Generator's `mapRevision` map property; saves made on another map keep story but not positions. */
+  mapRevision = "";
+  /** Clearance nav grid, built once per map load (tile collision never changes at runtime). */
+  private humanNavGrid: NavigationGrid | null = null;
   private overheadLayer!: Phaser.Tilemaps.TilemapLayer | null;
   /** Shared with {@link CamilleEncounterSystem} for spawn-point lookup. */
   map!: Phaser.Tilemaps.Tilemap;
@@ -174,6 +197,10 @@ export class GameScene extends Phaser.Scene {
   colony!: ColonyDynamicsSystem;
   /** Owns nightly snatcher spawn/detect/capture + colony-cat grab sweep. */
   snatcher!: SnatcherSystem;
+  /** Ambient cars on the real carriageways (visual only; roads already block movement). */
+  traffic!: TrafficSystem;
+  /** Anonymous park-goers and the extra security guards (no story effects). */
+  private crowd?: AmbientCrowdSystem;
   /**
    * Owns the looping background music (ambient ↔ danger crossfade) and
    * one-shot SFX. Public so HUDScene can hook the mute toggle.
@@ -282,6 +309,8 @@ export class GameScene extends Phaser.Scene {
     // on our subsystems; it only fires the scene-level SHUTDOWN event, which
     // we chain into these (WORKING_MEMORY "Scene Lifecycle — shutdown is
     // NOT auto-wired").
+    this.traffic?.destroy();
+    this.crowd?.destroy();
     this.snatcher?.shutdown();
     this.colony?.shutdown();
     this.camille?.shutdown();
@@ -369,6 +398,15 @@ export class GameScene extends Phaser.Scene {
     if (this.overheadLayer) {
       this.overheadLayer.setDepth(10);
     }
+    this.places = readPlaces(this.map.getObjectLayer("places")?.objects ?? []);
+    this.parkExits = placesOfType(this.places, "exit").map(({ x, y }) => ({ x, y }));
+    this.mapRevision = String(tiledProps(this.map.properties).mapRevision ?? "");
+    this.humanNavGrid = null;
+    this.traffic = new TrafficSystem(this, this.places, {
+      bounds: { width: this.map.widthInPixels, height: this.map.heightInPixels },
+      isDrivable: (x, y) => this.groundLayer?.getTileAtWorldXY(x, y)?.collides ?? true,
+      maxCars: 140,
+    });
     this.placePlaygroundCarabao();
     this.placeStarbucksLogo();
     this.cacheShelterPoints();
@@ -474,15 +512,23 @@ export class GameScene extends Phaser.Scene {
     if (data?.loadSave) {
       const save = SaveSystem.load();
       if (save) {
-        spawnX = save.playerPosition.x;
-        spawnY = save.playerPosition.y;
+        // Positions only mean something on the map they were saved on (0.5.0 rebuilt the map).
+        const sameMap = save.mapRevision === this.mapRevision;
+        const savedTileX = Math.floor(save.playerPosition.x / TILE_SIZE);
+        const savedTileY = Math.floor(save.playerPosition.y / TILE_SIZE);
+        if (sameMap && !this.isExplorationCellBlocked(savedTileX, savedTileY)) {
+          spawnX = save.playerPosition.x;
+          spawnY = save.playerPosition.y;
+        }
         this.stats.fromJSON(save.stats);
         this.dayNight.restore(save.timeOfDay, save.gameTimeMs);
-        savedSourceStates = save.sourceStates;
+        savedSourceStates = sameMap ? save.sourceStates : undefined;
         if (save.trust) this.trust.fromJSON(save.trust);
         if (save.territory) this.territory.fromJSON(save.territory);
         this.lives = save.lives;
-        this.scoring.fromJSON(save.runScore);
+        this.scoring.fromJSON(
+          sameMap ? save.runScore : { ...save.runScore, visitedCells: [], foodSourcesDiscovered: [] },
+        );
         for (const [key, val] of Object.entries(save.variables)) {
           this.registry.set(key, val);
         }
@@ -522,25 +568,25 @@ export class GameScene extends Phaser.Scene {
     const savedKnown = this.registry.get("KNOWN_CATS") as string[] | undefined;
     this.knownCats = new Set(savedKnown ?? []);
 
-    const blacky = this.spawnNPC("Blacky", "blacky", "spawn_blacky", "neutral", 150, 411, 1083);
+    const blacky = this.spawnNPC("Blacky", "blacky", "spawn_blacky", "neutral", 150, 3536, 2480);
     blacky.setTint(0x333333);
-    this.spawnNPC("Tiger", "tiger", "spawn_tiger", "territorial", 200, 1141, 632);
-    this.spawnNPC("Jayco", "jayco", "spawn_jayco", "friendly", 150, 1427, 484);
+    this.spawnNPC("Tiger", "tiger", "spawn_tiger", "territorial", 200, 4080, 2864);
+    this.spawnNPC("Jayco", "jayco", "spawn_jayco", "friendly", 150, 7088, 3280);
 
-    this.spawnNPC("Jayco Jr", "jayco", "spawn_jayco_jr", "friendly", 100, 1470, 520, {
+    this.spawnNPC("Jayco Jr", "jayco", "spawn_jayco_jr", "friendly", 100, 6512, 3184, {
       scale: 0.7,
       walkSpeed: 40,
       hyperactive: true,
     });
-    this.spawnNPC("Fluffy", "fluffy", "spawn_fluffy", "neutral", 180, 1500, 900);
-    this.spawnNPC("Pedigree", "fluffy", "spawn_pedigree", "neutral", 150, 2500, 1700);
+    this.spawnNPC("Fluffy", "fluffy", "spawn_fluffy", "neutral", 180, 7184, 2896);
+    this.spawnNPC("Pedigree", "fluffy", "spawn_pedigree", "neutral", 150, 6448, 4656);
     this.spawnGingerTwins();
     this.colony.spawnInitialBackgroundCats();
 
     this.restoreDispositions();
 
     const guardPoint = this.map.findObject("spawns", (o) => o.name === "spawn_guard");
-    this.guard = new GuardNPC(this, guardPoint?.x ?? 2169, guardPoint?.y ?? 1791);
+    this.guard = new GuardNPC(this, guardPoint?.x ?? 5840, guardPoint?.y ?? 4272);
     this.guard.setTarget(this.player);
     if (this.groundLayer) {
       this.physics.add.collider(this.guard, this.groundLayer);
@@ -549,6 +595,14 @@ export class GameScene extends Phaser.Scene {
       this.physics.add.collider(this.guard, this.objectsLayer);
     }
     this.guardIndicator = new ThreatIndicator(this, this.guard, "Guard", "dangerous", true);
+    this.crowd = new AmbientCrowdSystem(this, {
+      places: this.places,
+      spawns: readPlaces(this.map.getObjectLayer("spawns")?.objects ?? []),
+      player: this.player,
+      groundLayer: this.groundLayer,
+      objectsLayer: this.objectsLayer,
+      emotes: this.emotes,
+    });
 
     this.humans.spawnAmbientHumans();
 
@@ -694,8 +748,8 @@ export class GameScene extends Phaser.Scene {
 
   private placePlaygroundCarabao(): void {
     const playgroundPoint = this.map.findObject("spawns", (obj) => obj.name === "poi_playground");
-    const carabaoX = (playgroundPoint?.x ?? 22 * TILE_SIZE) + TILE_SIZE * 0.5;
-    const carabaoY = (playgroundPoint?.y ?? 31 * TILE_SIZE) + TILE_SIZE * 4;
+    const carabaoX = (playgroundPoint?.x ?? 156 * TILE_SIZE) + TILE_SIZE * 0.5;
+    const carabaoY = (playgroundPoint?.y ?? 68 * TILE_SIZE) + TILE_SIZE * 4;
     const hornbillX = carabaoX - TILE_SIZE * 3;
     const hornbillY = carabaoY - TILE_SIZE * 3;
 
@@ -705,8 +759,8 @@ export class GameScene extends Phaser.Scene {
 
   private placeStarbucksLogo(): void {
     const waterPoint = this.map.findObject("spawns", (obj) => obj.name === "poi_starbucks_water");
-    const logoX = (waterPoint?.x ?? 74 * TILE_SIZE) + TILE_SIZE * 2;
-    const logoY = (waterPoint?.y ?? 2 * TILE_SIZE) - TILE_SIZE;
+    const logoX = (waterPoint?.x ?? 202 * TILE_SIZE) + TILE_SIZE * 2;
+    const logoY = (waterPoint?.y ?? 91 * TILE_SIZE) - TILE_SIZE;
 
     this.add.image(logoX, logoY, "starbucks_logo").setOrigin(0.5, 0.5).setScale(0.3).setDepth(4);
   }
@@ -813,23 +867,30 @@ export class GameScene extends Phaser.Scene {
       });
     });
 
-    const roadY = spawnY + 32;
-    const carOffscreenX = spawnX + 400;
-    const carStopX = spawnX + 24;
+    // The car comes down the real carriageway beside spawn_mammacat and pulls over at the kerb.
+    const plan = this.planDropoff({ x: spawnX, y: spawnY });
+    const roadY = plan?.start.y ?? spawnY + 32;
+    const carOffscreenX = plan?.start.x ?? spawnX + 400;
+    const carStop = plan?.stop ?? { x: spawnX + 24, y: roadY };
+    const carExit = plan?.exit ?? { x: carOffscreenX + 200, y: roadY };
+    const dropAt = plan ? this.kerbDropPoint(plan, { x: spawnX, y: spawnY }) : { x: carStop.x - 20, y: roadY - 4 };
 
     const car = this.addDropoffVehicle(carOffscreenX, roadY);
+    if (plan) car.setRotation(plan.rotation).setFlipX(plan.flipX);
+    if (plan) this.traffic.reserve(plan.stop, 700);
 
     this.queueIntroDelayed(4500, () => {
       this.queueIntroTween({
         targets: car,
-        x: carStopX,
+        x: carStop.x,
+        y: carStop.y,
         duration: 2000,
         ease: "Cubic.easeOut",
       });
     });
 
     this.queueIntroDelayed(7500, () => {
-      this.player.setPosition(carStopX - 20, roadY - 4);
+      this.player.setPosition(dropAt.x, dropAt.y);
       this.player.setVisible(true);
       this.player.enterForcedCrouchPose();
     });
@@ -837,7 +898,8 @@ export class GameScene extends Phaser.Scene {
     this.queueIntroDelayed(9000, () => {
       this.queueIntroTween({
         targets: car,
-        x: carOffscreenX + 200,
+        x: carExit.x,
+        y: carExit.y,
         duration: 2500,
         ease: "Cubic.easeIn",
         onComplete: () => car.destroy(),
@@ -862,6 +924,7 @@ export class GameScene extends Phaser.Scene {
 
   private endIntroCinematic(): void {
     this.cinematicActive = false;
+    this.traffic.release();
     // Route cleanup through the shared helper so any still-running tweens or
     // pending delayed calls are actually cancelled (not just dereferenced).
     // Today the final scheduled tween finishes at ~11.5s and endIntroCinematic
@@ -1097,6 +1160,7 @@ export class GameScene extends Phaser.Scene {
 
     const deltaSec = delta / 1000;
     this.dayNight.update(delta);
+    this.traffic.update(delta, this.dayNight);
     this.camille.trySpawnAmbientDawnVisit();
 
     this.player.speedMultiplier = this.stats.speedMultiplier;
@@ -1119,6 +1183,7 @@ export class GameScene extends Phaser.Scene {
       this.foodSources.update(this.dayNight.currentPhase, time);
       this.guard.update(delta);
       this.guardIndicator.update();
+      this.crowd?.update(delta, this.dayNight.currentPhase, this.dayNight.phaseProgress);
       return;
     }
 
@@ -1138,6 +1203,7 @@ export class GameScene extends Phaser.Scene {
         this.foodSources.update(this.dayNight.currentPhase, time);
         this.guard.update(delta);
         this.guardIndicator.update();
+        this.crowd?.update(delta, this.dayNight.currentPhase, this.dayNight.phaseProgress);
         return;
       }
     }
@@ -1266,6 +1332,7 @@ export class GameScene extends Phaser.Scene {
     this.foodSources.update(this.dayNight.currentPhase, time);
     this.guard.update(delta);
     this.guardIndicator.update();
+    this.crowd?.update(delta, this.dayNight.currentPhase, this.dayNight.phaseProgress);
     this.updateNPCs(delta);
     this.updateHumansAndHazards(delta);
 
@@ -1435,12 +1502,17 @@ export class GameScene extends Phaser.Scene {
   // ──────────── Chapter 4: Territory ────────────
 
   /**
-   * Track when the player first enters Zone 6 (The Shops area).
-   * Zone 6 is approximately x > 2100, y < 700.
+   * Track when the player first enters Zone 6 (The Shops area): the map's
+   * `zone_shops` rect around the sunken plaza, Starbucks and the NE steps.
    */
   private checkZone6Visit(): void {
     if (this.registry.get("VISITED_ZONE_6")) return;
-    if (this.player.x > 2100 && this.player.y < 700) {
+    const zone = placeNamed(this.places, "zone_shops")?.rect;
+    const steps = this.map.findObject("spawns", (o) => o.name === "poi_pyramid_steps");
+    const inShops = zone
+      ? pointInRect(this.player, zone)
+      : Boolean(steps) && Phaser.Math.Distance.Between(this.player.x, this.player.y, steps?.x ?? 0, steps?.y ?? 0) < 400;
+    if (inShops) {
       this.registry.set("VISITED_ZONE_6", true);
     }
   }
@@ -1546,7 +1618,7 @@ export class GameScene extends Phaser.Scene {
     if (!this.territory.isClaimed) return false;
     const shopsPOI = this.map.findObject("spawns", (o) => o.name === "poi_pyramid_steps");
     if (!shopsPOI) return false;
-    return Phaser.Math.Distance.Between(x, y, shopsPOI.x ?? 0, shopsPOI.y ?? 0) < 120;
+    return Phaser.Math.Distance.Between(x, y, shopsPOI.x ?? 0, shopsPOI.y ?? 0) < TERRITORY_RADIUS_PX;
   }
 
   // ──────────── Chapter 6: Home ────────────
@@ -1611,6 +1683,7 @@ export class GameScene extends Phaser.Scene {
       this.territory.toJSON(),
       this.lives,
       this.scoring.toJSON(),
+      this.mapRevision,
     );
     if (ok) {
       const hud = this.scene.get("HUDScene") as HUDScene | undefined;
@@ -1668,8 +1741,9 @@ export class GameScene extends Phaser.Scene {
 
   /** Exposed so {@link SnatcherSystem} can route snatcher patrol paths. */
   createHumanNavigationGrid(): NavigationGrid {
+    if (this.humanNavGrid) return this.humanNavGrid;
     const clearance = GP.HUMAN_NAV_CLEARANCE_CHEBYSHEV_TILES;
-    return createNavigationGrid({
+    this.humanNavGrid = createNavigationGrid({
       width: this.map.width,
       height: this.map.height,
       tileSize: TILE_SIZE,
@@ -1687,6 +1761,7 @@ export class GameScene extends Phaser.Scene {
         return false;
       },
     });
+    return this.humanNavGrid;
   }
 
   /** Exposed so {@link SnatcherSystem} can route snatcher patrol paths. */
@@ -1711,7 +1786,7 @@ export class GameScene extends Phaser.Scene {
         return hops.length > 0 ? hops : null;
       },
       routeToExit: (from, exits) => {
-        const nearest = this.nearestExitPoint(from, exits);
+        const nearest = this.nearestExitPoint(from, this.parkExits.length > 0 ? this.parkExits : exits);
         if (!nearest) return [from];
         return [from, ...routeHumanPath([from, nearest], navigationGrid).path];
       },
@@ -1976,9 +2051,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   private spawnGingerTwins(): void {
-    const ginger = this.spawnNPC("Ginger", "fluffy", "spawn_ginger", "wary", 200, 774, 1378);
+    const ginger = this.spawnNPC("Ginger", "fluffy", "spawn_ginger", "wary", 200, 3696, 3536);
     ginger.setTint(0xffaa44);
-    const gingerB = this.spawnNPC("Ginger B", "fluffy", "spawn_ginger", "wary", 200, 774, 1378, {
+    const gingerB = this.spawnNPC("Ginger B", "fluffy", "spawn_ginger", "wary", 200, 3696, 3536, {
       offsetX: 60,
     });
     gingerB.setTint(0xffaa44);
@@ -2006,10 +2081,16 @@ export class GameScene extends Phaser.Scene {
       this.snatcher.checkDetection();
     }
 
-    // Crossfade background music to the danger theme whenever any
-    // snatcher exists in the park. setDanger() is idempotent, so
-    // calling it every frame is cheap.
-    this.audio.setDanger(this.snatcher.hasAnyActive);
+    // Crossfade background music to the danger theme while a snatcher is
+    // out and within earshot — since 0.5.0 the park is too big for
+    // "anywhere". setDanger() is idempotent, so calling it every frame is cheap.
+    this.audio.setDanger(
+      this.snatcher.activeSnatchers.some(
+        (s) =>
+          s.visible &&
+          Phaser.Math.Distance.Between(s.x, s.y, this.player.x, this.player.y) <= GP.SNATCHER_DANGER_MUSIC_DIST,
+      ),
+    );
 
     // NPC cats flee from snatchers.
     if (this.snatcher.hasAnyActive) {
@@ -2048,14 +2129,56 @@ export class GameScene extends Phaser.Scene {
       const obj = poi(poiName);
       if (obj) this.foodSources.addSource(type, obj.x ?? 0, obj.y ?? 0);
     }
-    this.foodSources.addBugSpawns(this.map, 20);
+    // Bugs only where Mamma Cat can reach (the sealed park), scaled with its area.
+    this.foodSources.addBugSpawns(
+      this.map,
+      60,
+      (x, y) => this.territory.visitCell(Math.floor(x / TILE_SIZE), Math.floor(y / TILE_SIZE), this.map.width) !== null,
+    );
   }
 
   // ──────────── Environment ────────────
 
-  /** True when Mamma Cat is within radial distance of the Makati Ave road centreline. */
+  /** True when Mamma Cat is within {@link GP.MAKATI_AVE_WITNESS_DIST} of the Makati Ave carriageway. */
   isNearMakatiAve(worldX: number, worldY: number): boolean {
-    return Phaser.Math.Distance.Between(worldX, worldY, GP.MAKATI_AVE_CENTER_X, worldY) <= GP.MAKATI_AVE_WITNESS_DIST;
+    const lane = placeNamed(this.places, "traffic_makati_southbound")?.polyline;
+    if (!lane) return false;
+    return closestOnPolyline(lane, { x: worldX, y: worldY }).distance <= GP.MAKATI_AVE_WITNESS_DIST;
+  }
+
+  /** Vertices of a named `route` polyline from the map (ambient humans, snatcher patrols), or null. */
+  routePoints(name: string): Pt[] | null {
+    const route = placeNamed(this.places, name)?.polyline;
+    return route && route.length > 1 ? route.map(({ x, y }) => ({ x, y })) : null;
+  }
+
+  /** Kerbside pull-over on the triangle-side carriageway nearest `near` (intro cinematic + dumping events). */
+  planDropoff(near: Pt): DropoffPlan | null {
+    let best: DropoffPlan | null = null;
+    let bestDist = Infinity;
+    for (const name of ["traffic_makati_southbound", "traffic_paseo_eastbound", "traffic_ayala_westbound"]) {
+      const lane = placeNamed(this.places, name);
+      if (!lane?.polyline) continue;
+      const dist = closestOnPolyline(lane.polyline, near).distance;
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = planKerbsideDropoff(lane.polyline, this.traffic.lanesFor(name) || Number(lane.props.lanes) || 2, near);
+      }
+    }
+    return best;
+  }
+
+  /** First spot Mamma Cat can reach between a stopped car and `near` — where a dropped cat lands (never a traffic island). */
+  kerbDropPoint(plan: DropoffPlan, near: Pt): Pt {
+    const total = Phaser.Math.Distance.Between(plan.stop.x, plan.stop.y, near.x, near.y);
+    for (let d = 0; d <= total; d += TILE_SIZE / 2) {
+      const x = plan.stop.x + plan.towardKerb.x * d;
+      const y = plan.stop.y + plan.towardKerb.y * d;
+      if (this.territory.visitCell(Math.floor(x / TILE_SIZE), Math.floor(y / TILE_SIZE), this.map.width) !== null) {
+        return { x, y };
+      }
+    }
+    return near;
   }
 
   /** Approximate line-of-sight check by raymarching through collision tiles. */
@@ -2101,7 +2224,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   isNearShelter(worldX: number, worldY: number): boolean {
-    return this.shelterPoints.some((s) => Phaser.Math.Distance.Between(worldX, worldY, s.x, s.y) < 80);
+    return this.shelterPoints.some((s) => Phaser.Math.Distance.Between(worldX, worldY, s.x, s.y) < SHELTER_RADIUS_PX);
   }
 
   private cacheShelterPoints(): void {

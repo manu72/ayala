@@ -277,6 +277,7 @@ function makeFrozenUpdateScene() {
     foodSources: { update: vi.fn() },
     guard: { update: vi.fn() },
     guardIndicator: { update: vi.fn() },
+    traffic: { update: vi.fn() },
     isNearShelter: vi.fn(() => false),
     isPeeking: false,
     isUnderCanopy: vi.fn(() => false),

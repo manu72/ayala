@@ -44,3 +44,29 @@ export function resolveSnatcherSpawnAction(input: SnatcherSpawnInput): SnatcherS
 
   return { type: "random_spawn" };
 }
+
+/**
+ * Stage the scripted first sighting near the player on the big map: pick the
+ * patrol vertex nearest `target` that is at least `minDistPx` away (so the
+ * snatcher appears just off-screen and walks into view), and start that
+ * closed patrol loop there. Returns null when no route qualifies.
+ */
+export function stagePatrolNear(
+  paths: ReadonlyArray<ReadonlyArray<{ x: number; y: number }>>,
+  target: { x: number; y: number },
+  minDistPx: number,
+): Array<{ x: number; y: number }> | null {
+  let best: { path: ReadonlyArray<{ x: number; y: number }>; index: number; dist: number } | null = null;
+  for (const path of paths) {
+    const closed = path.length > 2 && path[0]!.x === path[path.length - 1]!.x && path[0]!.y === path[path.length - 1]!.y;
+    const loop = closed ? path.slice(0, -1) : path;
+    loop.forEach((v, index) => {
+      const dist = Math.hypot(v.x - target.x, v.y - target.y);
+      if (dist >= minDistPx && (!best || dist < best.dist)) best = { path: loop, index, dist };
+    });
+  }
+  if (!best) return null;
+  const { path, index } = best as { path: ReadonlyArray<{ x: number; y: number }>; index: number };
+  const rotated = [...path.slice(index), ...path.slice(0, index)].map(({ x, y }) => ({ x, y }));
+  return [...rotated, { ...rotated[0]! }];
+}

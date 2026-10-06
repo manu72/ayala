@@ -16,28 +16,27 @@ const DEFAULT_PAUSE = CAMILLE_CARE_ROUTE_WAYPOINT_PAUSE_MS;
 const PYRAMID_PAUSE = CAMILLE_CARE_ROUTE_PYRAMID_PAUSE_MS;
 const ENTRY_BLACKY_PAUSE = CAMILLE_CARE_ROUTE_ENTRY_BLACKY_PAUSE_MS;
 
-/** Fallback world positions if a POI is missing from the tilemap (tile * 32 style). */
-/** Matches shipped `public/assets/tilemaps/atg.json` spawns (world px). */
+/** Fallback world positions if a POI is missing from the tilemap; mirrors the shipped atg.json spawns (world px, tile centres). */
 const FALLBACK: Record<string, { x: number; y: number }> = {
-  spawn_blacky: { x: 411, y: 1083 },
-  poi_fountain: { x: 693, y: 1316 },
-  spawn_ginger: { x: 774, y: 1378 },
-  poi_fountain_exchange: { x: 526, y: 1914 },
-  spawn_pedigree: { x: 1152, y: 2046 },
-  poi_water_bowl_3: { x: 2340, y: 1692 },
-  poi_pyramid_steps: { x: 2463, y: 346 },
-  poi_feeding_station_3: { x: 2816, y: 145 },
-  spawn_fluffy: { x: 2818, y: 76 },
-  poi_safe_sleep_central: { x: 2462, y: 255 },
-  spawn_jayco: { x: 2575, y: 222 },
-  poi_starbucks_water: { x: 2373, y: 65 },
-  spawn_jayco_jr: { x: 2342, y: 216 },
-  poi_water_bowl_2: { x: 2018, y: 166 },
-  poi_library: { x: 1418, y: 552 },
-  poi_water_bowl_1: { x: 1484, y: 568 },
-  poi_feeding_station_1: { x: 1252, y: 542 },
-  spawn_tiger: { x: 1056, y: 668 },
-  poi_escalator: { x: 450, y: 1050 },
+  spawn_blacky: { x: 3536, y: 2480 },
+  poi_fountain: { x: 3600, y: 3536 },
+  spawn_ginger: { x: 3696, y: 3536 },
+  poi_fountain_exchange: { x: 3312, y: 3888 },
+  spawn_pedigree: { x: 6448, y: 4656 },
+  poi_water_bowl_3: { x: 6032, y: 3920 },
+  poi_pyramid_steps: { x: 7152, y: 3152 },
+  poi_feeding_station_3: { x: 7280, y: 2896 },
+  spawn_fluffy: { x: 7184, y: 2896 },
+  poi_safe_sleep_central: { x: 6384, y: 3056 },
+  spawn_jayco: { x: 7088, y: 3280 },
+  poi_starbucks_water: { x: 6480, y: 2928 },
+  spawn_jayco_jr: { x: 6512, y: 3184 },
+  poi_water_bowl_2: { x: 7184, y: 2480 },
+  poi_library: { x: 4560, y: 2224 },
+  poi_water_bowl_1: { x: 4656, y: 2384 },
+  poi_feeding_station_1: { x: 4304, y: 2480 },
+  spawn_tiger: { x: 4080, y: 2864 },
+  poi_escalator: { x: 3440, y: 2480 },
 };
 
 function px(obj: Phaser.Types.Tilemaps.TiledObject | null | undefined, fb: number): number {
@@ -72,6 +71,20 @@ function underpassEntry(find: (n: string) => Phaser.Types.Tilemaps.TiledObject |
     y: py(blacky, fb.y),
     pauseMs: ENTRY_BLACKY_PAUSE,
   };
+}
+
+/**
+ * A story evening can adopt an ambient care visit that is still on its rounds
+ * (on the real-scale park the dawn circuit outlasts the day) instead of
+ * deleting it mid-park and respawning it at the underpass. Not if it is
+ * already a story visit, being torn down, or walking out of the park.
+ */
+export function canAdoptAmbientCareGroup(state: {
+  camille: { visible: boolean; isExitingPark: boolean } | null;
+  encounterActive: boolean;
+  teardownPending: boolean;
+}): boolean {
+  return Boolean(state.camille?.visible && !state.camille.isExitingPark && !state.encounterActive && !state.teardownPending);
 }
 
 /**

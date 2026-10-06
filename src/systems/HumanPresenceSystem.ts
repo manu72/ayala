@@ -172,76 +172,47 @@ export class HumanPresenceSystem {
   /** Spawn the scripted ambient humans (joggers, feeders, dog walkers). */
   spawnAmbientHumans(): void {
     const scene = this.scene;
-    const configs: HumanConfig[] = [
+    // Paths are the map's named routes along the real walks (A*-routed below).
+    const route = (name: string): Array<{ x: number; y: number }> => scene.routePoints(name) ?? [];
+    const allConfigs: HumanConfig[] = [
       {
         type: "jogger",
         speed: 100,
         activePhases: ["dawn", "evening"],
-        path: [
-          { x: 600, y: 1100 },
-          { x: 1200, y: 700 },
-          { x: 1800, y: 600 },
-          { x: 2300, y: 500 },
-          { x: 2300, y: 1000 },
-          { x: 1600, y: 1200 },
-          { x: 1000, y: 1300 },
-        ],
+        path: route("route_jogger_1"),
       },
       {
         type: "jogger",
         speed: 90,
         activePhases: ["dawn", "evening"],
-        path: [
-          { x: 1200, y: 800 },
-          { x: 1700, y: 700 },
-          { x: 1900, y: 1000 },
-          { x: 1400, y: 1100 },
-        ],
+        path: route("route_jogger_2"),
       },
-      // Jogger 3 (male): clockwise perimeter loop around the park triangle.
-      // Dawn + evenings only. Steers softly around other NPCs/cats (he
-      // ignores cats socially but must not run through them).
+      // Jogger 3 (male): perimeter loop on the park-side sidewalks of Paseo,
+      // Makati Ave and Ayala Ave. Dawn + evenings only. Steers softly around
+      // other NPCs/cats (he ignores cats socially but must not run through them).
       {
         type: "jogger_male",
         speed: 120,
         activePhases: ["dawn", "evening"],
         avoidanceRadius: 30,
         loopPauseSec: 5,
-        path: [
-          { x: 16, y: 1392 }, // tile (0,43)  — SW spawn on diagonal sidewalk
-          { x: 1008, y: 432 }, // tile (31,13) — NE turn onto main N walkway
-          { x: 3024, y: 432 }, // tile (94,13) — E end, turn south
-          { x: 3024, y: 2480 }, // tile (94,77) — SE corner, turn west
-          { x: 16, y: 2480 }, // tile (0,77)  — west-edge exit along Ayala Ave
-        ],
+        path: route("route_jogger_male"),
       },
       ...this.buildFeederConfigs(),
       {
         type: "dogwalker",
         speed: 60,
         activePhases: ["dawn", "evening", "day"],
-        path: [
-          { x: 550, y: 1000 },
-          { x: 800, y: 900 },
-          { x: 1100, y: 1000 },
-          { x: 1100, y: 1200 },
-          { x: 800, y: 1300 },
-          { x: 550, y: 1200 },
-        ],
+        path: route("route_dogwalker_1"),
       },
       {
         type: "dogwalker",
         speed: 55,
         activePhases: ["dawn", "evening"],
-        path: [
-          { x: 1900, y: 600 },
-          { x: 2200, y: 700 },
-          { x: 2400, y: 1000 },
-          { x: 2100, y: 1300 },
-          { x: 1900, y: 1000 },
-        ],
+        path: route("route_dogwalker_2"),
       },
     ];
+    const configs = allConfigs.filter((config) => config.path.length > 1);
 
     const walkerDogKeys = Phaser.Utils.Array.Shuffle(["SmallDog", "BrownDog", "WhiteDog"]);
     let walkerDogIdx = 0;
@@ -285,18 +256,18 @@ export class HumanPresenceSystem {
     const px = (obj: Phaser.Types.Tilemaps.TiledObject | null, fallback: number): number => obj?.x ?? fallback;
     const py = (obj: Phaser.Types.Tilemaps.TiledObject | null, fallback: number): number => obj?.y ?? fallback;
 
-    const entryX = px(blacky, 411) - 50;
-    const entryY = py(blacky, 1083);
+    const entryX = px(blacky, 3536) - 50;
+    const entryY = py(blacky, 2480);
 
     const feederCircuit: Array<{ x: number; y: number }> = [
       { x: entryX, y: entryY },
-      { x: px(blacky, 411), y: py(blacky, 1083) },
-      { x: px(ginger, 774), y: py(ginger, 1378) },
-      { x: px(station1, 1000), y: py(station1, 900) },
-      { x: px(tiger, 1141), y: py(tiger, 632) },
-      { x: px(jayco, 1427), y: py(jayco, 484) },
-      { x: px(fluffy, 1500), y: py(fluffy, 900) },
-      { x: px(station2, 1600), y: py(station2, 1000) },
+      { x: px(blacky, 3536), y: py(blacky, 2480) },
+      { x: px(ginger, 3696), y: py(ginger, 3536) },
+      { x: px(station1, 4304), y: py(station1, 2480) },
+      { x: px(tiger, 4080), y: py(tiger, 2864) },
+      { x: px(jayco, 7088), y: py(jayco, 3280) },
+      { x: px(fluffy, 7184), y: py(fluffy, 2896) },
+      { x: px(station2, 7024), y: py(station2, 2480) },
       { x: entryX, y: entryY },
     ];
 

@@ -152,6 +152,19 @@ export class BootScene extends Phaser.Scene {
       frameHeight: 45,
     });
 
+    // Ambient crowd extras (AmbientCrowdSystem) — anonymous art only, under new keys.
+    // girl.png: 8 cols x 6 rows of 150x85 side-view frames (idle, walk, phone, phone-walk, run, sit/lie).
+    this.load.spritesheet("crowd_girl", "assets/sprites/girl.png", {
+      frameWidth: 150,
+      frameHeight: 85,
+    });
+    // The legacy dogwalker.png is really 14 cols x 3 rows of 25x45 fedora-man figures;
+    // the "dogwalker" key above keeps its old 50x45 slicing.
+    this.load.spritesheet("crowd_fedora", "assets/sprites/dogwalker.png", {
+      frameWidth: 25,
+      frameHeight: 45,
+    });
+
     // Female dog walker directional spritesheets (48x48 frames, single-row strips)
     const dwSheets: Array<[string, string]> = [
       ["dw_e", "female_dogwalker_east"],

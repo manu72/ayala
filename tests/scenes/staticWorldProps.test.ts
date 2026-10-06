@@ -54,8 +54,8 @@ describe("static world props", () => {
     expect(overheadDepth).toBe(10);
     expect(gameSceneSource).toContain("this.placeStarbucksLogo();");
     expect(placementSource).toContain('obj.name === "poi_starbucks_water"');
-    expect(placementSource).toContain("const logoX = (waterPoint?.x ?? 74 * TILE_SIZE) + TILE_SIZE * 2;");
-    expect(placementSource).toContain("const logoY = (waterPoint?.y ?? 2 * TILE_SIZE) - TILE_SIZE;");
+    expect(placementSource).toContain("const logoX = (waterPoint?.x ?? 202 * TILE_SIZE) + TILE_SIZE * 2;");
+    expect(placementSource).toContain("const logoY = (waterPoint?.y ?? 91 * TILE_SIZE) - TILE_SIZE;");
     expect(placementSource).toContain('this.add.image(logoX, logoY, "starbucks_logo")');
     expect(placementSource).toContain(".setOrigin(0.5, 0.5)");
     expect(placementSource).toContain(".setScale(0.3)");

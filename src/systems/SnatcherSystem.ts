@@ -10,6 +10,7 @@ import { markSnatchedThisNight } from "../utils/snatcherNightState";
 import { markGameOver } from "../utils/gameOverState";
 import {
   resolveSnatcherSpawnAction,
+  stagePatrolNear,
   type SnatcherSpawnAction,
   type SnatcherSpawnInput,
 } from "../utils/snatcherSpawnLogic";
@@ -194,7 +195,8 @@ export class SnatcherSystem {
    * locking the save into random-spawn mode forever.
    */
   private playFirstSnatcherSighting(): void {
-    this.spawnSnatcher(0, true);
+    // Staged near Mamma Cat: on the real-scale park a fixed route is usually out of sight.
+    this.spawnSnatcher(0, true, undefined, { x: this.scene.player.x, y: this.scene.player.y });
 
     const snatcher = this.snatchersList[0];
     if (!snatcher) return;
@@ -209,39 +211,43 @@ export class SnatcherSystem {
         }
       }
 
-      this.scene.time.delayedCall(1000, () => {
-        if (!snatcher.active) return;
-        const near =
-          Phaser.Math.Distance.Between(this.scene.player.x, this.scene.player.y, snatcher.x, snatcher.y) <=
-          GP.SNATCHER_WITNESS_DIST;
-        const los = this.scene.hasLineOfSight(this.scene.player.x, this.scene.player.y, snatcher.x, snatcher.y);
-        if (!near || !los) return;
-        const hud = this.scene.scene.get("HUDScene") as HUDScene | undefined;
-        hud?.pulseEdge(0x220000, 0.35, 3000);
-        hud?.showNarration("Something moves in the dark. The other cats run. You should too.");
-        this.scene.registry.set(StoryKeys.FIRST_SNATCHER_SEEN, true);
+      // Keep checking for a while: the snatcher walks in from just off-screen.
+      const witnessCheck = this.scene.time.addEvent({
+        delay: 1000,
+        repeat: GP.SNATCHER_FIRST_SIGHTING_WITNESS_WINDOW_S - 1,
+        callback: () => {
+          if (!snatcher.active) {
+            witnessCheck.remove();
+            return;
+          }
+          const near =
+            Phaser.Math.Distance.Between(this.scene.player.x, this.scene.player.y, snatcher.x, snatcher.y) <=
+            GP.SNATCHER_WITNESS_DIST;
+          const los = this.scene.hasLineOfSight(this.scene.player.x, this.scene.player.y, snatcher.x, snatcher.y);
+          if (!near || !los) return;
+          witnessCheck.remove();
+          const hud = this.scene.scene.get("HUDScene") as HUDScene | undefined;
+          hud?.pulseEdge(0x220000, 0.35, 3000);
+          hud?.showNarration("Something moves in the dark. The other cats run. You should too.");
+          this.scene.registry.set(StoryKeys.FIRST_SNATCHER_SEEN, true);
+        },
       });
     });
   }
 
-  private spawnSnatcher(index: number, silent = false, navigationGrid?: NavigationGrid): void {
-    const patrolPaths = [
-      [
-        { x: 600, y: 1100 },
-        { x: 1200, y: 800 },
-        { x: 1800, y: 600 },
-        { x: 2200, y: 700 },
-        { x: 1600, y: 1200 },
-      ],
-      [
-        { x: 2400, y: 1000 },
-        { x: 1900, y: 1000 },
-        { x: 1400, y: 1100 },
-        { x: 900, y: 1000 },
-        { x: 1200, y: 700 },
-      ],
-    ];
-    const path = patrolPaths[index % patrolPaths.length]!;
+  private spawnSnatcher(
+    index: number,
+    silent = false,
+    navigationGrid?: NavigationGrid,
+    stageNear?: { x: number; y: number },
+  ): void {
+    // Night patrols over the park's lawns (map routes).
+    const patrolPaths = ["route_snatcher_1", "route_snatcher_2", "route_snatcher_3", "route_snatcher_4"]
+      .map((name) => this.scene.routePoints(name))
+      .filter((p): p is Array<{ x: number; y: number }> => p !== null);
+    const staged = stageNear ? stagePatrolNear(patrolPaths, stageNear, GP.SNATCHER_FIRST_SIGHTING_SPAWN_MIN_DIST) : null;
+    const path = staged ?? patrolPaths[index % Math.max(1, patrolPaths.length)];
+    if (!path) return;
     const snatcherType = index % 2 === 0 ? "snatcher" : "snatcher2";
     const grid = navigationGrid ?? this.scene.createHumanNavigationGrid();
 

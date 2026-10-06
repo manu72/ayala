@@ -327,6 +327,11 @@ export class HumanNPC extends BaseNPC {
     return this.encounterPaused;
   }
 
+  /** Walking to a park exit (route finished or phase over). */
+  get isExitingPark(): boolean {
+    return this.exiting;
+  }
+
   /** See {@link stationaryGreet}. */
   get stationaryGreetCount(): number {
     return this.stationaryGreet;
@@ -375,10 +380,16 @@ export class HumanNPC extends BaseNPC {
       !shouldBeActive &&
       this.isActive &&
       !this.exiting &&
-      this.config.sustainAcrossInactivePhases
+      this.config.sustainAcrossInactivePhases &&
+      phase !== "night"
     ) {
-      // Stay on the care route across dawn/day/evening/night until the path
-      // completes and exitAfterRoute drives a perimeter walk-off.
+      // Stay on the care route across dawn/day/evening until the path
+      // completes and exitAfterRoute drives a perimeter walk-off. Night
+      // still sends them home: the real-scale park (0.5.0) makes a full
+      // circuit outlast an evening, and nobody should stroll among snatchers.
+      return;
+    } else if (!shouldBeActive && this.isActive && !this.exiting && this.encounterPaused) {
+      // Never walk off mid-beat: exit on the first phase check after the encounter releases.
       return;
     } else if (!shouldBeActive && this.isActive && !this.exiting) {
       if (this.loopPausing) {

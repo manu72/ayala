@@ -9,8 +9,10 @@ export const STATS_DECAY = {
   hunger: 0.05,
   thirst: 0.1,
   energyRest: 0.05,
-  energyMoving: 0.15,
-  energyRunning: 0.3,
+  // Halved in 0.5.0 when the map grew to 2 m/tile (walks ~2x longer), so a
+  // park crossing costs about the same energy as before (was 0.15 / 0.3).
+  energyMoving: 0.08,
+  energyRunning: 0.16,
 } as const;
 
 /** Multiplier on decay during heat when not in shade. */

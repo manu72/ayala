@@ -125,8 +125,8 @@ export class FoodSourceManager {
     });
   }
 
-  /** Scatter bug sources on non-colliding tiles. */
-  addBugSpawns(map: Phaser.Tilemaps.Tilemap, count: number): void {
+  /** Scatter bug sources on non-colliding tiles (and, when given, only where `isWalkable` allows — e.g. inside the park). */
+  addBugSpawns(map: Phaser.Tilemaps.Tilemap, count: number, isWalkable?: (worldX: number, worldY: number) => boolean): void {
     const mapW = map.widthInPixels;
     const mapH = map.heightInPixels;
     const objectsLayer = map.getLayer('objects')?.tilemapLayer ?? null;
@@ -140,6 +140,7 @@ export class FoodSourceManager {
         const tile = objectsLayer.getTileAtWorldXY(x, y);
         if (tile?.collides) continue;
       }
+      if (isWalkable && !isWalkable(x, y)) continue;
       this.addSource("bugs", x, y);
       placed++;
     }

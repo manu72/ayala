@@ -11,10 +11,15 @@ export const GP = {
   CAT_PERSON_GREET_DIST: 64,
   CAT_PERSON_PLAYER_GREET_DIST: 50,
   NARRATION_WITNESS_DIST: 150,
-  /** Horizontal band centre for Makati Ave dumping events (world px). */
-  MAKATI_AVE_CENTER_X: 2800,
+  /** Dumping events need Mamma Cat within this distance of the Makati Ave carriageway (map `traffic_makati_southbound`). */
   MAKATI_AVE_WITNESS_DIST: 300,
   SNATCHER_WITNESS_DIST: 200,
+  /** The danger theme plays while a visible snatcher is within this range of Mamma Cat (world px). */
+  SNATCHER_DANGER_MUSIC_DIST: 640,
+  /** The scripted first sighting starts this far from Mamma Cat (just off-screen) so it walks into view. */
+  SNATCHER_FIRST_SIGHTING_SPAWN_MIN_DIST: 260,
+  /** Seconds the first sighting keeps checking whether Mamma Cat can see the snatcher. */
+  SNATCHER_FIRST_SIGHTING_WITNESS_WINDOW_S: 15,
   /** NPC cats flee snatcher when within this range. */
   NPC_FLEE_SNATCHER_DIST: 160,
   CAMILLE_ENCOUNTER_DIST: 64,
@@ -105,13 +110,22 @@ export const CHAPTER_REARM_MOVE_PX = 200;
  * Maximum distance (world pixels) from `poi_pyramid_steps` at which
  * Mamma Cat is considered "near the steps" for chapter 4 territory
  * negotiation. Slightly larger than the {@link isInTerritory} radius
- * (120 px) used post-claim so the trigger is forgiving — the player
+ * ({@link TERRITORY_RADIUS_PX}) used post-claim so the trigger is forgiving — the player
  * just has to walk up to Jayco at the steps, not stand on a single
  * tile. Pre-v0.3.8 territory could be claimed from anywhere as soon
  * as global trust crossed 80; that bypassed the entire "earn your
  * place at the steps" beat.
  */
-export const TERRITORY_NEGOTIATION_NEAR_STEPS_PX = 150;
+export const TERRITORY_NEGOTIATION_NEAR_STEPS_PX = 300;
+
+/**
+ * Radius (world px) of Mamma Cat's claimed territory around
+ * `poi_pyramid_steps`, and of the comfort zone around each shelter POI.
+ * Landmark footprints, so they scale with the map: 0.5.0 doubled the map
+ * resolution to 2 m per tile, so these doubled from 120 / 80 px.
+ */
+export const TERRITORY_RADIUS_PX = 240;
+export const SHELTER_RADIUS_PX = 160;
 
 /**
  * Per-cat trust required of Jayco before he will offer territory at the
@@ -165,4 +179,4 @@ export const NAMED_AND_MAMMA_COUNT = 9;
  * `GameScene.spawnColonyCats`. Cap is a perf / readability constraint; the
  * narrative total lives independently in `COLONY_COUNT`.
  */
-export const VISIBLE_BACKGROUND_CAP = 12;
+export const VISIBLE_BACKGROUND_CAP = 24;
