@@ -41,6 +41,7 @@ describe("PixelLab pets", () => {
   it("always cast Cat cat and Mittens in the opening colony roster", () => {
     expect(backgroundCatLook(0)).toMatchObject({ spriteKey: PETS.catcat.texture, layout: "pixellab" });
     expect(backgroundCatLook(1)).toMatchObject({ spriteKey: PETS.mittens.texture, layout: "pixellab" });
-    expect(backgroundCatLook(5, () => 0.9)).toEqual({ spriteKey: "fluffy" }); // later cats: mostly the legacy sheets
+    expect(backgroundCatLook(4)).toEqual({ spriteKey: "fluffy" }); // later cats: the legacy sheets, fixed per index
+    expect(backgroundCatLook(9)).toEqual(backgroundCatLook(4));
   });
 });

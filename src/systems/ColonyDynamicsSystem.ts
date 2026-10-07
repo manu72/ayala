@@ -9,7 +9,14 @@ import {
   NAMED_AND_MAMMA_COUNT,
   VISIBLE_BACKGROUND_CAP,
 } from "../config/gameplayConstants";
-import { backgroundCatLook, computeBackgroundSpawnCount, decrementColonyTotal } from "../utils/colonySpawn";
+import {
+  backgroundCatLook,
+  backgroundIndices,
+  colonyCatName,
+  computeBackgroundSpawnCount,
+  decrementColonyTotal,
+  readIndexList,
+} from "../utils/colonySpawn";
 import { placesOfType } from "../utils/mapPlaces";
 import { inCarPath } from "../utils/kerbsideDropoff";
 
@@ -42,6 +49,11 @@ export class ColonyDynamicsSystem {
   private dumpedComfortWindowUntil: Record<number, number> = {};
   /** Per-frame checks of the story cars yielding to Mamma Cat, removed on shutdown. */
   private readonly yieldChecks = new Set<() => void>();
+  /** Each background cat's index: it fixes the cat's look and name across sessions. */
+  private readonly backgroundIndex = new WeakMap<NPCCat, number>();
+  private namedIndices = new Set<number>();
+  private lostIndices = new Set<number>();
+  private nextIndex = 0;
 
   constructor(scene: GameScene) {
     this.scene = scene;
@@ -92,9 +104,31 @@ export class ColonyDynamicsSystem {
    * total, clamped at the named+Mamma floor, and keeps field + registry
    * in lockstep.
    */
-  onCatRemoved(): void {
+  onCatRemoved(cat?: NPCCat): void {
     this.colonyCountValue = decrementColonyTotal(this.colonyCountValue, NAMED_AND_MAMMA_COUNT);
     this.scene.registry.set(StoryKeys.COLONY_COUNT, this.colonyCountValue);
+    const index = cat ? this.backgroundIndex.get(cat) : undefined;
+    if (index !== undefined) {
+      this.lostIndices.add(index);
+      this.scene.registry.set(StoryKeys.COLONY_LOST, [...this.lostIndices]);
+    }
+  }
+
+  /**
+   * Mamma Cat greets a background cat: she learns its name (kept in the save,
+   * shown over it from then on). Returns the name and whether it is new to
+   * her, or null for a cat that isn't one of the background roster.
+   */
+  learnName(cat: NPCCat): { name: string; isNew: boolean } | null {
+    const index = this.backgroundIndex.get(cat);
+    if (index === undefined) return null;
+    const isNew = !this.namedIndices.has(index);
+    if (isNew) {
+      this.namedIndices.add(index);
+      this.scene.registry.set(StoryKeys.COLONY_NAMED, [...this.namedIndices]);
+      this.scene.npcs.find((e) => e.cat === cat)?.indicator.reveal();
+    }
+    return { name: colonyCatName(index), isNew };
   }
 
   /**
@@ -123,28 +157,44 @@ export class ColonyDynamicsSystem {
     }));
     if (zones.length === 0) return;
 
+    this.namedIndices = new Set(readIndexList(this.scene.registry.get(StoryKeys.COLONY_NAMED)));
+    this.lostIndices = new Set(readIndexList(this.scene.registry.get(StoryKeys.COLONY_LOST)));
     const count = computeBackgroundSpawnCount(this.colonyCountValue, NAMED_AND_MAMMA_COUNT, VISIBLE_BACKGROUND_CAP);
-    for (let i = 0; i < count; i++) {
+    const indices = backgroundIndices(count, this.lostIndices);
+    this.nextIndex = Math.max(-1, ...indices, ...this.lostIndices) + 1;
+    indices.forEach((index, i) => {
       const zone = zones[i % zones.length]!;
       const { x, y } = this.pickReachablePointInZone(zone);
       const disp = dispositions[Math.floor(Math.random() * dispositions.length)]!;
       const homeRadius = 80 + Math.random() * 80;
+      this.addColonyCat(index, x, y, { cx: x, cy: y, radius: homeRadius }, disp);
+    });
+  }
 
-      const cat = new NPCCat(this.scene, {
-        name: `Colony Cat ${this.scene.npcs.length + 1}`,
-        ...backgroundCatLook(i),
-        x,
-        y,
-        homeZone: { cx: x, cy: y, radius: homeRadius },
-        disposition: disp,
-      });
-      const ground = this.scene.groundLayer;
-      const objects = this.scene.objectsLayer;
-      if (ground) this.scene.physics.add.collider(cat, ground);
-      if (objects) this.scene.physics.add.collider(cat, objects);
-      const indicator = new ThreatIndicator(this.scene, cat, "???", disp, false);
-      this.scene.npcs.push({ cat, indicator });
-    }
+  /** Background cat `index` (fixed look and name), with its colliders and name tag. */
+  private addColonyCat(
+    index: number,
+    x: number,
+    y: number,
+    homeZone: { cx: number; cy: number; radius: number },
+    disposition: "neutral" | "wary" | "friendly" | "territorial",
+  ): NPCCat {
+    const cat = new NPCCat(this.scene, {
+      name: `Colony Cat ${index + 1}`,
+      ...backgroundCatLook(index),
+      x,
+      y,
+      homeZone,
+      disposition,
+    });
+    this.backgroundIndex.set(cat, index);
+    const ground = this.scene.groundLayer;
+    const objects = this.scene.objectsLayer;
+    if (ground) this.scene.physics.add.collider(cat, ground);
+    if (objects) this.scene.physics.add.collider(cat, objects);
+    const indicator = new ThreatIndicator(this.scene, cat, colonyCatName(index), disposition, this.namedIndices.has(index));
+    this.scene.npcs.push({ cat, indicator });
+    return cat;
   }
 
   /**
@@ -380,21 +430,8 @@ export class ColonyDynamicsSystem {
     const x = atX ?? fallbackZone?.x ?? this.scene.player.x;
     const y = atY ?? fallbackZone?.y ?? this.scene.player.y;
 
-    const cat = new NPCCat(this.scene, {
-      name: `Colony Cat ${this.scene.npcs.length + 1}`,
-      ...backgroundCatLook(),
-      x,
-      y,
-      homeZone: { cx: x, cy: y, radius: 100 },
-      disposition: "wary",
-    });
-    const ground = this.scene.groundLayer;
-    const objects = this.scene.objectsLayer;
-    if (ground) this.scene.physics.add.collider(cat, ground);
-    if (objects) this.scene.physics.add.collider(cat, objects);
-    const indicator = new ThreatIndicator(this.scene, cat, "???", "wary", false);
-    this.scene.npcs.push({ cat, indicator });
-    return cat;
+    // a newcomer joins the roster: the next index, so it keeps its look and name next session
+    return this.addColonyCat(this.nextIndex++, x, y, { cx: x, cy: y, radius: 100 }, "wary");
   }
 
 }

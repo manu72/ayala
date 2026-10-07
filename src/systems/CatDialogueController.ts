@@ -10,7 +10,7 @@ import type {
 import type { EmoteType } from "./EmoteSystem";
 import { calculateRelationshipStage } from "../services/DialogueRelationship";
 import { buildDialogueRecencyContext } from "../utils/dialogueRecency";
-import { getRandomColonyLine } from "../data/cat-dialogue";
+import { colonyIntroLine, getRandomColonyLine } from "../data/cat-dialogue";
 import { FallbackDialogueService } from "../services/FallbackDialogueService";
 import {
   storeConversation,
@@ -234,7 +234,9 @@ export class CatDialogueController {
     // with a dumped cat still awards its comfort trust bump.
     if (name.startsWith("Colony Cat")) {
       scene.colony.tryCreditDumpedPetComfort(cat);
-      scene.dialogue.show([getRandomColonyLine()]);
+      // Greeting a colony cat teaches Mamma Cat its name, for good.
+      const learned = scene.colony.learnName(cat);
+      scene.dialogue.show([learned?.isNew ? colonyIntroLine(learned.name) : getRandomColonyLine(learned?.name)]);
       // Arm the anti-chain guard. Phaser delivers key events before
       // `update()`, so without this the same Space press that closes this
       // scripted line can re-enter `tryInteract` on the next frame and

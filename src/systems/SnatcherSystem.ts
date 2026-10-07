@@ -327,7 +327,7 @@ export class SnatcherSystem {
     const prevCount = typeof prev === "number" && Number.isFinite(prev) && prev >= 0 ? Math.floor(prev) : 0;
     this.scene.registry.set(StoryKeys.CATS_SNATCHED, prevCount + 1);
 
-    this.scene.colony.onCatRemoved();
+    this.scene.colony.onCatRemoved(cat);
 
     if (near && los) {
       const hud = this.scene.scene.get("HUDScene") as HUDScene | undefined;

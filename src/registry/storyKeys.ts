@@ -44,6 +44,10 @@ export const StoryKeys = {
   // `NAMED_AND_MAMMA_COUNT`. Drives the `JournalScene` colony count and the
   // derived visible background spawn in `GameScene.spawnColonyCats`.
   COLONY_COUNT: "COLONY_COUNT",
+  // Background colony cats (by index, see utils/colonySpawn) whose names Mamma
+  // Cat has learned by greeting them, and those lost to snatchers (never respawned).
+  COLONY_NAMED: "COLONY_NAMED",
+  COLONY_LOST: "COLONY_LOST",
 } as const;
 
 export type StoryKey = (typeof StoryKeys)[keyof typeof StoryKeys];

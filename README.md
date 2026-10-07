@@ -38,6 +38,7 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 - Mamma Cat player character with walk, run, crouch, and rest animations
 - **Survival system:** hunger, thirst, and energy stats with environmental modifiers and collapse mechanics
 - **Real water:** the PSE pond, the McMicking water-curtain pool and the Starbucks waterfall are drinkable all along their edges and never run out (Space beside the water). The colony cats, named story cats included, walk there now and then (a few times a day, at most four at once), drink a while (💧) and walk home, as the real ATG cats do (`CatWaterTrips`, `src/utils/waterEdge.ts`)
+- **Colony cats have names:** greet one (Space beside it) and Mamma Cat learns its name, shown over it from then on. Names and looks stay with each cat across saves, and a cat lost to a snatcher doesn't come back
 - **Food and water sources** scattered across the map with cooldowns and time-of-day availability
 - **Day/night cycle** (dawn, day, evening, night) with smooth colour transitions and a game clock
 - **8 named NPC cats** (Blacky, Tiger, Jayco, Jayco Jr, Fluffy, Pedigree, Ginger, Ginger B) with unique dispositions and multi-stage dialogue

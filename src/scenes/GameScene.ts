@@ -536,6 +536,8 @@ export class GameScene extends Phaser.Scene {
       StoryKeys.FIRST_SNATCHER_SEEN,
       StoryKeys.COLLAPSE_COUNT,
       StoryKeys.COLONY_COUNT,
+      StoryKeys.COLONY_NAMED,
+      StoryKeys.COLONY_LOST,
     ]) {
       this.registry.remove(key);
     }
@@ -2102,7 +2104,8 @@ export class GameScene extends Phaser.Scene {
       // Logic lives in {@link CatDialogueController.refreshLastPartner}.
       this.catDialogue.refreshLastPartner(cat, dist, now);
 
-      if (!indicator.known) {
+      // Colony cats' names are learned by greeting them (ColonyDynamicsSystem.learnName), not by passing by.
+      if (!indicator.known && !cat.npcName.startsWith("Colony Cat")) {
         if (dist < LEARN_NAME_DISTANCE) {
           indicator.reveal();
           this.addKnownCat(cat.npcName);
