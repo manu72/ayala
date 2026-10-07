@@ -25,6 +25,12 @@ export { resolveSnatcherSpawnAction, type SnatcherSpawnAction, type SnatcherSpaw
 
 const PLAYER_CAPTURE_RANGE = 16;
 const COLONY_CAT_CAPTURE_RANGE = 16;
+/** Patrol walking speed, px/s. */
+const SNATCHER_SPEED = 20;
+/** The first sighting's witness checks start this long after the snatcher appears. */
+const FIRST_SIGHTING_DELAY_MS = 2000;
+/** Stage it to come into view within this share of its walk before the last check (glances and routing detours slow it). */
+const FIRST_SIGHTING_REACH_SHARE = 0.6;
 
 /**
  * Owns nightly snatcher spawn/detect/capture and the colony-cat grab
@@ -201,7 +207,7 @@ export class SnatcherSystem {
     const snatcher = this.snatchersList[0];
     if (!snatcher) return;
 
-    this.scene.time.delayedCall(2000, () => {
+    this.scene.time.delayedCall(FIRST_SIGHTING_DELAY_MS, () => {
       for (const { cat } of this.scene.npcs) {
         if (cat.state === "sleeping") continue;
         const dist = Phaser.Math.Distance.Between(snatcher.x, snatcher.y, cat.x, cat.y);
@@ -245,7 +251,15 @@ export class SnatcherSystem {
     const patrolPaths = ["route_snatcher_1", "route_snatcher_2", "route_snatcher_3", "route_snatcher_4"]
       .map((name) => this.scene.routePoints(name))
       .filter((p): p is Array<{ x: number; y: number }> => p !== null);
-    const staged = stageNear ? stagePatrolNear(patrolPaths, stageNear, GP.SNATCHER_FIRST_SIGHTING_SPAWN_MIN_DIST) : null;
+    // Staged: start off-screen on the stretch of patrol that walks into her view before the witness window closes.
+    const witnessWalkS = FIRST_SIGHTING_DELAY_MS / 1000 + GP.SNATCHER_FIRST_SIGHTING_WITNESS_WINDOW_S;
+    const staged = stageNear
+      ? stagePatrolNear(patrolPaths, stageNear, GP.SNATCHER_FIRST_SIGHTING_SPAWN_MIN_DIST, {
+          witnessDistPx: GP.SNATCHER_WITNESS_DIST,
+          reachPx: SNATCHER_SPEED * witnessWalkS * FIRST_SIGHTING_REACH_SHARE,
+          canSee: (p) => this.scene.hasLineOfSight(stageNear.x, stageNear.y, p.x, p.y),
+        })
+      : null;
     const path = staged ?? patrolPaths[index % Math.max(1, patrolPaths.length)];
     if (!path) return;
     const snatcherType = index % 2 === 0 ? "snatcher" : "snatcher2";
@@ -253,7 +267,7 @@ export class SnatcherSystem {
 
     const config: HumanConfig = {
       type: snatcherType,
-      speed: 20,
+      speed: SNATCHER_SPEED,
       activePhases: ["night"],
       path,
     };
