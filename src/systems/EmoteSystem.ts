@@ -41,8 +41,8 @@ export class EmoteSystem {
     offsetY = 0,
   ): void {
     const now = scene.time.now;
-    const lastShown = this.cooldowns.get(target) ?? 0;
-    if (now - lastShown < COOLDOWN_MS) return;
+    const lastShown = this.cooldowns.get(target);
+    if (lastShown !== undefined && now - lastShown < COOLDOWN_MS) return;
     this.cooldowns.set(target, now);
 
     const glyph = EMOTE_GLYPHS[emote];

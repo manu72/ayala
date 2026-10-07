@@ -13,10 +13,12 @@ const COLS = 4;
 /**
  * A dog that follows its dog-walker owner on a short leash, weaving
  * slightly. Barks and lunges when Mamma Cat gets within range,
- * startling nearby cats. Accepts any sprite key so different dog
- * textures can be assigned.
+ * startling nearby cats — unless it's `friendly` (Ella), which never barks
+ * and greets its friends instead (see PetFriends). Accepts any sprite key
+ * so different dog textures can be assigned.
  */
 export class DogNPC extends Phaser.GameObjects.Sprite {
+  readonly friendly: boolean;
   private owner: HumanNPC;
   private lastBarkTime = -Infinity;
   private isLunging = false;
@@ -25,11 +27,12 @@ export class DogNPC extends Phaser.GameObjects.Sprite {
   private barkTextTween: Phaser.Tweens.Tween | null = null;
   private spriteKey: string;
 
-  constructor(scene: Phaser.Scene, owner: HumanNPC, spriteKey: string) {
+  constructor(scene: Phaser.Scene, owner: HumanNPC, spriteKey: string, opts: { friendly?: boolean } = {}) {
     const startX = owner.x;
     const startY = owner.y + 24;
     super(scene, startX, startY, spriteKey);
     this.owner = owner;
+    this.friendly = opts.friendly ?? false;
     this.spriteKey = spriteKey;
 
     scene.add.existing(this);
@@ -85,7 +88,7 @@ export class DogNPC extends Phaser.GameObjects.Sprite {
 
     // Check for Mamma Cat proximity
     const distToPlayer = Phaser.Math.Distance.Between(this.x, this.y, player.x, player.y);
-    if (distToPlayer < BARK_RANGE && time - this.lastBarkTime > BARK_COOLDOWN_MS) {
+    if (!this.friendly && distToPlayer < BARK_RANGE && time - this.lastBarkTime > BARK_COOLDOWN_MS) {
       this.bark(time, player, npcs, emotes, scene);
     }
   }
@@ -110,12 +113,6 @@ export class DogNPC extends Phaser.GameObjects.Sprite {
     scene: Phaser.Scene,
   ): void {
     this.lastBarkTime = time;
-    if (this.lungeTween) {
-      this.lungeTween.stop();
-      this.lungeTween = null;
-    }
-    this.isLunging = true;
-
     this.cleanupBarkText();
 
     this.barkText = scene.add
@@ -141,22 +138,7 @@ export class DogNPC extends Phaser.GameObjects.Sprite {
     });
 
     emotes.show(scene, player, "alert");
-
-    // Lunge toward player while leash-follow is paused
-    const lungeX = this.x + (player.x - this.x) * 0.2;
-    const lungeY = this.y + (player.y - this.y) * 0.2;
-
-    this.lungeTween = scene.tweens.add({
-      targets: this,
-      x: lungeX,
-      y: lungeY,
-      duration: 200,
-      yoyo: true,
-      onComplete: () => {
-        this.isLunging = false;
-        this.lungeTween = null;
-      },
-    });
+    this.lunge(player, scene);
 
     for (const { cat } of npcs) {
       const catDist = Phaser.Math.Distance.Between(this.x, this.y, cat.x, cat.y);
@@ -165,6 +147,29 @@ export class DogNPC extends Phaser.GameObjects.Sprite {
         emotes.show(scene, cat, "alert");
       }
     }
+  }
+
+  /** A friendly dog's hello: a heart and a tug on the leash toward `friend`. */
+  greet(friend: { x: number; y: number }, emotes: EmoteSystem, scene: Phaser.Scene): void {
+    emotes.show(scene, this, "heart");
+    if (!this.isLunging) this.lunge(friend, scene);
+  }
+
+  /** Lunge a fifth of the way toward `target` and back, leash-follow paused meanwhile. */
+  private lunge(target: { x: number; y: number }, scene: Phaser.Scene): void {
+    this.lungeTween?.stop();
+    this.isLunging = true;
+    this.lungeTween = scene.tweens.add({
+      targets: this,
+      x: this.x + (target.x - this.x) * 0.2,
+      y: this.y + (target.y - this.y) * 0.2,
+      duration: 200,
+      yoyo: true,
+      onComplete: () => {
+        this.isLunging = false;
+        this.lungeTween = null;
+      },
+    });
   }
 
   private cleanupBarkText(): void {
