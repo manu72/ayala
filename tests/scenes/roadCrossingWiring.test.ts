@@ -9,6 +9,18 @@ import colonySource from "../../src/systems/ColonyDynamicsSystem.ts?raw";
  */
 const sources = import.meta.glob("../../src/**/*.ts", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
 
+/** Arguments of a call, counting only top-level commas (not those inside nested calls, arrays or objects; a trailing comma adds none). */
+const argCount = (args: string): number => {
+  let depth = 0;
+  let count = 1;
+  for (const ch of args.replace(/,\s*$/, "")) {
+    if ("([{".includes(ch)) depth++;
+    else if (")]}".includes(ch)) depth--;
+    else if (ch === "," && depth === 0) count++;
+  }
+  return count;
+};
+
 describe("road crossing wiring", () => {
   it("lets only the player's ground collider skip road tiles", () => {
     const groundColliders = Object.entries(sources).flatMap(([file, src]) =>
@@ -23,7 +35,8 @@ describe("road crossing wiring", () => {
     // guard, NPC cats, humans, snatchers, Camille's group: plain two-argument colliders
     const others = groundColliders.filter((c) => !c.args.includes("isRoadTile"));
     expect(others.length).toBeGreaterThanOrEqual(6);
-    for (const c of others) expect(c.args.split(",").length, `${c.file}: ${c.args}`).toBe(2);
+    for (const c of others) expect(argCount(c.args), `${c.file}: ${c.args}`).toBe(2);
+    expect([argCount("cat, layerFor(a, b)"), argCount("cat, ground,"), argCount("a, b, (_a, t) => !isRoadTile(t)")]).toEqual([2, 2, 3]);
   });
 
   it("restores the buildings' road-side faces right after the ground layer's collision is set", () => {

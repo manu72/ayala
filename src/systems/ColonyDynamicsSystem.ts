@@ -40,6 +40,8 @@ export class ColonyDynamicsSystem {
   private dumpingInProgressFlag = false;
   private dumpedCatEventIds = new WeakMap<NPCCat, number>();
   private dumpedComfortWindowUntil: Record<number, number> = {};
+  /** Per-frame checks of the story cars yielding to Mamma Cat, removed on shutdown. */
+  private readonly yieldChecks = new Set<() => void>();
 
   constructor(scene: GameScene) {
     this.scene = scene;
@@ -202,6 +204,8 @@ export class ColonyDynamicsSystem {
     this.dumpingInProgressFlag = false;
     this.dumpedComfortWindowUntil = {};
     this.dumpedCatEventIds = new WeakMap();
+    for (const check of this.yieldChecks) this.scene.events.off("update", check);
+    this.yieldChecks.clear();
   }
 
   // ──────────── Internal — dumping sequence ────────────
@@ -276,6 +280,7 @@ export class ColonyDynamicsSystem {
     const check = (): void => {
       if (!car.active || tween.isFinished() || tween.isDestroyed()) {
         this.scene.events.off("update", check);
+        this.yieldChecks.delete(check);
         return;
       }
       const { x, y } = this.scene.player;
@@ -295,6 +300,7 @@ export class ColonyDynamicsSystem {
       }
     };
     this.scene.events.on("update", check);
+    this.yieldChecks.add(check);
   }
 
   /**

@@ -55,7 +55,8 @@ interface Trip {
  * routes come from the human nav grid.
  */
 export class CatWaterTrips<C extends TripCat> {
-  private readonly due = new Map<C, number>();
+  /** Weak, so cats removed from the park (snatched) don't linger here. */
+  private readonly due = new WeakMap<C, number>();
   private readonly trips = new Map<C, Trip>();
   private readonly rng: () => number;
 
