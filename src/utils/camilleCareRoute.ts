@@ -29,7 +29,7 @@ const FALLBACK: Record<string, { x: number; y: number }> = {
   spawn_fluffy: { x: 7184, y: 2896 },
   poi_safe_sleep_central: { x: 6384, y: 3056 },
   spawn_jayco: { x: 7088, y: 3280 },
-  poi_starbucks_water: { x: 6480, y: 2928 },
+  poi_starbucks_water: { x: 6512, y: 2928 },
   spawn_jayco_jr: { x: 6512, y: 3184 },
   poi_water_bowl_2: { x: 7184, y: 2480 },
   poi_library: { x: 4560, y: 2224 },

@@ -510,8 +510,13 @@ export function monumentDecal(rect, style) {
   }
 }
 
-/** McMicking water curtain: a stone wall with a sheet of falling water on its pool side. */
-export function curtainDecal(rect) {
+/** A water curtain (McMicking, the Starbucks waterfall): a stone wall with a sheet of falling water on its pool side; on the north wall unless westWall. */
+export function curtainDecal(rect, westWall = false) {
+  if (westWall) {
+    // the same curtain on its side: wall to the west, the sheet falling east
+    const d = curtainDecal([rect[1], rect[0], rect[3], rect[2]])
+    return { bbox: [d.bbox[1], d.bbox[0], d.bbox[3], d.bbox[2]], paint: (wx, wy, c) => d.paint(wy, wx, c) }
+  }
   const [x0, y0, x1, y1] = rect
   return {
     bbox: [x0, y0, x1, y1 + 6],

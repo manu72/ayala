@@ -143,7 +143,7 @@ describe("atg.json structure", () => {
       return Math.hypot(end.x - to.x, end.y - to.y) <= 3 * TILE && hasLineOfSightTiles(end.x, end.y, to.x, to.y, TILE, blockedAt);
     };
     // the PSE pond, the McMicking water-curtain pool and the Starbucks waterfall: cats pick among their 3 nearest spots
-    for (const [name, cell] of [["PSE pond", [100, 125]], ["McMicking pool", [111, 107]], ["Starbucks waterfall", [202, 88]]] as const) {
+    for (const [name, cell] of [["PSE pond", [100, 125]], ["McMicking pool", [111, 107]], ["Starbucks waterfall", [201, 91]]] as const) {
       const near = spots.filter((s) => Math.hypot(s.x - (cell[0] * TILE + 16), s.y - (cell[1] * TILE + 16)) < 8 * TILE);
       expect(near.filter(canWalkTo).length, name).toBeGreaterThanOrEqual(3);
     }
@@ -239,6 +239,36 @@ describe("park geography", () => {
     expect(tilesAway(starbucks, ground, [T.STEPS])).toBeLessThanOrEqual(8);
     expect(tilesAway(spawn("poi_starbucks_water"), ground, [T.WATER, T.WATER_EDGE])).toBeLessThanOrEqual(2);
     expect(tilesAway(spawn("poi_shops_supermarket"), ground, [T.GLASS_FACADE])).toBeLessThanOrEqual(3);
+  });
+
+  it("puts the Starbucks waterfall on the courtyard's west wall, leaving the gap west of Starbucks open to the north lawn", () => {
+    const [bx, by] = cellOf(spawn("poi_starbucks_water"));
+    const water: number[] = [];
+    for (let y = by - 6; y <= by + 6; y++) for (let x = bx - 6; x <= bx + 6; x++) if (ground[cellIndex(x, y)] === gid(T.WATER)) water.push(x);
+    expect(water.length).toBeGreaterThan(0);
+    expect(water.every((x) => x < bx)).toBe(true);
+    // a few steps from the courtyard up through the gap to the lawn north of Starbucks (54 when the waterfall filled it)
+    const steps = new Map([[cellIndex(bx, by), 0]]);
+    const queue = [cellIndex(bx, by)];
+    for (let head = 0; head < queue.length; head++) {
+      const i = queue[head]!;
+      const x = i % W;
+      const y = (i - x) / W;
+      if ((steps.get(i) ?? 0) >= 12) continue;
+      for (const [nx, ny] of [[x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]] as const) {
+        if (blocked(nx, ny) || steps.has(cellIndex(nx, ny))) continue;
+        steps.set(cellIndex(nx, ny), (steps.get(i) ?? 0) + 1);
+        queue.push(cellIndex(nx, ny));
+      }
+    }
+    const [sx, sy] = cellOf(spawn("poi_starbucks"));
+    let lawnNorth = false;
+    for (const i of steps.keys()) {
+      const x = i % W;
+      const y = (i - x) / W;
+      if (y < sy - 4 && Math.abs(x - sx) <= 6 && [T.GRASS_LIGHT, T.GRASS_MED, T.GRASS_DARK, T.GRASS_FLOWER].map(gid).includes(ground[i] ?? 0)) lawnNorth = true;
+    }
+    expect(lawnNorth).toBe(true);
   });
 
   it("puts the pyramid steps up to the towers beside the glass, with a guard in Jayco's sight", () => {

@@ -153,8 +153,12 @@ const PLACES = {
   sunkenPlaza: [[356, 2], [372, -6], [400, 4], [398, 22], [362, 22]],
   mallStairs: { from: [352, -2], to: [372, 14], half: 3 },
   starbucks: [[372, 22], [388, 22], [388, 27], [372, 27]],
-  starbucksWaterfall: [[362, 20], [369, 20], [369, 25], [362, 25]],
-  mallFacade: [[[360, 22], [400, 22]], [[400, 22], [400, 4]]],
+  // on the courtyard's west wall, falling east into the plaza
+  starbucksWaterfall: [[360, 12], [366, 12], [366, 20], [360, 20]],
+  mallFacade: [[[370, 22], [400, 22]], [[400, 22], [400, 4]]],
+  // the paved gap west of Starbucks, from the courtyard up to the north lawn (plaza, not
+  // lawn: new lawn cells would reshuffle the seeded scatter, see WORKING_MEMORY.md)
+  mallGap: [[360, 20], [370, 20], [370, 24], [360, 24]],
   // Broad steps up to the towers, just inside the Makati Ave / Santo Tomas entrance
   neSteps: { from: [402, -8], to: [410, 16], half: 4 },
   // Triangular cat shelter at the park side of Tower Two, by the Mandarin gap
@@ -256,6 +260,7 @@ paintLine([PLACES.neSteps.from, PLACES.neSteps.to], PLACES.neSteps.half, (i) => 
 paintPoly(PLACES.playground, (i) => parkPaint(i, K.PLAYGROUND))
 paintPoly(PLACES.catShelter, (i) => parkPaint(i, K.PLAZA))
 for (const seg of PLACES.mallFacade) paintLine(seg, 1, (i) => parkPaint(i, K.GLASS))
+paintPoly(PLACES.mallGap, (i) => parkPaint(i, K.PLAZA))
 paintPoly(PLACES.starbucks, (i) => parkPaint(i, K.STARBUCKS))
 
 // OSM steps (surface ends of underpasses) and the Sedeño escalator
@@ -302,10 +307,9 @@ for (let i = 0; i < N; i++) {
   }
 }
 
-// The Starbucks waterfall basin: its back half (inside the mall's glass line) is deep
-// water, so the basin has a real pool to draw and the facade has no gap; cats drink
-// from the walkable plaza-side rim.
-paintPoly(PLACES.starbucksWaterfall, (i, p) => { if (kind[i] === K.WATER && p[1] > PLACES.mallFacade[0][0][1]) ground[i] = t(T.WATER) })
+// The Starbucks waterfall basin: its back (west) 4 m against the courtyard wall is deep
+// water, so the basin has a real pool to draw; cats drink from the walkable plaza-side rim.
+paintPoly(PLACES.starbucksWaterfall, (i, p) => { if (kind[i] === K.WATER && p[0] < PLACES.starbucksWaterfall[0][0] + 4) ground[i] = t(T.WATER) })
 
 // ─────────────────────────────────────────
 // TREES — Poisson-ish scatter of the extracted stamps over the lawns
@@ -513,7 +517,7 @@ const SPAWNS = {
   spawn_ginger: [190, -21],
   spawn_guard: [322, -64], // guards the restaurant scraps (detect 120 px + 80 px leash)
   poi_starbucks: [380, 18],
-  poi_starbucks_water: [365, 17],
+  poi_starbucks_water: [367, 17], // beside the waterfall, in front of Starbucks
   poi_shops_supermarket: [394, 14],
   poi_pyramid_steps: [406, 4],
   poi_safe_sleep_central: [358, 10],
@@ -906,16 +910,19 @@ for (const [name, p] of Object.entries(PLACES.monuments)) {
   const [cx, cy] = cellOf(p)
   DECALS.push(monumentDecal([cx * TILE_SIZE, cy * TILE_SIZE, (cx + 2) * TILE_SIZE, (cy + 2) * TILE_SIZE], name === 'gabriela_silang' ? 'rider' : 'figure'))
 }
-// water curtains along the back (north) edge of each pool's deep water, so the wall and
-// the falling sheet sit on cells that block
-for (const ring of [PLACES.mcmickingPool, PLACES.starbucksWaterfall]) {
-  let x0 = Infinity, x1 = -Infinity, y0 = Infinity
+// water curtains along the back wall of each pool's deep water (McMicking: north, the
+// Starbucks waterfall: west), so the wall and the falling sheet sit on cells that block
+for (const [ring, westWall] of [[PLACES.mcmickingPool, false], [PLACES.starbucksWaterfall, true]]) {
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity
   paintPoly(ring, (i) => {
     if (ground[i] !== t(T.WATER)) return
     const cx = i % MAP_W, cy = (i - cx) / MAP_W
-    x0 = Math.min(x0, cx); x1 = Math.max(x1, cx); y0 = Math.min(y0, cy)
+    x0 = Math.min(x0, cx); x1 = Math.max(x1, cx); y0 = Math.min(y0, cy); y1 = Math.max(y1, cy)
   })
-  if (x0 <= x1) DECALS.push(curtainDecal([x0 * TILE_SIZE, y0 * TILE_SIZE, (x1 + 1) * TILE_SIZE, y0 * TILE_SIZE + 14]))
+  if (x0 > x1) continue
+  DECALS.push(westWall
+    ? curtainDecal([x0 * TILE_SIZE, y0 * TILE_SIZE, x0 * TILE_SIZE + 14, (y1 + 1) * TILE_SIZE], true)
+    : curtainDecal([x0 * TILE_SIZE, y0 * TILE_SIZE, (x1 + 1) * TILE_SIZE, y0 * TILE_SIZE + 14]))
 }
 // the Sedeño underpass: the stair and the escalator run side by side into one dark mouth
 {
