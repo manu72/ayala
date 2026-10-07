@@ -80,6 +80,8 @@ const TILE_SIZE = GP.TILE_SIZE;
 const DEFAULT_ZOOM = 2.5;
 const PEEK_ZOOM = 0.5;
 const ZOOM_DURATION = 500;
+/** A second Tab this soon after the first shows the whole map. */
+const FULL_MAP_DOUBLE_TAP_MS = 300;
 /** Top-down story cars from the `vehicles` atlas, drawn at native (real) scale; nose east, rotation = heading. */
 const DROPOFF_SUV_FRAME = STORY_VEHICLES.suv.frame;
 const DROPOFF_COROLLA_FRAME = STORY_VEHICLES.corolla.frame;
@@ -110,6 +112,9 @@ export class GameScene extends Phaser.Scene {
   restHoldTimer = 0;
   restHoldActive = false;
   isPeeking = false;
+  /** Peeking at the whole map (double-tap Tab): the camera has let go of Mamma Cat. */
+  private showingFullMap = false;
+  private lastPeekTapAt = Number.NEGATIVE_INFINITY;
   isPaused = false;
   cinematicActive = false;
 
@@ -371,6 +376,8 @@ export class GameScene extends Phaser.Scene {
     this.restHoldTimer = 0;
     this.restHoldActive = false;
     this.isPeeking = false;
+    this.showingFullMap = false;
+    this.lastPeekTapAt = Number.NEGATIVE_INFINITY;
     this.isPaused = false;
     this.collapse = new CollapseSystem(this);
     this.collapse.resetTransient();
@@ -1134,9 +1141,34 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private togglePeekInput(): void {
-    this.isPeeking = !this.isPeeking;
-    this.cameras.main.zoomTo(this.isPeeking ? PEEK_ZOOM : DEFAULT_ZOOM, ZOOM_DURATION);
+  /** Tab: look around, and back. A quick double tap shows the whole map. */
+  private togglePeekInput(time: number): void {
+    const doubleTap = !this.showingFullMap && time - this.lastPeekTapAt < FULL_MAP_DOUBLE_TAP_MS;
+    this.lastPeekTapAt = doubleTap ? Number.NEGATIVE_INFINITY : time;
+    this.isPeeking = doubleTap || !this.isPeeking;
+    this.setCameraView(doubleTap ? "map" : this.isPeeking ? "peek" : "cat");
+  }
+
+  /** Follow Mamma Cat at the normal or peek zoom, or let go of her and fit the whole map in view. */
+  private setCameraView(view: "cat" | "peek" | "map"): void {
+    const cam = this.cameras.main;
+    const { widthInPixels: w, heightInPixels: h } = this.map;
+    if (view === "map") {
+      this.showingFullMap = true;
+      cam.stopFollow();
+      cam.removeBounds(); // bounds would pin the map to the view's left edge instead of centring it
+      cam.pan(w / 2, h / 2, ZOOM_DURATION, "Sine.easeInOut", true);
+      cam.zoomTo(Math.min(cam.width / w, cam.height / h), ZOOM_DURATION, "Sine.easeInOut", true);
+      return;
+    }
+    if (this.showingFullMap) {
+      this.showingFullMap = false;
+      cam.panEffect.reset();
+      cam.setBounds(0, 0, w, h);
+      cam.startFollow(this.player, true, 0.08, 0.08);
+      cam.setDeadzone(50, 50);
+    }
+    cam.zoomTo(view === "peek" ? PEEK_ZOOM : DEFAULT_ZOOM, ZOOM_DURATION, undefined, true);
   }
 
   private tryPrimaryInteract(time: number): void {
@@ -1173,6 +1205,11 @@ export class GameScene extends Phaser.Scene {
 
   update(time: number, delta: number): void {
     this.roadMarkings?.update(); // camera culling only; runs during cinematics too
+    // Story moments need the camera back on her.
+    if (this.showingFullMap && (this.cinematicActive || this.playerInputFrozen)) {
+      this.isPeeking = false;
+      this.setCameraView("cat");
+    }
     if (this.cinematicActive) return;
 
     // Dialogue engagement release (close / out-of-range / flee / destroy)
@@ -1243,12 +1280,12 @@ export class GameScene extends Phaser.Scene {
     // ──── Tab peek (toggle) ────
     const peekRequested = (this.tabKey && Phaser.Input.Keyboard.JustDown(this.tabKey)) || this.consumeTouchPeekQueue();
     if (peekRequested) {
-      if (!this.playerInputFrozen) this.togglePeekInput();
+      if (!this.playerInputFrozen) this.togglePeekInput(time);
     }
     if (this.isPeeking) {
       if (this.player.isMoving) {
         this.isPeeking = false;
-        this.cameras.main.zoomTo(DEFAULT_ZOOM, ZOOM_DURATION);
+        this.setCameraView("cat");
       } else {
         this.player.setVelocity(0);
         this.updateNPCs(delta);

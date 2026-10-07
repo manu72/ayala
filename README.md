@@ -90,6 +90,7 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 | Any movement key, Space, or Z       | Wake up from rest                                                                                                            |
 | J                                   | Open colony journal                                                                                                          |
 | Tab (toggle)                        | Look around -- camera zooms out to survey the area, press again to return                                                    |
+| Tab Tab (quick double tap)          | Whole map -- camera lets go of Mamma Cat and fits the full map in view; Tab or moving returns to her                         |
 | Escape                              | Pause menu (Save Game, Colony Journal, Resume, Quit to Title)                                                                |
 
 ### Tips
