@@ -331,10 +331,15 @@ describe('AmbientCrowdSystem', () => {
       free: unknown[]
     }
     const anchors = internals.anchors
+    // Checked every frame, asserted once: thousands of expect() calls cost more than the simulation.
+    const faults: string[] = []
     const books = () => {
-      expect(internals.free.length + crowd.population).toBe(T.poolSize)
-      expect(internals.counts.reduce((a, b) => a + b, 0)).toBe(crowd.population)
-      internals.counts.forEach((n, role) => expect(n).toBe(activeOf(crowd).filter((p) => p.role === role).length))
+      if (internals.free.length + crowd.population !== T.poolSize) faults.push(`pool ${internals.free.length}+${crowd.population}`)
+      if (internals.counts.reduce((a, b) => a + b, 0) !== crowd.population) faults.push(`counts ${internals.counts.join()}`)
+      internals.counts.forEach((n, role) => {
+        const real = activeOf(crowd).filter((p) => p.role === role).length
+        if (n !== real) faults.push(`role ${role}: ${n} counted, ${real} active`)
+      })
     }
     run(10, 'day', 0.1, books)
     run(10, 'evening', 0.5, books)
@@ -345,14 +350,15 @@ describe('AmbientCrowdSystem', () => {
       for (const list of anchors.values()) {
         for (const a of list) {
           const taken = a.seats.filter(Boolean)
-          expect(a.used).toBe(taken.length)
+          if (a.used !== taken.length) faults.push(`anchor used ${a.used}, ${taken.length} seated`)
           for (const p of taken) {
-            expect(seen.has(p)).toBe(false)
+            if (seen.has(p)) faults.push('one person in two seats')
             seen.add(p)
           }
         }
       }
     })
+    expect(faults.slice(0, 5)).toEqual([])
   })
 
   it('empties to the night shift once people can slip away unseen', () => {
@@ -456,12 +462,14 @@ describe('AmbientCrowdSystem', () => {
     for (const at of [spawnCat, restaurantRow, placeNamed(places, 'exit_makati_crossing')!]) {
       const { crowd, run } = setup(at)
       let checked = 0
+      const stuck: string[] = []
       run(45, 'day', 0.35, () => {
         for (const p of activeOf(crowd)) {
           checked++
-          expect(deepInWall(p.x, p.y), `${Math.round(p.x)},${Math.round(p.y)}`).toBe(false)
+          if (deepInWall(p.x, p.y)) stuck.push(`${Math.round(p.x)},${Math.round(p.y)}`)
         }
       })
+      expect(stuck).toEqual([])
       expect(checked).toBeGreaterThan(10_000)
     }
   })
