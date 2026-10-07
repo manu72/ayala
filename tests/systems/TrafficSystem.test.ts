@@ -507,13 +507,112 @@ describe("Mamma Cat on the road", () => {
     expect(onHorn).toHaveBeenCalled();
   });
 
-  it("leaves traffic alone when she is off the road", () => {
-    const run = (cat?: () => null) => {
+  it("leaves traffic alone when she is out of the world or well up the pavement", () => {
+    const run = (cat?: () => { x: number; y: number; radius: number; onRoad: boolean; settled: boolean } | null) => {
       const { scene, images } = makeScene();
       const traffic = new TrafficSystem(scene, places, { maxCars: 40, rng: seeded(), cat });
       for (let i = 0; i < 600; i++) traffic.update(1000 / 60, RUSH);
       return shownCars(images).map((img) => [img.x, img.y, img.rotation]);
     };
-    expect(run(() => null)).toEqual(run());
+    const untouched = run();
+    expect(run(() => null)).toEqual(untouched);
+    // the road edge is at y = 252.8; she sits on the pavement 37 px beyond it
+    expect(run(() => ({ x: 2000, y: 300, radius: RADIUS, onRoad: false, settled: true }))).toEqual(untouched);
+  });
+
+  /** Run traffic round her; count any drawn vehicle moving while it touches her, and any two drawn vehicles overlapping. */
+  const watch = (opts: {
+    rng: () => number;
+    clock: TrafficClock;
+    seconds: number;
+    maxCars?: number;
+    her: (frame: number) => { x: number; y: number; radius: number; settled: boolean };
+  }) => {
+    const { scene, images } = makeScene();
+    let her = { ...opts.her(0), onRoad: true };
+    const traffic = new TrafficSystem(scene, places, { maxCars: opts.maxCars ?? 40, rng: opts.rng, isDrivable, cat: () => her });
+    const last = new Map<ImageMock, { x: number; y: number; rotation: number }>();
+    let movedOntoHer = 0;
+    let crashes = 0;
+    for (let i = 0; i < opts.seconds * 60; i++) {
+      her = { ...opts.her(i), onRoad: true };
+      traffic.update(1000 / 60, opts.clock);
+      const drawn = shownCars(images);
+      for (const img of drawn) {
+        const prev = last.get(img);
+        if (gapTo(img, her) < her.radius && prev && (prev.x !== img.x || prev.y !== img.y || prev.rotation !== img.rotation)) movedOntoHer++;
+        last.set(img, { x: img.x, y: img.y, rotation: img.rotation });
+      }
+      for (let a = 0; a < drawn.length; a++) for (let b = a + 1; b < drawn.length; b++) if (carsOverlap(drawn[a]!, drawn[b]!)) crashes++;
+    }
+    return { movedOntoHer, crashes, images };
+  };
+  const DAY: TrafficClock = { currentPhase: "day", phaseProgress: 0.5 };
+
+  it("never swings a bus corner over her as she wakes and settles again beside it", () => {
+    // every vehicle a bus (the longest swing), light enough that they get past her; she naps in the inner lane and keeps stirring
+    const nap = watch({
+      rng: () => 0.88,
+      clock: DAY,
+      maxCars: 12,
+      seconds: 90,
+      her: (i) => (Math.floor(i / 37) % 2 === 0 ? { x: 2000, y: 173.6, radius: 12, settled: true } : { x: 2000, y: 173.6, radius: 10, settled: false }),
+    });
+    expect(nap.movedOntoHer).toBe(0);
+    expect(nap.crashes).toBe(0);
+  });
+
+  it("never steers one vehicle through another while she wanders between the lanes", () => {
+    // she crosses back and forth, pausing at different points across both lanes
+    const stops = [150, 185, 205, 240, 200, 170, 230];
+    const wander = (i: number) => {
+      const leg = Math.floor(i / 150) % stops.length;
+      const from = stops[(leg + stops.length - 1) % stops.length]!;
+      const to = stops[leg]!;
+      const t = Math.min(1, (i % 150) / 40); // walk for 40 frames, then wait
+      return { x: 2000, y: from + (to - from) * t, radius: RADIUS, settled: false };
+    };
+    for (const rng of [seeded(5), () => 0.999 /* all motorbikes */]) {
+      const run = watch({ rng, clock: DAY, seconds: 60, her: wander });
+      expect(run.movedOntoHer).toBe(0);
+      expect(run.crashes).toBe(0);
+    }
+  });
+
+  it("steers cars in her own lane round her when she sits there and the next lane has gaps", () => {
+    const { scene, images } = makeScene();
+    const her = { x: 2000, y: 226.4, radius: RADIUS, onRoad: true, settled: true };
+    const traffic = new TrafficSystem(scene, places, { maxCars: 40, rng: seeded(), isDrivable, cat: () => her });
+    const lastX = new Map<ImageMock, number>();
+    let passedRound = 0;
+    for (let i = 0; i < 60 * 60; i++) {
+      traffic.update(1000 / 60, DAY);
+      for (const img of shownCars(images)) {
+        // between the two lane centres (173.6 and 226.4): a car from her lane passing on its inside
+        if ((lastX.get(img) ?? Infinity) < her.x && img.x >= her.x && img.y > 180 && img.y < 215) passedRound++;
+        lastX.set(img, img.x);
+      }
+    }
+    expect(passedRound).toBeGreaterThan(2);
+  });
+
+  it("keeps cars hidden for a scripted car silent, though they still stop for her", () => {
+    const { scene } = makeScene();
+    let her: { x: number; y: number; radius: number; onRoad: boolean; settled: boolean } | null = null;
+    const onScreech = vi.fn();
+    const onHorn = vi.fn();
+    const traffic = new TrafficSystem(scene, places, { maxCars: 40, rng: () => 0.05, isDrivable, cat: () => her, onScreech, onHorn });
+    for (let i = 0; i < 20 * 60; i++) traffic.update(1000 / 60, RUSH);
+    traffic.reserve({ x: 2000, y: 240 }, 700, 300); // the dumping car's stretch: cars inside fade out but drive on
+    for (let i = 0; i < 30; i++) traffic.update(1000 / 60, RUSH);
+    her = { x: 2050, y: 226.4, radius: RADIUS, onRoad: true, settled: false };
+    let held = 0;
+    for (let i = 0; i < 4 * 60; i++) {
+      traffic.update(1000 / 60, RUSH);
+      held += (traffic as unknown as { lanes: Array<{ cars: Array<{ blocked?: boolean }> }> }).lanes.some((l) => l.cars.some((c) => c.blocked)) ? 1 : 0;
+    }
+    expect(held).toBeGreaterThan(0); // a hidden car really did stop for her
+    expect(onScreech).not.toHaveBeenCalled();
+    expect(onHorn).not.toHaveBeenCalled();
   });
 });

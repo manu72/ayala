@@ -193,9 +193,12 @@ const CAUTION_LATERAL_PX = LANE_WIDTH_PX * 1.5;
 /** Every car near a sitting or sleeping cat (her lane or the next) crawls past her. */
 export const PASS_SPEED = 45;
 
+/** Side gap a car leaves when passing her; it also bounds how far a steering car's corners may swing. */
+export const sideGap = (car: LaneCar): number => (car.agile ? AGILE_SIDE_GAP_PX : CAT_SIDE_GAP_PX);
+
 /** Lateral room a car needs between its centre line and the cat's centre to pass her. */
 export const passClearance = (car: LaneCar, cat: LaneObstacle): number =>
-  (car.width ?? DEFAULT_CAR_WIDTH_PX) / 2 + cat.radius + (car.agile ? AGILE_SIDE_GAP_PX : CAT_SIDE_GAP_PX);
+  (car.width ?? DEFAULT_CAR_WIDTH_PX) / 2 + cat.radius + sideGap(car);
 
 /** True if the car body, at its lateral offset, would touch the cat if it drove on. */
 export function catInPath(car: LaneCar, cat: LaneObstacle): boolean {

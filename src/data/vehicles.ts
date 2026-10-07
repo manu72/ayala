@@ -46,6 +46,9 @@ export const VEHICLE_CLASSES: Readonly<Record<VehicleClass, ClassSpec>> = {
   moto: { length: 32, width: 13, agile: true, weight: 0.1, frames: ["moto_a", "moto_b", "moto_c", "moto_d"] },
 };
 
+/** The widest ambient vehicle (a bus), px: what a car passing Mamma Cat must not reach into in the next lane. */
+export const WIDEST_VEHICLE_PX = Math.max(...Object.values(VEHICLE_CLASSES).map((c) => c.width));
+
 /** Story drop-off cars (intro cinematic and dumping events), same atlas. */
 export const STORY_VEHICLES = {
   suv: { frame: "story_suv", length: 80, width: 34 },

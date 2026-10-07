@@ -1,7 +1,7 @@
 import type Phaser from "phaser";
 import { DAY_NIGHT_PHASES, type TimeOfDay } from "./DayNightCycle";
 import { nightLevel } from "../utils/nightLevel";
-import { pickVehicle, VEHICLE_ATLAS, type VehicleModel } from "../data/vehicles";
+import { pickVehicle, VEHICLE_ATLAS, WIDEST_VEHICLE_PX, type VehicleModel } from "../data/vehicles";
 import { LANE_WIDTH_PX, topDownPose } from "../utils/kerbsideDropoff";
 import { closestOnPolyline, placesOfType, pointAlong, polylineLength, type MapPlace, type Pt } from "../utils/mapPlaces";
 import {
@@ -15,6 +15,7 @@ import {
   notPastCat,
   offsetPolyline,
   passClearance,
+  sideGap,
   reservedStretch,
   stepLane,
   trafficDensity,
@@ -62,10 +63,18 @@ const STEER_RATIO = 0.35;
 const AGILE_STEER_RATIO = 0.8;
 const STEER_CREEP_PX_S = 30;
 const MAX_YAW = 0.45;
+/**
+ * A car whose body (plus its side gap, which also bounds its drawn steering
+ * swing) reaches further than this from its lane centre could touch a bus
+ * centred in the next lane: it must check that lane and hold its traffic back.
+ */
+const NEXT_LANE_CLEAR_PX = LANE_WIDTH_PX - WIDEST_VEHICLE_PX / 2;
 /** A driver held up by her honks after this (sooner after an emergency stop), now and then, a few times at most. */
 const HORN_AFTER_MS = 1800;
 const HORN_AFTER_SCREECH_MS = 500;
 const HORN_CHANCE = 0.7;
+/** Only drivers this close behind her (nose to cat, a few cars back) honk at her; further back they are just in a queue. */
+const HORN_RANGE_PX = 320;
 const MAX_HONKS = 3;
 
 interface CarSprites {
@@ -142,7 +151,7 @@ export interface TrafficOptions {
   isCovered?: (x: number, y: number) => boolean;
   /** Mamma Cat each frame, or null while she can't be on the road (cars then ignore her). */
   cat?: () => TrafficCat | null;
-  /** A car braked hard for her (tyre screech); world px of the car. */
+  /** A car braked hard for her (tyre screech); world px of its nose. */
   onScreech?: (x: number, y: number) => void;
   /** A driver held up by her sounds the horn; world px of the car. */
   onHorn?: (x: number, y: number) => void;
@@ -493,7 +502,7 @@ export class TrafficSystem {
   private markIntruders(lane: Lane): void {
     for (const car of lane.cars) {
       const reach = Math.max(Math.abs(car.lat), car.swerve !== 0 ? Math.abs(car.latTarget) : 0);
-      if (reach + car.width / 2 <= LANE_WIDTH_PX / 2 + 1) continue;
+      if (!this.reachesNextLane(car, reach)) continue;
       const into = (car.swerve || car.lat) > 0 ? lane.right : lane.left;
       if (!into) continue;
       const along = closestOnPolyline(into.pts, this.laneToWorld(lane, car.dist, car.lat)).along;
@@ -517,13 +526,15 @@ export class TrafficSystem {
         continue;
       }
       const need = passClearance(car, cat) + 2;
+      const toCat = cat.along - cat.radius - (car.dist + car.length / 2);
       if (car.swerve !== 0) {
-        const lat = cat.lateral + car.swerve * need; // she may shuffle a little
-        if (Math.abs(lat) <= LANE_WIDTH_PX) car.latTarget = lat;
-        else car.swerve = 0; // no longer fits that way: think again next frame
+        // She may shuffle: follow her, but further out only if that way is still clear.
+        const lat = cat.lateral + car.swerve * need;
+        if (Math.abs(lat) > LANE_WIDTH_PX) car.swerve = 0; // no longer fits that way: think again next frame
+        else if (Math.abs(lat) <= Math.abs(car.latTarget) || this.canPass(lane, car, cat, lat, toCat)) car.latTarget = lat;
+        // else it keeps the line it checked, and stops for her if she is now in it
         continue;
       }
-      const toCat = cat.along - cat.radius - (car.dist + car.length / 2);
       car.latTarget = 0;
       if (toCat > SWERVE_LOOKAHEAD_PX || Math.abs(cat.lateral) >= need) continue;
       const sides: Array<-1 | 1> = [-1, 1];
@@ -541,7 +552,7 @@ export class TrafficSystem {
 
   private canPass(lane: Lane, car: Car, cat: LaneObstacle, lat: number, toCat: number): boolean {
     const halfW = car.width / 2;
-    if (Math.abs(lat) + halfW > LANE_WIDTH_PX / 2 + 2) {
+    if (this.reachesNextLane(car, lat)) {
       const into = lat > 0 ? lane.right : lane.left;
       if (!into || !this.cat) return false; // kerb, median or oncoming traffic that way
       const at = closestOnPolyline(into.pts, this.cat).along;
@@ -558,24 +569,34 @@ export class TrafficSystem {
     return true;
   }
 
-  /** Ease each car toward its lateral target, never sideways into the cat while level with her. */
+  private reachesNextLane(car: Car, lat: number): boolean {
+    return Math.abs(lat) + car.width / 2 + sideGap(car) > NEXT_LANE_CLEAR_PX;
+  }
+
+  /**
+   * Ease each car toward its lateral target. Level with her a car holds its
+   * line: no sliding or turning beside or over her (and a car stopped over her
+   * doesn't move at all).
+   */
   private steer(lane: Lane, dt: number): void {
     const cat = lane.cat;
     for (const car of lane.cars) {
-      const step = Math.max(car.speed, STEER_CREEP_PX_S) * (car.agile ? AGILE_STEER_RATIO : STEER_RATIO) * dt;
-      const next = car.lat + Math.max(-step, Math.min(step, car.latTarget - car.lat));
       const level = cat !== null && notPastCat(car, cat) && car.dist + car.length / 2 > cat.along - cat.radius - CAT_GAP_PX;
-      const intoHer =
-        cat !== null && Math.abs(next - cat.lateral) < Math.abs(car.lat - cat.lateral) && Math.abs(next - cat.lateral) < passClearance(car, cat);
-      const lat = level && intoHer ? car.lat : next;
+      const step = Math.max(car.speed, STEER_CREEP_PX_S) * (car.agile ? AGILE_STEER_RATIO : STEER_RATIO) * dt;
+      const lat = level ? car.lat : car.lat + Math.max(-step, Math.min(step, car.latTarget - car.lat));
       car.latVel = dt > 0 ? (lat - car.lat) / dt : 0;
       car.lat = lat;
     }
   }
 
-  /** Tyre screech on an emergency stop; a driver held up by her, whatever she is doing, may honk. */
+  /**
+   * Tyre screech on an emergency stop; a driver held up by her, whatever she
+   * is doing, may honk. Cars faded out of a scripted car's reserved stretch
+   * still stop for her, but make no sound.
+   */
   private driverReactions(lane: Lane, dt: number): void {
     for (const car of lane.cars) {
+      const heard = this.visible && car.fade > 0.01 && !this.inStretch(lane, car);
       if (!car.blocked) {
         if (car.screeched || car.heldMs > 0 || car.honks > 0) {
           car.screeched = false;
@@ -590,17 +611,19 @@ export class TrafficSystem {
         car.heldMs = 0;
         car.hornAt = HORN_AFTER_SCREECH_MS * (1 + 0.8 * this.rng());
         // Heard, not seen: the camera may lag a dart onto the road. Callers fade it with distance.
-        if (this.visible) {
-          const p = this.laneToWorld(lane, car.dist, car.lat);
+        // From the nose, where the tyres stop short of her (a bus's centre is ~100 px back).
+        if (heard) {
+          const p = this.laneToWorld(lane, car.dist + car.length / 2, car.lat);
           this.onScreech?.(p.x, p.y);
         }
       }
-      if (car.speed >= 5) continue;
+      const cat = lane.cat;
+      if (car.speed >= 5 || !cat || cat.along - (car.dist + car.length / 2) > HORN_RANGE_PX) continue;
       car.heldMs += dt * 1000;
       if (car.heldMs < car.hornAt || car.honks >= MAX_HONKS) continue;
       car.honks++;
       car.hornAt = car.heldMs + 3500 + 2500 * this.rng();
-      if (this.visible && this.rng() < HORN_CHANCE) {
+      if (heard && this.rng() < HORN_CHANCE) {
         const p = this.laneToWorld(lane, car.dist, car.lat);
         this.onHorn?.(p.x, p.y);
       }
@@ -631,7 +654,9 @@ export class TrafficSystem {
         // Heading from the chord under the car body, so it turns smoothly through bends, plus any steering yaw.
         const back = this.laneToWorld(lane, car.dist - half, car.lat);
         const front = this.laneToWorld(lane, car.dist + half, car.lat);
-        const yaw = Math.max(-MAX_YAW, Math.min(MAX_YAW, Math.atan2(car.latVel, Math.max(car.speed, 40))));
+        // Steering yaw, capped so the corners never swing out further than the car's side gap.
+        const maxYaw = Math.min(MAX_YAW, Math.asin(Math.min(1, sideGap(car) / half)));
+        const yaw = Math.max(-maxYaw, Math.min(maxYaw, Math.atan2(car.latVel, Math.max(car.speed, 40))));
         const { rotation } = topDownPose(Math.atan2(front.y - back.y, front.x - back.x) + yaw);
         car.img.setPosition(p.x, p.y).setRotation(rotation).setAlpha(alpha);
         car.shadow
