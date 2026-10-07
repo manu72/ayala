@@ -97,7 +97,7 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 ### Tips
 
 - **Survival stats** (hunger, thirst, energy) are shown as bars in the top-left corner alongside the in-game clock. Keep them topped up by finding food sources, water, and safe resting spots around the park. Any pond, fountain pool or waterfall edge is drinkable.
-- **Running** is costly -- it drains energy fast and should be used to escape threats, not for casual travel.
+- **Running** is costly -- it burns 2.5x the energy per metre of walking and makes her thirsty three times as fast (worse in the midday sun), so use it to escape threats, not for casual travel.
 - **Crouching** near bushes or tree canopy makes Mamma Cat much harder for the guard to spot.
 - **Resting** requires you to hold Z for 2 seconds while standing still. A progress ring appears so you know it's working. Energy restores faster in shade and even faster at designated safe spots.
 - **Look around** (Tab) is useful for spotting food, water, threats, and other cats before committing to a direction.

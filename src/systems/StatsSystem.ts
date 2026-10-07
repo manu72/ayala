@@ -12,8 +12,14 @@ export const STATS_DECAY = {
   // Halved in 0.5.0 when the map grew to 2 m/tile (walks ~2x longer), so a
   // park crossing costs about the same energy as before (was 0.15 / 0.3).
   energyMoving: 0.08,
-  energyRunning: 0.16,
+  // Running covers ground at 2x walking speed, so 5x the rate makes it cost
+  // 2.5x the energy per metre: a sprint to escape, not a way to travel
+  // (a 10 s sprint costs 4, 6 in the midday sun).
+  energyRunning: 0.4,
 } as const;
+
+/** Thirst decays this many times faster while running (panting in the Manila heat). */
+export const STATS_RUNNING_THIRST_MULTIPLIER = 3;
 
 /** Multiplier on decay during heat when not in shade. */
 export const STATS_HEAT_MULTIPLIER = 1.5;
@@ -126,8 +132,10 @@ export class StatsSystem {
 
     // Hunger/thirst always decay, but at reduced rate while resting
     const decayMod = isResting ? STATS_REST_DECAY_MULTIPLIER : 1.0;
+    const running = !isResting && isRunning && this.canRun;
+    const thirstMod = running ? STATS_RUNNING_THIRST_MULTIPLIER : 1.0;
     this.hunger = Math.max(0, this.hunger - STATS_DECAY.hunger * heatMod * decayMod * deltaSec);
-    this.thirst = Math.max(0, this.thirst - STATS_DECAY.thirst * heatMod * decayMod * deltaSec);
+    this.thirst = Math.max(0, this.thirst - STATS_DECAY.thirst * heatMod * decayMod * thirstMod * deltaSec);
 
     if (isResting) {
       // Energy only restores when Mamma is well-fed and hydrated. A starving
@@ -139,7 +147,7 @@ export class StatsSystem {
         const rate = inShelter ? STATS_REST_RATE_SAFE : inShade ? STATS_REST_RATE_SHADE : STATS_REST_RATE_OPEN;
         this.energy = Math.min(100, this.energy + rate * deltaSec);
       }
-    } else if (isRunning && this.canRun) {
+    } else if (running) {
       this.energy = Math.max(0, this.energy - STATS_DECAY.energyRunning * heatMod * deltaSec);
     } else if (isMoving) {
       this.energy = Math.max(0, this.energy - STATS_DECAY.energyMoving * heatMod * deltaSec);
