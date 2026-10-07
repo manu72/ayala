@@ -2,7 +2,7 @@ import Phaser from "phaser";
 import type { StatsSystem } from "./StatsSystem";
 import type { TimeOfDay } from "./DayNightCycle";
 
-export type SourceType = "feeding_station" | "fountain" | "restaurant_scraps" | "water_bowl" | "bugs" | "safe_sleep";
+export type SourceType = "feeding_station" | "fountain" | "restaurant_scraps" | "water_bowl" | "bugs" | "safe_sleep" | "open_water";
 
 interface SourceDef {
   type: SourceType;
@@ -51,6 +51,8 @@ export const SOURCE_DEFS: Readonly<Record<SourceType, SourceDef>> = {
   },
   bugs: { type: "bugs", stat: "hunger", amount: 5, cooldownMs: 10_000, symbol: "·", symbolColor: "#88aa44" },
   safe_sleep: { type: "safe_sleep", stat: "energy", amount: 100, cooldownMs: 0, symbol: "★", symbolColor: "#ffdd44" },
+  // The pond, fountain pools and waterfall themselves: drink anywhere along the edge; real water never runs out.
+  open_water: { type: "open_water", stat: "thirst", amount: 35, cooldownMs: 0, symbol: "💧", symbolColor: "#4488ff" },
 };
 
 /** Maximum world-distance (px) at which the player can use a nearby source. */
@@ -81,9 +83,16 @@ export class FoodSourceManager {
   private scene: Phaser.Scene;
   private sources: Source[] = [];
   private floatingTexts: Phaser.GameObjects.Text[] = [];
+  /** Finds open water she can drink from at a position (the nearest water point), if any. */
+  private openWater: ((x: number, y: number) => { x: number; y: number } | null) | null = null;
 
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
+  }
+
+  /** Let her drink at any open water's edge when no placed source is in reach. */
+  setOpenWater(find: (x: number, y: number) => { x: number; y: number } | null): void {
+    this.openWater = find;
   }
 
   /** Register a source at a world position. */
@@ -165,7 +174,7 @@ export class FoodSourceManager {
       }
     }
 
-    if (!nearest) return null;
+    if (!nearest) return this.drinkOpenWater(playerX, playerY, stats);
 
     const def = SOURCE_DEFS[nearest.type];
     const actual = stats.restore(def.stat, def.amount);
@@ -180,6 +189,15 @@ export class FoodSourceManager {
       y: nearest.y,
       actualRestored: actual,
     };
+  }
+
+  private drinkOpenWater(playerX: number, playerY: number, stats: StatsSystem): FoodSourceInteraction | null {
+    const water = this.openWater?.(playerX, playerY);
+    if (!water) return null;
+    const def = SOURCE_DEFS.open_water;
+    const actual = stats.restore(def.stat, def.amount);
+    this.showFloatingText(`+${Math.round(actual)}`, water.x, water.y - 16, def.symbolColor);
+    return { type: "open_water", stat: def.stat, x: water.x, y: water.y, actualRestored: actual };
   }
 
   /** Update markers to reflect availability. */

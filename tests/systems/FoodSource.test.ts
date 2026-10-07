@@ -382,3 +382,29 @@ describe('FoodSourceManager — harness sanity', () => {
     expect(tweens).toHaveLength(1)
   })
 })
+
+describe('FoodSourceManager.tryInteract — open water (pond, fountain pools, waterfall)', () => {
+  it('drinks at any open water in reach when no placed source is, and the water never runs out', () => {
+    const { manager, stats } = buildManager([])
+    manager.setOpenWater((x, y) => (x > 500 ? { x: 520, y } : null))
+    stats.thirst = 10
+    expect(manager.tryInteract(100, 100, stats, 'night', 0)).toBeNull()
+    expect(manager.tryInteract(510, 100, stats, 'night', 0)).toEqual({
+      type: 'open_water',
+      stat: 'thirst',
+      x: 520,
+      y: 100,
+      actualRestored: SOURCE_DEFS.open_water.amount,
+    })
+    expect(manager.tryInteract(510, 100, stats, 'night', 1)?.type).toBe('open_water') // straight away again
+    expect(stats.thirst).toBe(10 + 2 * SOURCE_DEFS.open_water.amount)
+  })
+
+  it('uses an available placed source first, and the water while that one cools down', () => {
+    const { manager, stats } = buildManager([['fountain', 510, 100]])
+    manager.setOpenWater(() => ({ x: 520, y: 100 }))
+    stats.thirst = 0
+    expect(manager.tryInteract(510, 100, stats, 'day', 0)?.type).toBe('fountain')
+    expect(manager.tryInteract(510, 100, stats, 'day', 1)?.type).toBe('open_water')
+  })
+})

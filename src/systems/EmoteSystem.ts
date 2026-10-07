@@ -5,7 +5,7 @@
 
 import Phaser from "phaser";
 
-export type EmoteType = "heart" | "alert" | "curious" | "sleep" | "hostile" | "danger";
+export type EmoteType = "heart" | "alert" | "curious" | "sleep" | "hostile" | "danger" | "drink";
 
 const EMOTE_GLYPHS: Record<EmoteType, string> = {
   heart: "\u2665",
@@ -14,6 +14,7 @@ const EMOTE_GLYPHS: Record<EmoteType, string> = {
   sleep: "z z z",
   hostile: "!!",
   danger: "!!!",
+  drink: "\u{1F4A7}",
 };
 
 const EMOTE_COLORS: Record<EmoteType, string> = {
@@ -23,6 +24,7 @@ const EMOTE_COLORS: Record<EmoteType, string> = {
   sleep: "#95a5a6",
   hostile: "#e74c3c",
   danger: "#c0392b",
+  drink: "#4488ff",
 };
 
 /** Minimum ms between emotes on the same target to prevent spam. */

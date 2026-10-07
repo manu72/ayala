@@ -65,6 +65,11 @@
        "name": "collides",
        "type": "bool",
        "value": true
+      },
+      {
+       "name": "water",
+       "type": "bool",
+       "value": true
       }
      ]
     },

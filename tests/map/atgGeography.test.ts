@@ -6,6 +6,8 @@ import { buildCamilleEraCareRoutes } from "../../src/utils/camilleCareRoute";
 import { createNavigationGrid, routeHumanPath } from "../../src/utils/humanRoutePath";
 import { GP, TERRITORY_NEGOTIATION_NEAR_STEPS_PX } from "../../src/config/gameplayConstants";
 import { readPlaces, type TiledObjectLike } from "../../src/utils/mapPlaces";
+import { drinkSpots } from "../../src/utils/waterEdge";
+import { hasLineOfSightTiles } from "../../src/utils/lineOfSight";
 
 /**
  * Data invariants for the generated map (scripts/generate-map.mjs). These pin
@@ -121,6 +123,30 @@ describe("atg.json structure", () => {
     const roads = [T.ROAD, T.ROAD_LINE, T.ROAD_SOLID_LINE, T.ROAD_EDGE].map(gid);
     expect([...roadTiles].sort((a, b) => a - b)).toEqual(roads.sort((a, b) => a - b));
     for (const g of roads) expect(colliding.has(g)).toBe(true);
+  });
+
+  it("marks open water drinkable, with drinking spots every cat can walk to round each pond, pool and waterfall", () => {
+    const waterTiles = new Set(
+      (parkTiles && "tiles" in parkTiles ? parkTiles.tiles ?? [] : [])
+        .filter((t) => t.properties?.some((p) => p.name === "water" && p.value === true))
+        .map((t) => t.id + 1),
+    );
+    expect([...waterTiles]).toEqual([gid(T.WATER)]);
+    const isWater = (x: number, y: number) => x >= 0 && y >= 0 && x < W && y < H && waterTiles.has(ground[cellIndex(x, y)] ?? 0);
+    const spots = drinkSpots(W, H, TILE, isWater, (x, y) => !blocked(x, y));
+    const grid = createNavigationGrid({ width: W, height: H, tileSize: TILE, isBlocked: (x, y) => !clear(x, y) });
+    const blockedAt = (x: number, y: number) => blocked(Math.floor(x / TILE), Math.floor(y / TILE));
+    // Like GameScene's water-trip routes: the nav grid keeps a tile clear, then up to 3 tiles are walked straight.
+    const canWalkTo = (to: { x: number; y: number }) => {
+      const { path } = routeHumanPath([spawn("spawn_mammacat"), to], grid);
+      const end = path[path.length - 1]!;
+      return Math.hypot(end.x - to.x, end.y - to.y) <= 3 * TILE && hasLineOfSightTiles(end.x, end.y, to.x, to.y, TILE, blockedAt);
+    };
+    // the PSE pond, the McMicking water-curtain pool and the Starbucks waterfall: cats pick among their 3 nearest spots
+    for (const [name, cell] of [["PSE pond", [100, 125]], ["McMicking pool", [111, 107]], ["Starbucks waterfall", [202, 88]]] as const) {
+      const near = spots.filter((s) => Math.hypot(s.x - (cell[0] * TILE + 16), s.y - (cell[1] * TILE + 16)) < 8 * TILE);
+      expect(near.filter(canWalkTo).length, name).toBeGreaterThanOrEqual(3);
+    }
   });
 
   it("hides the gameplay ground under half-tile-offset art layers that cover the whole map", () => {

@@ -186,3 +186,6 @@ export const CAR_FRIGHT_RADIUS_PX = 110;
 
 /** World sounds (tyre screech, horn) fade to silence this many px from the camera centre. */
 export const SFX_EAR_RANGE_PX = 700;
+
+/** Mamma Cat can drink from open water (pond, fountain pool, waterfall) whose edge is this close to her. */
+export const DRINK_REACH_PX = 22;

@@ -36,7 +36,10 @@ import {
   SHELTER_RADIUS_PX,
   CAR_FRIGHT_RADIUS_PX,
   SFX_EAR_RANGE_PX,
+  DRINK_REACH_PX,
 } from "../config/gameplayConstants";
+import { CatWaterTrips } from "../systems/CatWaterTrips";
+import { drinkSpots, isWaterTile, waterWithin } from "../utils/waterEdge";
 import { StoryKeys, migrateLegacyIntroFlag } from "../registry/storyKeys";
 import {
   ScriptedDialogueService,
@@ -82,6 +85,8 @@ const PEEK_ZOOM = 0.5;
 const ZOOM_DURATION = 500;
 /** A second Tab this soon after the first shows the whole map. */
 const FULL_MAP_DOUBLE_TAP_MS = 300;
+/** A cat's walk to the water ends with up to this many tiles walked straight from where the nav grid stops. */
+const LAST_HOP_TILES = 3;
 /** Top-down story cars from the `vehicles` atlas, drawn at native (real) scale; nose east, rotation = heading. */
 const DROPOFF_SUV_FRAME = STORY_VEHICLES.suv.frame;
 const DROPOFF_COROLLA_FRAME = STORY_VEHICLES.corolla.frame;
@@ -114,6 +119,8 @@ export class GameScene extends Phaser.Scene {
   isPeeking = false;
   /** Peeking at the whole map (double-tap Tab): the camera has let go of Mamma Cat. */
   private showingFullMap = false;
+  /** Colony cats' walks to the pond, fountain pool and waterfall to drink. */
+  private waterTrips?: CatWaterTrips<NPCCat>;
   private lastPeekTapAt = Number.NEGATIVE_INFINITY;
   isPaused = false;
   cinematicActive = false;
@@ -622,6 +629,7 @@ export class GameScene extends Phaser.Scene {
     this.spawnNPC("Pedigree", "fluffy", "spawn_pedigree", "neutral", 150, 6448, 4656);
     this.spawnGingerTwins();
     this.colony.spawnInitialBackgroundCats();
+    this.startWaterTrips();
 
     this.restoreDispositions();
 
@@ -647,6 +655,8 @@ export class GameScene extends Phaser.Scene {
     this.humans.spawnAmbientHumans();
 
     this.foodSources = new FoodSourceManager(this);
+    // Real water never runs out: she drinks at any edge of the pond, fountain pools and waterfall.
+    this.foodSources.setOpenWater((x, y) => waterWithin({ x, y }, DRINK_REACH_PX, TILE_SIZE, this.isWaterCell));
     if (savedSourceStates && savedSourceStates.length > 0) {
       this.foodSources.restoreFromStates(savedSourceStates);
     } else {
@@ -1183,7 +1193,8 @@ export class GameScene extends Phaser.Scene {
     );
 
     if (usedSource) {
-      this.scoring.discoverFoodSource(this.foodSourceKey(usedSource));
+      if (usedSource.type === "open_water") this.player.faceToward(usedSource.x, usedSource.y);
+      else this.scoring.discoverFoodSource(this.foodSourceKey(usedSource)); // the water's own 💧 spots count as finds
       // Play the directional drinking / eating animation as feedback.
       // Shared by every FoodSource type (water_bowl, fountain,
       // feeding_station, restaurant_scraps, bugs); startConsuming() is a
@@ -1971,6 +1982,28 @@ export class GameScene extends Phaser.Scene {
     if (key !== null) this.scoring.visitCell(key);
   }
 
+  /** True on a cell of open water (pond, fountain pool, waterfall) — every cat drinks there. */
+  private isWaterCell = (cx: number, cy: number): boolean => isWaterTile(this.groundLayer?.getTileAt(cx, cy));
+
+  private startWaterTrips(): void {
+    const spots = drinkSpots(this.map.width, this.map.height, TILE_SIZE, this.isWaterCell, (cx, cy) => !this.isExplorationCellBlocked(cx, cy));
+    this.waterTrips = new CatWaterTrips<NPCCat>({
+      cats: () => this.npcs.map(({ cat }) => cat),
+      spots,
+      route: (from, to) => {
+        const { path } = routeHumanPath([from, to], this.createHumanNavigationGrid());
+        const end = path[path.length - 1];
+        // The nav grid keeps a tile clear of obstacles, so the last few steps to the water's edge are walked straight.
+        const blockedAt = (x: number, y: number) => this.isExplorationCellBlocked(Math.floor(x / TILE_SIZE), Math.floor(y / TILE_SIZE));
+        const hop = end && Math.hypot(end.x - to.x, end.y - to.y) <= LAST_HOP_TILES * TILE_SIZE && hasLineOfSightTiles(end.x, end.y, to.x, to.y, TILE_SIZE, blockedAt);
+        return hop ? [...path, to] : null;
+      },
+      player: () => this.player,
+      storyMoment: () => this.cinematicActive || this.playerInputFrozen || this.dialogue.isActive,
+      onDrink: (cat) => this.emotes.show(this, cat, "drink"),
+    });
+  }
+
   private foodSourceKey(source: { type: SourceType; x: number; y: number }): string {
     return `${source.type}:${Math.round(source.x)}:${Math.round(source.y)}`;
   }
@@ -2051,6 +2084,7 @@ export class GameScene extends Phaser.Scene {
 
   private updateNPCs(delta: number): void {
     const now = this.time.now;
+    this.waterTrips?.update(delta);
     const hud = this.scene.get("HUDScene") as HUDScene | undefined;
 
     for (const { cat, indicator } of this.npcs) {
