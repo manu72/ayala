@@ -16,6 +16,7 @@ import { EmoteSystem } from "../systems/EmoteSystem";
 import { ChapterSystem } from "../systems/ChapterSystem";
 import { TerritorySystem } from "../systems/TerritorySystem";
 import { ColonyDynamicsSystem } from "../systems/ColonyDynamicsSystem";
+import { PetFriends } from "../systems/PetFriends";
 import { SnatcherSystem } from "../systems/SnatcherSystem";
 import { HumanPresenceSystem } from "../systems/HumanPresenceSystem";
 import { CollapseSystem } from "../systems/CollapseSystem";
@@ -196,6 +197,8 @@ export class GameScene extends Phaser.Scene {
    * Commit C, no other code touches a raw `humans[]` array.
    */
   humans!: HumanPresenceSystem;
+  /** Ella, Cat cat and Mittens greeting each other (and Mamma Cat). */
+  private petFriends!: PetFriends;
   /** Dog NPCs tethered to dog-walker humans; pushed to by {@link HumanPresenceSystem.spawnAmbientHumans}. */
   dogs: DogNPC[] = [];
   /** Tracks which cats have already shown narration this approach, to avoid repeating. */
@@ -473,6 +476,7 @@ export class GameScene extends Phaser.Scene {
     this.camille = new CamilleEncounterSystem(this);
     this.camille.resetTransient();
     this.humans = new HumanPresenceSystem(this);
+    this.petFriends = new PetFriends(this);
     // resetTransient() seeds the stationary anchor at the player's spawn
     // so an instant interaction on frame 0 doesn't fire the
     // "moved beyond threshold" reset that clears every greet counter.
@@ -2249,6 +2253,7 @@ export class GameScene extends Phaser.Scene {
     for (const dog of this.dogs) {
       dog.update(now, this.player, this.npcs, this.emotes, this);
     }
+    this.petFriends.update();
 
     if (this.dayNight.currentPhase === "night") {
       this.snatcher.checkDetection();

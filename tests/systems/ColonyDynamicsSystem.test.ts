@@ -4,9 +4,15 @@ vi.mock("../../src/sprites/NPCCat", () => ({
   NPCCat: class {
     npcName: string;
     spriteKey: string;
-    constructor(_scene: unknown, cfg: { name: string; spriteKey: string }) {
+    x: number;
+    y: number;
+    disposition: string;
+    constructor(_scene: unknown, cfg: { name: string; spriteKey: string; x: number; y: number; disposition: string }) {
       this.npcName = cfg.name;
       this.spriteKey = cfg.spriteKey;
+      this.x = cfg.x;
+      this.y = cfg.y;
+      this.disposition = cfg.disposition;
     }
   },
 }));
@@ -67,14 +73,17 @@ describe("ColonyDynamicsSystem — the dumping car yielding to Mamma Cat", () =>
 });
 
 type Tag = { name: string; known: boolean };
-type Entry = { cat: NPCCat & { spriteKey: string }; indicator: Tag };
+type Entry = { cat: NPCCat & { spriteKey: string; disposition: string }; indicator: Tag };
 
 /** A scene with one colony zone, enough to spawn the background roster. */
 function rosterScene(registry: Map<string, unknown>) {
   const npcs: Entry[] = [];
   const scene = {
     registry: { get: (k: string) => registry.get(k), set: (k: string, v: unknown) => registry.set(k, v) },
-    places: [{ name: "colony_central", type: "colony_zone", x: 500, y: 500, props: { radius: 200 } }],
+    places: [
+      { name: "colony_central", type: "colony_zone", x: 500, y: 500, props: { radius: 200 } },
+      { name: "colony_west", type: "colony_zone", x: 2400, y: 3000, props: { radius: 400 } },
+    ],
     territory: { visitCell: () => 0 },
     map: { tileWidth: 32, width: 290 },
     physics: { add: { collider: () => undefined } },
@@ -115,5 +124,16 @@ describe("ColonyDynamicsSystem — colony cats' names", () => {
     expect(muningAgain.indicator).toEqual({ name: colonyCatName(2), known: true });
     expect(muningAgain.cat.spriteKey).toBe(muning.cat.spriteKey);
     expect(second.npcs.filter((e) => e.indicator.known)).toHaveLength(1);
+  });
+
+  it("houses Cat cat and Mittens together in the west colony, on Ella's walk, friendly from the start", () => {
+    for (let run = 0; run < 20; run++) {
+      const { scene, npcs } = rosterScene(new Map());
+      new ColonyDynamicsSystem(scene).spawnInitialBackgroundCats();
+      const [catcat, mittens] = npcs.map((e) => e.cat);
+      expect([catcat!.disposition, mittens!.disposition]).toEqual(["friendly", "friendly"]);
+      expect(Math.hypot(catcat!.x - 2400, catcat!.y - 3000)).toBeLessThanOrEqual(72);
+      expect(Math.hypot(mittens!.x - catcat!.x, mittens!.y - catcat!.y)).toBeLessThanOrEqual(36);
+    }
   });
 });

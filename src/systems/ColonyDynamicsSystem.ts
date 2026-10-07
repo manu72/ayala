@@ -151,11 +151,16 @@ export class ColonyDynamicsSystem {
     ];
     // Spawn discs on the park's lawns (map `colony_zone` places).
     const zones = placesOfType(this.scene.places, "colony_zone").map((z) => ({
+      name: z.name,
       cx: z.x,
       cy: z.y,
       radius: Number(z.props.radius) || 300,
     }));
     if (zones.length === 0) return;
+    // Cat cat and Mittens (indices 0 and 1) are friends with Ella: they share a
+    // home in the west colony, which her walk passes through, and like Mamma Cat from the start.
+    const petsZone = zones.find((z) => z.name === "colony_west") ?? zones[0]!;
+    let petsHome: { x: number; y: number } | null = null;
 
     this.namedIndices = new Set(readIndexList(this.scene.registry.get(StoryKeys.COLONY_NAMED)));
     this.lostIndices = new Set(readIndexList(this.scene.registry.get(StoryKeys.COLONY_LOST)));
@@ -163,6 +168,13 @@ export class ColonyDynamicsSystem {
     const indices = backgroundIndices(count, this.lostIndices);
     this.nextIndex = Math.max(-1, ...indices, ...this.lostIndices) + 1;
     indices.forEach((index, i) => {
+      if (index <= 1) {
+        const near = petsHome ? { cx: petsHome.x, cy: petsHome.y, radius: 60 } : { cx: petsZone.cx, cy: petsZone.cy, radius: 120 };
+        const { x, y } = this.pickReachablePointInZone(near);
+        petsHome ??= { x, y };
+        this.addColonyCat(index, x, y, { cx: x, cy: y, radius: 100 }, "friendly");
+        return;
+      }
       const zone = zones[i % zones.length]!;
       const { x, y } = this.pickReachablePointInZone(zone);
       const disp = dispositions[Math.floor(Math.random() * dispositions.length)]!;

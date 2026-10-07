@@ -233,7 +233,7 @@ export class HumanPresenceSystem {
 
       if (routedConfig.type === "dogwalker") {
         const dogKey = walkerDogKeys[walkerDogIdx % walkerDogKeys.length]!;
-        scene.dogs.push(new DogNPC(scene, human, dogKey));
+        scene.dogs.push(new DogNPC(scene, human, dogKey, { friendly: dogKey === PETS.ella.texture }));
         walkerDogIdx++;
       }
     }
