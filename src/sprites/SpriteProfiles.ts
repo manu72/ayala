@@ -277,6 +277,27 @@ const KISH_PROFILE: SpriteProfile = {
   },
 };
 
+/**
+ * Kish's other outfit (PixelLab "kishdale"): same girl, same size and motion, different
+ * clothes. Chosen per in-game day by {@link kishProfileForDay}.
+ */
+export const KISHDALE_PROFILE: SpriteProfile = {
+  ...KISH_PROFILE,
+  key: "kishdale",
+  directionalKeys: {
+    walkDown: "kishdale_walk_s",
+    walkLeft: "kishdale_walk_w",
+    walkRight: "kishdale_walk_e",
+    walkUp: "kishdale_walk_n",
+    idle: "kishdale_stand",
+  },
+};
+
+/** Kish wears her usual clothes on odd days and the "kishdale" outfit on even days. */
+export function kishProfileForDay(day: number): SpriteProfile {
+  return Math.floor(day) % 2 === 0 ? KISHDALE_PROFILE : KISH_PROFILE;
+}
+
 function createSnatcherProfile(key: "snatcher" | "snatcher2", texturePrefix = key): SpriteProfile {
   return {
     key,

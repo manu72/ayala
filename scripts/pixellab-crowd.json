@@ -1,0 +1,232 @@
+{
+  "_about": "Provenance for public/assets/sprites/crowd/<key>.png. Characters generated with PixelLab (create_character standard mode + animate_character template walking-8-frames; poses via create_character_state with use_color_palette_from_reference=true). Download zip (holds every state of the character's group): https://api.pixellab.ai/mcp/characters/<id>/download -> cache as /tmp/pixellab-crowd/<key>.zip, then run python3 scripts/build-crowd-sheets.py.",
+  "params": {
+    "mode": "standard",
+    "n_directions": 4,
+    "size": 48,
+    "canvas": "68x68",
+    "view": "low top-down",
+    "shading": "basic shading",
+    "outline": "single color black outline",
+    "detail": "medium detail",
+    "walk_template_animation_id": "walking-8-frames",
+    "pose_state_edit_descriptions": {
+      "sit_bench": "sitting down on an invisible seat at knee height, thighs horizontal, knees bent, feet flat on the ground, relaxed, hands resting on lap. Only the person is drawn: no bench, no chair, no furniture, no ground.",
+      "sit_ground": "sitting cross-legged on the grass, relaxed, hands resting on knees. Only the person is drawn: no grass, no ground, no blanket, no shadow.",
+      "selfie": "holding a smartphone up at arm's length taking a selfie",
+      "smoke": "standing, smoking a cigarette, hand raised to mouth",
+      "_why_sit_wording": "The requested 'sitting on a park bench, relaxed, hands resting on lap' drew a full wooden bench into the sprite (state a9f8fcb8-4d91-4729-84b0-79a98ed6799b on officeMan, unused). The map already draws bench tiles, so sit poses are prop-free; sit_ground likewise forbids grass/ground."
+    }
+  },
+  "sheet_layout": {
+    "cell": 68,
+    "cols": 8,
+    "rows": 6,
+    "size": "544x408",
+    "rows_0_3": "walk south, east, north, west (frames 0-7)",
+    "row_4": "cols 0-3 stand S/E/N/W (base rotations); col 4 selfie (south); col 5 smoke (south); cols 6-7 empty",
+    "row_5": "cols 0-3 sit_bench S/E/N/W; cols 4-7 sit_ground S/E/N/W",
+    "frame_index": "row*8+col: stand 32-35, selfie 36, smoke 37, sit_bench 40-43, sit_ground 44-47",
+    "alignment": "walk + stand copied raw (shared 68px canvas); every pose rotation shifted vertically so its lowest opaque row = the base south rotation's lowest opaque row. Missing poses are transparent.",
+    "north_sit_note": "north (from behind) sit cells: the lowest opaque row is the seat/legs, not the feet, so they align the seat to the feet row"
+  },
+  "characters": {
+    "officeMan": {
+      "id": "dcdfbcf0-c815-428c-9d12-5511c83307e9",
+      "name": "crowd office man",
+      "description": "Filipino office worker man, short neat black hair, white long-sleeve dress shirt with sleeves rolled up, dark grey slacks, black leather shoes, blue lanyard ID badge on chest",
+      "walk_group_id": "21a4ea93-84d8-4f6a-b6d1-a95271a793ce",
+      "walk_directions": ["south", "east", "north", "west"],
+      "poses": ["sit_bench", "smoke"],
+      "states": {
+        "sit_bench": { "id": "3a06afe8-af91-405d-af8e-92fe16283200", "state_name": "Sit bench noprop" },
+        "smoke": { "id": "62f672cb-7d86-40df-81ef-1539ce229486", "state_name": "Smoke" }
+      },
+      "rejected_states": {
+        "a9f8fcb8-4d91-4729-84b0-79a98ed6799b": "sit_bench with a bench drawn into the sprite"
+      },
+      "known_issues": "north walk shows the lanyard badge on his back in most frames (flickers against the clean north rotation). smoke reads clearly (cigarette + smoke wisp); sit_bench uses the prop-free wording (the bench-drawn state is listed under rejected_states)."
+    },
+    "officeWoman": {
+      "id": "15e53e62-81b8-4846-b9b8-3ec0f9f60ab5",
+      "name": "crowd office woman",
+      "description": "Filipina office worker woman, tan skin, black hair in a low bun, light blue blouse, black pencil skirt, black flat shoes, brown leather shoulder tote bag, ID lanyard",
+      "walk_group_id": "4f08bfc1-afac-4333-9bf5-5e6ce48672bd",
+      "walk_directions": ["south", "east", "north", "west"],
+      "poses": ["sit_bench", "sit_ground"],
+      "states": {
+        "sit_bench": { "id": "64c889c9-868d-4fef-90e1-d26f03e233c4", "state_name": "Sit bench" },
+        "sit_ground": { "id": "bdf6aa2c-b424-4f5e-8cb7-affb34a44e39", "state_name": "Sit ground" }
+      },
+      "known_issues": "tote bag appears/disappears between walk frames (mostly missing in the south walk); two stray specks (north f3, west f5) are cleared by the builder's despeckle. sit_bench west rotation was drawn facing east -> builder uses mirror(east) (tote bag swaps side); the frontal sit_bench (south) reads a little short/squat.",
+      "pose_fixes": [
+        { "pose": "sit_bench", "dir": "west", "mirror_of": "east" }
+      ]
+    },
+    "student": {
+      "id": "932cad5d-be4c-43e7-a2e5-d129cf6051e0",
+      "name": "crowd student",
+      "description": "Filipino college student, light brown skin, messy black hair, white polo school uniform, navy blue slacks, black sneakers, black backpack",
+      "walk_group_id": "1e644724-ae74-44cc-bc92-6cb77e157d1f",
+      "walk_directions": ["south", "east", "north", "west"],
+      "walk_overrides": { "north": "walk_north_v2" },
+      "walk_north_v2_group_id": "514f3d4a-bb4c-4638-b0aa-0aa0c8f7b6c5",
+      "poses": ["sit_bench", "sit_ground"],
+      "states": {
+        "sit_bench": { "id": "71784fe0-0117-4be4-8c12-ee2971da162c", "state_name": "Sit bench" },
+        "sit_ground": { "id": "cf81da1c-2381-47bb-bb56-f668442cae60", "state_name": "Sit ground" }
+      },
+      "known_issues": "north walk draws the black backpack as a navy bib (reads as dungarees) while the north rotation shows the backpack. north walk now comes from walk_north_v2 (skeleton-v3 re-roll of walking-8-frames, 80x80 canvas centred + feet-aligned) which draws the backpack correctly; sit_ground west was drawn facing east -> mirror(east).",
+      "pose_fixes": [
+        { "pose": "sit_ground", "dir": "west", "mirror_of": "east" }
+      ]
+    },
+    "barongMan": {
+      "id": "9c8e919f-d260-4cdf-8d84-acb0f243cb89",
+      "name": "crowd barongMan",
+      "description": "Filipino man in a cream embroidered barong tagalog shirt, black trousers, black shoes, short black hair, brown skin",
+      "walk_group_id": "804761f5-c154-4280-99c6-234f20882d07",
+      "walk_directions": ["south", "east", "north", "west"],
+      "poses": ["sit_bench", "smoke"],
+      "states": {
+        "sit_bench": { "id": "ffb54384-c96c-46bd-936e-df692ceb6fde", "state_name": "Sit bench" },
+        "smoke": { "id": "9c36aba5-c2bd-43c5-8385-b5523b284fb4", "state_name": "Smoke" }
+      },
+      "known_issues": "PixelLab drew south walk frames 5 and 6 from behind; the builder replaces them with mirrored frames 1 and 2 (walk_fixes). Shirt reads as cream with red chest patches rather than visible embroidery. sit_bench adds a dark necktie and reads as a plain white shirt rather than a barong; sit_bench west was drawn facing east -> mirror(east).",
+      "walk_fixes": [
+        { "dir": "south", "frame": 5, "mirror_of": 1, "dx": 1 },
+        { "dir": "south", "frame": 6, "mirror_of": 2, "dx": 1 }
+      ],
+      "pose_fixes": [
+        { "pose": "sit_bench", "dir": "west", "mirror_of": "east" }
+      ]
+    },
+    "tourist": {
+      "id": "cdebf69f-0df2-43a3-997b-cab80b1ff317",
+      "name": "crowd tourist",
+      "description": "foreign tourist woman, fair skin, wide straw sun hat, sunglasses, sleeveless yellow floral top, khaki shorts, sandals, camera on a neck strap",
+      "walk_group_id": "8ccc8433-ba38-4377-b307-abd31113b1e4",
+      "walk_directions": ["south", "east", "north", "west"],
+      "poses": ["sit_bench", "sit_ground", "selfie"],
+      "states": {
+        "sit_bench": { "id": "1947e770-3edb-4e3f-bb00-b4318c47776d", "state_name": "Sit bench" },
+        "sit_ground": { "id": "33526433-d78d-4255-b3b1-2ce66438f31e", "state_name": "Sit ground" },
+        "selfie": { "id": "b326e826-367c-44ec-8823-dabb2425119d", "state_name": "Selfie" }
+      },
+      "known_issues": "camera is carried in the hand (appears/disappears across south walk frames) rather than on the neck strap; north walk hat is a lighter straw tone than the north rotation. selfie: phone raised in one hand, camera bag kept."
+    },
+    "teen": {
+      "id": "7d0f4f49-ffb0-4c8b-9681-82ecd3f9f864",
+      "name": "crowd teen",
+      "description": "Filipino teenager, brown skin, short black hair with undercut, oversized black graphic t-shirt, olive cargo shorts, white sneakers, holding a smartphone",
+      "walk_group_id": "630fbee6-f3ac-4448-9371-70fc45f6210e",
+      "walk_directions": ["south", "east", "north", "west"],
+      "poses": ["sit_bench", "sit_ground", "selfie"],
+      "states": {
+        "sit_bench": { "id": "b23cd9d1-4905-441f-9dbd-030320434ad5", "state_name": "Sit bench" },
+        "sit_ground": { "id": "c8ef8689-2fc1-4fef-8a53-89184579a87d", "state_name": "Sit ground" },
+        "selfie": { "id": "8d65b000-8d5e-4500-a429-ce99e4f68fd0", "state_name": "Selfie" }
+      },
+      "known_issues": "smartphone is only a few light pixels in the hand; faint grey marks on the back of the hair in north walk frames. sit_bench and sit_ground west rotations were drawn facing east -> mirror(east).",
+      "pose_fixes": [
+        { "pose": "sit_bench", "dir": "west", "mirror_of": "east" },
+        { "pose": "sit_ground", "dir": "west", "mirror_of": "east" }
+      ]
+    },
+    "lola": {
+      "id": "a83b5b19-938a-4baf-97bc-3f80e98ac9a3",
+      "name": "crowd lola",
+      "description": "elderly Filipina grandmother, short curly grey hair, loose pink floral house dress, flip-flop slippers, small woven bayong bag, brown skin, slightly stooped",
+      "walk_group_id": "2d524399-79e3-4f55-b999-182849370804",
+      "walk_directions": ["south", "east", "north", "west"],
+      "poses": ["sit_bench", "sit_ground"],
+      "states": {
+        "sit_bench": { "id": "332bf1c2-161f-4664-873d-b2de4f98bb83", "state_name": "Sit bench" },
+        "sit_ground": { "id": "8087e2c3-29cf-49af-94a1-5a9458972166", "state_name": "Sit ground" }
+      },
+      "known_issues": "west walk splits the dress into pink trouser legs on the stride frames; bayong bag appears/disappears between walk frames; not visibly stooped. sit poses fine; still not visibly stooped."
+    },
+    "youngPro": {
+      "id": "27887cde-38b2-4e46-ab01-79951005581e",
+      "name": "crowd youngPro",
+      "description": "young Filipina professional, light tan skin, long straight black hair, beige cardigan over white top, blue denim jeans, white sneakers, small black backpack",
+      "walk_group_id": "e42bf243-c7fe-44a8-830b-5066225b3c4f",
+      "walk_directions": ["south", "east", "north", "west"],
+      "poses": ["sit_bench", "sit_ground", "selfie"],
+      "states": {
+        "sit_bench": { "id": "5e1ffedf-d87d-436d-ad4d-e837cb17a5c0", "state_name": "Sit bench" },
+        "sit_ground": { "id": "ac345f4f-6fbe-4df0-906f-9ff137adfa76", "state_name": "Sit ground" },
+        "selfie": { "id": "11e9b0f6-7460-4309-8849-5b533e039d12", "state_name": "Selfie v2" }
+      },
+      "known_issues": "cardigan is inconsistent: beige sleeves in the rotations, bare arms / white sleeveless top in most south and west walk frames; backpack not visible from the north; one stray speck (north f2) is cleared by the builder's despeckle. selfie re-rolled once (v1 held a phone in each raised hand); v2 holds one phone, other arm down.",
+      "rejected_states": {
+        "f48f5bfb-3428-48b1-87e0-055feb74d080": "selfie v1: a phone in each raised hand"
+      }
+    },
+    "dad": {
+      "id": "d694d9eb-5517-432a-802f-efbdec0af119",
+      "name": "crowd dad",
+      "description": "middle-aged Filipino dad, brown skin, red baseball cap, navy and white striped polo shirt, khaki trousers, slight belly, brown loafers",
+      "walk_group_id": "47c418b6-44d9-48c8-9575-3df33eaf4758",
+      "walk_directions": ["south", "east", "north", "west"],
+      "poses": ["sit_bench", "sit_ground", "smoke"],
+      "states": {
+        "sit_bench": { "id": "d1239a5a-9fcd-4a06-817a-fae41af05517", "state_name": "Sit bench" },
+        "sit_ground": { "id": "affcfca6-b237-458d-a8a6-eef49bbbca18", "state_name": "Sit ground" },
+        "smoke": { "id": "3c9348a0-ce02-4b2a-bee0-adcc87382945", "state_name": "Smoke" }
+      },
+      "known_issues": "no visible belly; PixelLab drew south walk frame 5 from behind -> mirror(frame 1) (walk_fixes).",
+      "walk_fixes": [
+        { "dir": "south", "frame": 5, "mirror_of": 1, "dx": 0 }
+      ]
+    },
+    "parkStaff": {
+      "id": "f2dea4ce-b636-4093-9e82-073cf8e6902d",
+      "name": "crowd parkStaff",
+      "description": "park maintenance worker, brown skin, dark green work uniform shirt and dark green cap, dark grey work trousers, black rubber boots, cotton work gloves",
+      "walk_group_id": "4fbffabc-8f6b-4463-830e-70cd976ee864",
+      "walk_directions": ["south", "east", "north", "west"],
+      "poses": ["sit_bench", "smoke"],
+      "states": {
+        "sit_bench": { "id": "568fa239-cc6e-4829-a824-3ae94342aea0", "state_name": "Sit bench" },
+        "smoke": { "id": "f157f0a2-33af-4988-b667-6d083af1b65c", "state_name": "Smoke" }
+      },
+      "known_issues": "south walk frames 5-6 drawn from behind -> mirrored frames 1-2 (walk_fixes); work gloves read as pale hands; sit_bench west was drawn facing east -> mirror(east).",
+      "walk_fixes": [
+        { "dir": "south", "frame": 5, "mirror_of": 1, "dx": 0 },
+        { "dir": "south", "frame": 6, "mirror_of": 2, "dx": 1 }
+      ],
+      "pose_fixes": [
+        { "pose": "sit_bench", "dir": "west", "mirror_of": "east" }
+      ]
+    },
+    "rider": {
+      "id": "1f55884f-bc65-4727-b00d-fd7177c402ba",
+      "name": "crowd rider",
+      "description": "food delivery rider on foot, brown skin, bright pink rider jacket, black pants, black sneakers, square pink insulated delivery backpack box, carrying a black helmet",
+      "walk_group_id": "297ee835-4f43-4bbc-98f4-fb492c4460b2",
+      "walk_directions": ["south", "east", "north", "west"],
+      "poses": ["sit_bench", "sit_ground"],
+      "states": {
+        "sit_bench": { "id": "146940b3-4db7-42b1-a360-73d461167c98", "state_name": "Sit bench" },
+        "sit_ground": { "id": "55eb1f61-f14f-4fa8-aed7-a125690bcf64", "state_name": "Sit ground" }
+      },
+      "known_issues": "no helmet visible in any frame; the insulated delivery box reads as a pink backpack (box shape only from the side); south walk shows a dark ponytail/pack mass at her left."
+    },
+    "expat": {
+      "id": "bb3f8a96-5ca7-4986-bb4e-4a5dd5c01616",
+      "name": "crowd expat",
+      "description": "western expat businessman, fair skin, short brown hair, navy suit jacket with open collar white shirt, grey trousers, brown shoes, black briefcase",
+      "walk_group_id": "d9986c53-8430-4668-81bc-f942cfdb5304",
+      "walk_directions": ["south", "east", "north", "west"],
+      "poses": ["sit_bench"],
+      "states": {
+        "sit_bench": { "id": "cd8e797b-b16a-4c16-9f8c-a11b5bdf61fc", "state_name": "Sit bench" }
+      },
+      "known_issues": "wears a blue tie despite 'open collar'; briefcase flickers in/out of the E/W walk; south walk frame 4 lost the tie/lapels -> mirror(frame 0) (walk_fixes); sit_bench puts the briefcase on the ground beside him.",
+      "walk_fixes": [
+        { "dir": "south", "frame": 4, "mirror_of": 0, "dx": 1 }
+      ]
+    }
+  }
+}

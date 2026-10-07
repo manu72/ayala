@@ -1,3 +1,5 @@
+import { PETS } from "../data/pets";
+import type { NPCCatConfig } from "../sprites/NPCCat";
 /**
  * Pure helpers for the dynamic colony-count model.
  *
@@ -45,4 +47,45 @@ export function decrementColonyTotal(current: number, floor: number): number {
   const safeCurrent = Number.isFinite(current) ? Math.floor(current) : floor;
   const safeFloor = Number.isFinite(floor) ? Math.floor(floor) : 0;
   return Math.max(safeFloor, safeCurrent - 1);
+}
+
+const LEGACY_CAT_SHEETS = ["mammacat", "blacky", "tiger", "jayco", "fluffy"];
+
+/**
+ * Look for background colony cat number `index`. The first two are Cat cat and
+ * Mittens (PixelLab, 4-direction walks) — one of each, they are individuals;
+ * everyone else uses the legacy sheets. Fixed per index, so a cat Mamma Cat has
+ * learned the name of looks the same every session.
+ */
+export function backgroundCatLook(index: number): Pick<NPCCatConfig, "spriteKey" | "scale" | "layout"> {
+  const pet = index === 0 ? PETS.catcat : index === 1 ? PETS.mittens : null;
+  if (pet) return { spriteKey: pet.texture, scale: pet.scale, layout: "pixellab" };
+  return { spriteKey: LEGACY_CAT_SHEETS[index % LEGACY_CAT_SHEETS.length] ?? "blacky" };
+}
+
+/** What the colony calls its background cats, by index (the first two are the PixelLab pets). */
+const COLONY_CAT_NAMES = [
+  "Cat cat", "Mittens", "Muning", "Mingming", "Tagpi", "Kuting", "Ganda", "Pogi",
+  "Bunso", "Tisoy", "Kape", "Ube", "Mochi", "Puti", "Itim", "Pandesal",
+  "Siopao", "Bituin", "Sungit", "Taba", "Kulot", "Bulak", "Dilaw", "Kidlat",
+  "Choco", "Mais", "Bibingka", "Sinigang", "Lambing", "Tala", "Ulan", "Kisig",
+];
+
+/** Background colony cat `index`'s name: fixed per index, numbered once the list runs out. */
+export function colonyCatName(index: number): string {
+  const base = COLONY_CAT_NAMES[index % COLONY_CAT_NAMES.length] ?? "Mingming";
+  const round = Math.floor(index / COLONY_CAT_NAMES.length);
+  return round === 0 ? base : `${base} ${round + 1}`;
+}
+
+/** The first `count` background indices, skipping cats lost to snatchers (they never come back). */
+export function backgroundIndices(count: number, lost: ReadonlySet<number>): number[] {
+  const out: number[] = [];
+  for (let i = 0; out.length < count; i++) if (!lost.has(i)) out.push(i);
+  return out;
+}
+
+/** A saved list of background indices (registry values may be missing or corrupt). */
+export function readIndexList(value: unknown): number[] {
+  return Array.isArray(value) ? value.filter((v): v is number => Number.isInteger(v) && v >= 0) : [];
 }

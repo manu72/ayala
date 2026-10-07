@@ -628,6 +628,47 @@ describe('HumanNPC — care route (waypointPause / sustain / exitAfterRoute)', (
     expect(npc.visible).toBe(true)
   })
 
+  it('never walks off mid-beat: the phase-end exit waits for the encounter pause to release', () => {
+    const { npc } = makeHuman({
+      type: 'camille',
+      lingerWaypointIndex: 0,
+      path: [
+        { x: 0, y: 0 },
+        { x: 400, y: 0 },
+      ],
+      waypointPauseMs: [0, 0],
+      activePhases: ['evening'],
+    })
+    const exiting = () => (npc as unknown as { exiting: boolean }).exiting
+    npc.setPhase('evening')
+    npc.update(16)
+    npc.pauseForEncounter(100)
+    npc.setPhase('night')
+    expect(exiting()).toBe(false)
+    expect(npc.visible).toBe(true)
+    npc.resumeFromEncounter()
+    npc.setPhase('night')
+    expect(exiting()).toBe(true)
+  })
+
+  it('sustainAcrossInactivePhases still walks the NPC out when night falls', () => {
+    const { npc } = makeHuman({
+      type: 'camille',
+      lingerWaypointIndex: 0,
+      path: [
+        { x: 0, y: 0 },
+        { x: 400, y: 0 },
+      ],
+      waypointPauseMs: [0, 0],
+      activePhases: ['dawn', 'evening'],
+      sustainAcrossInactivePhases: true,
+    })
+    npc.setPhase('evening')
+    npc.update(16)
+    npc.setPhase('night')
+    expect((npc as unknown as { exiting: boolean }).exiting).toBe(true)
+  })
+
   it('exitAfterRoute invokes onExitParkComplete once then deactivates at the park edge', () => {
     let exits = 0
     const { npc } = makeHuman({

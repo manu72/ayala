@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import { computeBackgroundSpawnCount, decrementColonyTotal } from '../../src/utils/colonySpawn'
+import {
+  backgroundIndices,
+  colonyCatName,
+  computeBackgroundSpawnCount,
+  decrementColonyTotal,
+  readIndexList,
+} from '../../src/utils/colonySpawn'
 
 /**
  * `COLONY_COUNT` is the total colony population (named + Mamma + background).
@@ -74,5 +80,27 @@ describe('decrementColonyTotal', () => {
   it('non-finite floor is treated as 0', () => {
     expect(decrementColonyTotal(5, Number.NaN)).toBe(4)
     expect(decrementColonyTotal(0, Number.NaN)).toBe(0)
+  })
+})
+
+describe('colony cat names', () => {
+  it('gives every background index its own fixed name, the pets theirs', () => {
+    expect([colonyCatName(0), colonyCatName(1)]).toEqual(['Cat cat', 'Mittens'])
+    const names = Array.from({ length: 100 }, (_, i) => colonyCatName(i))
+    expect(new Set(names).size).toBe(100)
+    expect(names).toEqual(Array.from({ length: 100 }, (_, i) => colonyCatName(i)))
+  })
+
+  it('skips cats lost to snatchers when filling the roster', () => {
+    expect(backgroundIndices(4, new Set())).toEqual([0, 1, 2, 3])
+    expect(backgroundIndices(4, new Set([1, 3]))).toEqual([0, 2, 4, 5])
+    expect(backgroundIndices(0, new Set([0]))).toEqual([])
+  })
+
+  it('reads saved index lists defensively', () => {
+    expect(readIndexList([0, 3, 7])).toEqual([0, 3, 7])
+    expect(readIndexList([1, -1, 2.5, 'x', null, NaN, 4])).toEqual([1, 4])
+    expect(readIndexList(undefined)).toEqual([])
+    expect(readIndexList('3')).toEqual([])
   })
 })

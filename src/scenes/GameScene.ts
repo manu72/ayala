@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 import { MammaCat } from "../sprites/MammaCat";
 import { NPCCat } from "../sprites/NPCCat";
-import { GuardNPC } from "../sprites/GuardNPC";
+import { GUARD_HEAD_DROP_PX, GuardNPC } from "../sprites/GuardNPC";
 import type { HumanConfig } from "../sprites/HumanNPC";
 import { DogNPC } from "../sprites/DogNPC";
 import { DayNightCycle } from "../systems/DayNightCycle";
@@ -19,6 +19,11 @@ import { ColonyDynamicsSystem } from "../systems/ColonyDynamicsSystem";
 import { SnatcherSystem } from "../systems/SnatcherSystem";
 import { HumanPresenceSystem } from "../systems/HumanPresenceSystem";
 import { CollapseSystem } from "../systems/CollapseSystem";
+import { TrafficSystem, type TrafficCat } from "../systems/TrafficSystem";
+import { RoadMarkings } from "../systems/RoadMarkings";
+import { NightLights } from "../systems/NightLights";
+import { nightLevel } from "../utils/nightLevel";
+import { AmbientCrowdSystem } from "../systems/AmbientCrowdSystem";
 import { CatDialogueController } from "../systems/CatDialogueController";
 import type { HUDScene } from "./HUDScene";
 import {
@@ -27,7 +32,14 @@ import {
   CHAPTER_REARM_MOVE_PX,
   TERRITORY_NEGOTIATION_NEAR_STEPS_PX,
   TERRITORY_JAYCO_TRUST_REQUIRED,
+  TERRITORY_RADIUS_PX,
+  SHELTER_RADIUS_PX,
+  CAR_FRIGHT_RADIUS_PX,
+  SFX_EAR_RANGE_PX,
+  DRINK_REACH_PX,
 } from "../config/gameplayConstants";
+import { CatWaterTrips } from "../systems/CatWaterTrips";
+import { drinkSpots, isWaterTile, waterWithin } from "../utils/waterEdge";
 import { StoryKeys, migrateLegacyIntroFlag } from "../registry/storyKeys";
 import {
   ScriptedDialogueService,
@@ -41,7 +53,20 @@ import { NPC_DIALOGUE_SCRIPTS } from "../data/npc-dialogue";
 import { AudioSystem } from "../systems/AudioSystem";
 import { CamilleEncounterSystem } from "../systems/CamilleEncounterSystem";
 import { hasLineOfSightTiles } from "../utils/lineOfSight";
+import { exposeFacesTowardRoads, isRoadTile } from "../utils/roadTiles";
 import { createNavigationGrid, routeHumanPath, type NavigationGrid } from "../utils/humanRoutePath";
+import {
+  closestOnPolyline,
+  placeNamed,
+  placesOfType,
+  pointInRect,
+  readPlaces,
+  tiledProps,
+  type MapPlace,
+  type Pt,
+} from "../utils/mapPlaces";
+import { planKerbsideDropoff, type DropoffPlan } from "../utils/kerbsideDropoff";
+import { STORY_SUV_COLOUR_CYCLE, STORY_VEHICLES, VEHICLE_ATLAS } from "../data/vehicles";
 import { applyLifeLoss, MAX_LIVES } from "../utils/lifeFlow";
 import { markGameOver } from "../utils/gameOverState";
 import { consumeSnatchedThisNight, restoreSnatchedThisNight } from "../utils/snatcherNightState";
@@ -56,28 +81,23 @@ const TILE_SIZE = GP.TILE_SIZE;
 // `CatDialogueController` now (Commit D).
 
 const DEFAULT_ZOOM = 2.5;
-const PEEK_ZOOM = 0.8;
+const PEEK_ZOOM = 0.5;
 const ZOOM_DURATION = 500;
-const DROPOFF_SUV_TEXTURE = "suv_small";
-const DROPOFF_COROLLA_TEXTURE = "corolla_small";
-const DROPOFF_SUV_DISPLAY_WIDTH = 72;
-const DROPOFF_SUV_DISPLAY_HEIGHT = 28;
-const DROPOFF_COROLLA_DISPLAY_WIDTH = 68;
-const DROPOFF_COROLLA_DISPLAY_HEIGHT = 28;
-const DROPOFF_SUV_TINT_CYCLE: ReadonlyArray<number | null> = [
-  0x111111,
-  0xffd43b,
-  0x2f9e44,
-  0xd9480f,
-  0x1c7ed6,
-  null,
-];
+/** A second Tab this soon after the first shows the whole map. */
+const FULL_MAP_DOUBLE_TAP_MS = 300;
+/** A cat's walk to the water ends with up to this many tiles walked straight from where the nav grid stops. */
+const LAST_HOP_TILES = 3;
+/** Top-down story cars from the `vehicles` atlas, drawn at native (real) scale; nose east, rotation = heading. */
+const DROPOFF_SUV_FRAME = STORY_VEHICLES.suv.frame;
+const DROPOFF_COROLLA_FRAME = STORY_VEHICLES.corolla.frame;
+/** Same world-fixed soft shadow as ambient traffic (TrafficSystem). */
+const DROPOFF_SHADOW_ALPHA = 0.28;
+const DROPOFF_SHADOW_DX = 3;
+const DROPOFF_SHADOW_DY = 4;
 
 export interface DropoffVehicleOptions {
-  texture?: string;
-  displayWidth?: number;
-  displayHeight?: number;
-  tint?: number | null;
+  /** `vehicles` atlas frame; defaults to the silver story SUV. */
+  frame?: string;
 }
 
 export interface NPCEntry {
@@ -97,6 +117,11 @@ export class GameScene extends Phaser.Scene {
   restHoldTimer = 0;
   restHoldActive = false;
   isPeeking = false;
+  /** Peeking at the whole map (double-tap Tab): the camera has let go of Mamma Cat. */
+  private showingFullMap = false;
+  /** Colony cats' walks to the pond, fountain pool and waterfall to drink. */
+  private waterTrips?: CatWaterTrips<NPCCat>;
+  private lastPeekTapAt = Number.NEGATIVE_INFINITY;
   isPaused = false;
   cinematicActive = false;
 
@@ -128,6 +153,14 @@ export class GameScene extends Phaser.Scene {
   groundLayer: Phaser.Tilemaps.TilemapLayer | null = null;
   /** Objects collision layer, shared with {@link ColonyDynamicsSystem} + {@link SnatcherSystem}. */
   objectsLayer: Phaser.Tilemaps.TilemapLayer | null = null;
+  /** The map's `places` layer (traffic lanes, exits, zones, crowd anchors, routes) in world px. */
+  places: MapPlace[] = [];
+  /** Park exits for ambient humans (underpass mouths, mall, towers, crossing) from the map. */
+  parkExits: Pt[] = [];
+  /** Generator's `mapRevision` map property; saves made on another map keep story but not positions. */
+  mapRevision = "";
+  /** Clearance nav grid, built once per map load (tile collision never changes at runtime). */
+  private humanNavGrid: NavigationGrid | null = null;
   private overheadLayer!: Phaser.Tilemaps.TilemapLayer | null;
   /** Shared with {@link CamilleEncounterSystem} for spawn-point lookup. */
   map!: Phaser.Tilemaps.Tilemap;
@@ -174,6 +207,12 @@ export class GameScene extends Phaser.Scene {
   colony!: ColonyDynamicsSystem;
   /** Owns nightly snatcher spawn/detect/capture + colony-cat grab sweep. */
   snatcher!: SnatcherSystem;
+  /** Ambient cars on the real carriageways (visual only; roads already block movement). */
+  traffic!: TrafficSystem;
+  private roadMarkings?: RoadMarkings;
+  private nightLights?: NightLights;
+  /** Anonymous park-goers and the extra security guards (no story effects). */
+  private crowd?: AmbientCrowdSystem;
   /**
    * Owns the looping background music (ambient ↔ danger crossfade) and
    * one-shot SFX. Public so HUDScene can hook the mute toggle.
@@ -282,6 +321,10 @@ export class GameScene extends Phaser.Scene {
     // on our subsystems; it only fires the scene-level SHUTDOWN event, which
     // we chain into these (WORKING_MEMORY "Scene Lifecycle — shutdown is
     // NOT auto-wired").
+    this.traffic?.destroy();
+    this.roadMarkings?.destroy();
+    this.nightLights?.destroy();
+    this.crowd?.destroy();
     this.snatcher?.shutdown();
     this.colony?.shutdown();
     this.camille?.shutdown();
@@ -340,24 +383,38 @@ export class GameScene extends Phaser.Scene {
     this.restHoldTimer = 0;
     this.restHoldActive = false;
     this.isPeeking = false;
+    this.showingFullMap = false;
+    this.lastPeekTapAt = Number.NEGATIVE_INFINITY;
     this.isPaused = false;
     this.collapse = new CollapseSystem(this);
     this.collapse.resetTransient();
 
-    this.map = this.make.tilemap({ key: "atg" });
+    // insertNull: empty cells stay null instead of becoming Tile objects (the art/shade/roof
+    // layers are mostly empty and 291x230 each); every getTileAt call here already treats empty as null.
+    this.map = this.make.tilemap({ key: "atg", insertNull: true });
     const parkTileset = this.map.addTilesetImage("park-tiles", "park-tiles");
     if (!parkTileset) throw new Error('Failed to load tileset "park-tiles"');
     const treesTileset = this.map.addTilesetImage("trees-pale", "trees-pale");
     if (!treesTileset) throw new Error('Failed to load tileset "trees-pale"');
     const plantsTileset = this.map.addTilesetImage("plants", "plants");
     if (!plantsTileset) throw new Error('Failed to load tileset "plants"');
-    const tilesets = [parkTileset, treesTileset, plantsTileset].filter(Boolean) as Phaser.Tilemaps.Tileset[];
+    const groundArtTileset = this.map.addTilesetImage("atg-ground", "atg-ground");
+    if (!groundArtTileset) throw new Error('Failed to load tileset "atg-ground"');
+    const tilesets = [parkTileset, treesTileset, plantsTileset, groundArtTileset];
 
+    // `ground` is the gameplay layer (collision, tile queries) and is never drawn;
+    // `groundArt` + `shade` draw it, offset half a tile (dual-grid autotiles).
     const rawGroundLayer = this.map.createLayer("ground", tilesets, 0, 0);
     if (rawGroundLayer && "setCollisionByProperty" in rawGroundLayer) {
       this.groundLayer = rawGroundLayer as Phaser.Tilemaps.TilemapLayer;
       this.groundLayer.setCollisionByProperty({ collides: true });
+      // Mamma Cat walks on roads (see the player's ground collider), so buildings need their road-side edges back.
+      const ground = this.groundLayer;
+      exposeFacesTowardRoads(this.map.width, this.map.height, (x, y) => ground.getTileAt(x, y));
+      this.groundLayer.setVisible(false); // Phaser ignores Tiled's layer visibility; collision doesn't need drawing
     }
+    this.map.createLayer("groundArt", tilesets);
+    this.map.createLayer("shade", tilesets);
 
     const rawObjectsLayer = this.map.createLayer("objects", tilesets, 0, 0);
     if (rawObjectsLayer && "setCollisionByProperty" in rawObjectsLayer) {
@@ -369,6 +426,26 @@ export class GameScene extends Phaser.Scene {
     if (this.overheadLayer) {
       this.overheadLayer.setDepth(10);
     }
+    this.map.createLayer("roofArt", tilesets)?.setDepth(10);
+    this.places = readPlaces(this.map.getObjectLayer("places")?.objects ?? []);
+    this.parkExits = placesOfType(this.places, "exit").map(({ x, y }) => ({ x, y }));
+    this.mapRevision = String(tiledProps(this.map.properties).mapRevision ?? "");
+    this.humanNavGrid = null;
+    const isDrivable = (x: number, y: number) => this.groundLayer?.getTileAtWorldXY(x, y)?.collides ?? true;
+    this.traffic = new TrafficSystem(this, this.places, {
+      bounds: { width: this.map.widthInPixels, height: this.map.heightInPixels },
+      isDrivable,
+      maxCars: 140,
+      isCovered: (x, y) => this.overheadLayer?.getTileAtWorldXY(x, y) != null,
+      cat: () => this.catForTraffic(),
+      onScreech: (x, y) => this.onCarScreech(x, y),
+      onHorn: (x, y) => this.audio?.playCarHorn(this.earVolume(x, y)),
+    });
+    this.roadMarkings = new RoadMarkings(this, this.places, {
+      lanesFor: (name) => this.traffic.lanesFor(name),
+      isDrivable,
+    });
+    this.nightLights = new NightLights(this, this.places);
     this.placePlaygroundCarabao();
     this.placeStarbucksLogo();
     this.cacheShelterPoints();
@@ -376,6 +453,7 @@ export class GameScene extends Phaser.Scene {
     const spawnPoint = this.map.findObject("spawns", (obj) => obj.name === "spawn_mammacat");
     let spawnX = spawnPoint?.x ?? this.map.widthInPixels / 2;
     let spawnY = spawnPoint?.y ?? this.map.heightInPixels / 2;
+    const parkSpawn = { x: spawnX, y: spawnY };
 
     this.stats = new StatsSystem();
     this.dayNight = new DayNightCycle(this);
@@ -458,6 +536,8 @@ export class GameScene extends Phaser.Scene {
       StoryKeys.FIRST_SNATCHER_SEEN,
       StoryKeys.COLLAPSE_COUNT,
       StoryKeys.COLONY_COUNT,
+      StoryKeys.COLONY_NAMED,
+      StoryKeys.COLONY_LOST,
     ]) {
       this.registry.remove(key);
     }
@@ -474,15 +554,23 @@ export class GameScene extends Phaser.Scene {
     if (data?.loadSave) {
       const save = SaveSystem.load();
       if (save) {
-        spawnX = save.playerPosition.x;
-        spawnY = save.playerPosition.y;
+        // Positions only mean something on the map they were saved on (0.5.0 rebuilt the map).
+        const sameMap = save.mapRevision === this.mapRevision;
+        const savedTileX = Math.floor(save.playerPosition.x / TILE_SIZE);
+        const savedTileY = Math.floor(save.playerPosition.y / TILE_SIZE);
+        if (sameMap && !this.isPlayerCellBlocked(savedTileX, savedTileY)) {
+          spawnX = save.playerPosition.x;
+          spawnY = save.playerPosition.y;
+        }
         this.stats.fromJSON(save.stats);
         this.dayNight.restore(save.timeOfDay, save.gameTimeMs);
-        savedSourceStates = save.sourceStates;
+        savedSourceStates = sameMap ? save.sourceStates : undefined;
         if (save.trust) this.trust.fromJSON(save.trust);
         if (save.territory) this.territory.fromJSON(save.territory);
         this.lives = save.lives;
-        this.scoring.fromJSON(save.runScore);
+        this.scoring.fromJSON(
+          sameMap ? save.runScore : { ...save.runScore, visitedCells: [], foodSourcesDiscovered: [] },
+        );
         for (const [key, val] of Object.entries(save.variables)) {
           this.registry.set(key, val);
         }
@@ -512,35 +600,43 @@ export class GameScene extends Phaser.Scene {
     }
 
     if (this.groundLayer) {
-      this.physics.add.collider(this.player, this.groundLayer);
+      // Roads collide for everyone else (traffic lanes, human nav grid, NPC cats); Mamma Cat may cross them.
+      this.physics.add.collider(
+        this.player,
+        this.groundLayer,
+        undefined,
+        (_player, tile) => !isRoadTile(tile as Phaser.Tilemaps.Tile),
+      );
     }
     if (this.objectsLayer) {
       this.physics.add.collider(this.player, this.objectsLayer);
     }
-    this.initialiseTerritoryExploration(spawnX, spawnY);
+    // Explorable ground is the park, flooded from the map spawn: a save may leave her on or across a road.
+    this.initialiseTerritoryExploration(parkSpawn.x, parkSpawn.y);
 
     const savedKnown = this.registry.get("KNOWN_CATS") as string[] | undefined;
     this.knownCats = new Set(savedKnown ?? []);
 
-    const blacky = this.spawnNPC("Blacky", "blacky", "spawn_blacky", "neutral", 150, 411, 1083);
+    const blacky = this.spawnNPC("Blacky", "blacky", "spawn_blacky", "neutral", 150, 3536, 2480);
     blacky.setTint(0x333333);
-    this.spawnNPC("Tiger", "tiger", "spawn_tiger", "territorial", 200, 1141, 632);
-    this.spawnNPC("Jayco", "jayco", "spawn_jayco", "friendly", 150, 1427, 484);
+    this.spawnNPC("Tiger", "tiger", "spawn_tiger", "territorial", 200, 4080, 2864);
+    this.spawnNPC("Jayco", "jayco", "spawn_jayco", "friendly", 150, 7088, 3280);
 
-    this.spawnNPC("Jayco Jr", "jayco", "spawn_jayco_jr", "friendly", 100, 1470, 520, {
+    this.spawnNPC("Jayco Jr", "jayco", "spawn_jayco_jr", "friendly", 100, 6512, 3184, {
       scale: 0.7,
       walkSpeed: 40,
       hyperactive: true,
     });
-    this.spawnNPC("Fluffy", "fluffy", "spawn_fluffy", "neutral", 180, 1500, 900);
-    this.spawnNPC("Pedigree", "fluffy", "spawn_pedigree", "neutral", 150, 2500, 1700);
+    this.spawnNPC("Fluffy", "fluffy", "spawn_fluffy", "neutral", 180, 7184, 2896);
+    this.spawnNPC("Pedigree", "fluffy", "spawn_pedigree", "neutral", 150, 6448, 4656);
     this.spawnGingerTwins();
     this.colony.spawnInitialBackgroundCats();
+    this.startWaterTrips();
 
     this.restoreDispositions();
 
     const guardPoint = this.map.findObject("spawns", (o) => o.name === "spawn_guard");
-    this.guard = new GuardNPC(this, guardPoint?.x ?? 2169, guardPoint?.y ?? 1791);
+    this.guard = new GuardNPC(this, guardPoint?.x ?? 5840, guardPoint?.y ?? 4272);
     this.guard.setTarget(this.player);
     if (this.groundLayer) {
       this.physics.add.collider(this.guard, this.groundLayer);
@@ -548,11 +644,21 @@ export class GameScene extends Phaser.Scene {
     if (this.objectsLayer) {
       this.physics.add.collider(this.guard, this.objectsLayer);
     }
-    this.guardIndicator = new ThreatIndicator(this, this.guard, "Guard", "dangerous", true);
+    this.guardIndicator = new ThreatIndicator(this, this.guard, "Guard", "dangerous", true, GUARD_HEAD_DROP_PX);
+    this.crowd = new AmbientCrowdSystem(this, {
+      places: this.places,
+      spawns: readPlaces(this.map.getObjectLayer("spawns")?.objects ?? []),
+      player: this.player,
+      groundLayer: this.groundLayer,
+      objectsLayer: this.objectsLayer,
+      emotes: this.emotes,
+    });
 
     this.humans.spawnAmbientHumans();
 
     this.foodSources = new FoodSourceManager(this);
+    // Real water never runs out: she drinks at any edge of the pond, fountain pools and waterfall.
+    this.foodSources.setOpenWater((x, y) => waterWithin({ x, y }, DRINK_REACH_PX, TILE_SIZE, this.isWaterCell));
     if (savedSourceStates && savedSourceStates.length > 0) {
       this.foodSources.restoreFromStates(savedSourceStates);
     } else {
@@ -694,8 +800,8 @@ export class GameScene extends Phaser.Scene {
 
   private placePlaygroundCarabao(): void {
     const playgroundPoint = this.map.findObject("spawns", (obj) => obj.name === "poi_playground");
-    const carabaoX = (playgroundPoint?.x ?? 22 * TILE_SIZE) + TILE_SIZE * 0.5;
-    const carabaoY = (playgroundPoint?.y ?? 31 * TILE_SIZE) + TILE_SIZE * 4;
+    const carabaoX = (playgroundPoint?.x ?? 156 * TILE_SIZE) + TILE_SIZE * 0.5;
+    const carabaoY = (playgroundPoint?.y ?? 68 * TILE_SIZE) + TILE_SIZE * 4;
     const hornbillX = carabaoX - TILE_SIZE * 3;
     const hornbillY = carabaoY - TILE_SIZE * 3;
 
@@ -705,44 +811,62 @@ export class GameScene extends Phaser.Scene {
 
   private placeStarbucksLogo(): void {
     const waterPoint = this.map.findObject("spawns", (obj) => obj.name === "poi_starbucks_water");
-    const logoX = (waterPoint?.x ?? 74 * TILE_SIZE) + TILE_SIZE * 2;
-    const logoY = (waterPoint?.y ?? 2 * TILE_SIZE) - TILE_SIZE;
+    const logoX = (waterPoint?.x ?? 202 * TILE_SIZE) + TILE_SIZE * 2;
+    const logoY = (waterPoint?.y ?? 91 * TILE_SIZE) - TILE_SIZE;
 
     this.add.image(logoX, logoY, "starbucks_logo").setOrigin(0.5, 0.5).setScale(0.3).setDepth(4);
   }
 
-  private tintForSuvDropoff(sequenceIndex: number): number | null {
-    return DROPOFF_SUV_TINT_CYCLE[(sequenceIndex - 1) % DROPOFF_SUV_TINT_CYCLE.length] ?? null;
+  private frameForSuvDropoff(sequenceIndex: number): string {
+    // Baked colours replacing the old tint cycle: black, yellow, green, orange, blue, silver.
+    return STORY_SUV_COLOUR_CYCLE[(sequenceIndex - 1) % STORY_SUV_COLOUR_CYCLE.length] ?? DROPOFF_SUV_FRAME;
   }
 
   /** Called by the intro cinematic (this scene) and {@link ColonyDynamicsSystem} dumping events. */
   vehicleOptionsForDumpingEvent(eventNum: number): DropoffVehicleOptions {
     if (eventNum === 1) {
-      return {
-        texture: DROPOFF_COROLLA_TEXTURE,
-        displayWidth: DROPOFF_COROLLA_DISPLAY_WIDTH,
-        displayHeight: DROPOFF_COROLLA_DISPLAY_HEIGHT,
-      };
+      return { frame: DROPOFF_COROLLA_FRAME };
     }
 
-    return { tint: this.tintForSuvDropoff(eventNum - 1) };
+    return { frame: this.frameForSuvDropoff(eventNum - 1) };
   }
 
-  /** Called by the intro cinematic (this scene) and {@link ColonyDynamicsSystem} dumping events. */
+  /**
+   * Called by the intro cinematic (this scene) and {@link ColonyDynamicsSystem} dumping events.
+   * Callers tween the returned car; a world-fixed shadow follows it each frame and dies with it.
+   */
   addDropoffVehicle(x: number, y: number, options: DropoffVehicleOptions = {}): Phaser.GameObjects.Image {
-    const texture = options.texture ?? DROPOFF_SUV_TEXTURE;
-    const displayWidth = options.displayWidth ?? DROPOFF_SUV_DISPLAY_WIDTH;
-    const displayHeight = options.displayHeight ?? DROPOFF_SUV_DISPLAY_HEIGHT;
-    const tint = options.tint ?? null;
-
-    const vehicle = this.add
-      .image(x, y, texture)
-      .setDisplaySize(displayWidth, displayHeight)
-      .setDepth(4);
-
-    if (tint !== null) {
-      vehicle.setTint(tint);
-    }
+    const frame = options.frame ?? DROPOFF_SUV_FRAME;
+    const vehicle = this.add.image(x, y, VEHICLE_ATLAS, frame).setDepth(4);
+    const fx = this.sys.game.renderer.type === Phaser.WEBGL; // tint shadows and additive light need WebGL
+    const shadow = this.add.image(x, y, VEHICLE_ATLAS, frame).setDepth(4 - 0.01).setTint(0x000000);
+    // headlights after dusk (the intro drop happens at night), same look as the traffic
+    const beam = fx && this.textures.exists("light_beam")
+      ? this.add.image(x, y, "light_beam").setOrigin(0, 0.5).setDepth(51).setBlendMode(Phaser.BlendModes.ADD).setTint(0xfff1d0)
+      : null;
+    const follow = (): void => {
+      shadow
+        .setPosition(vehicle.x + DROPOFF_SHADOW_DX, vehicle.y + DROPOFF_SHADOW_DY)
+        .setRotation(vehicle.rotation)
+        .setAlpha(vehicle.alpha * DROPOFF_SHADOW_ALPHA)
+        .setVisible(vehicle.visible && fx);
+      if (beam) {
+        const night = this.dayNight ? nightLevel(this.dayNight.currentPhase, this.dayNight.phaseProgress) : 0;
+        const nose = vehicle.displayWidth / 2;
+        beam
+          .setPosition(vehicle.x + Math.cos(vehicle.rotation) * nose, vehicle.y + Math.sin(vehicle.rotation) * nose)
+          .setRotation(vehicle.rotation)
+          .setAlpha(vehicle.alpha * night * 0.32)
+          .setVisible(vehicle.visible && night > 0.02 && this.overheadLayer?.getTileAtWorldXY(beam.x, beam.y) == null);
+      }
+    };
+    follow();
+    this.events.on(Phaser.Scenes.Events.PRE_RENDER, follow);
+    vehicle.once(Phaser.GameObjects.Events.DESTROY, () => {
+      this.events.off(Phaser.Scenes.Events.PRE_RENDER, follow);
+      shadow.destroy();
+      beam?.destroy();
+    });
 
     return vehicle;
   }
@@ -813,23 +937,30 @@ export class GameScene extends Phaser.Scene {
       });
     });
 
-    const roadY = spawnY + 32;
-    const carOffscreenX = spawnX + 400;
-    const carStopX = spawnX + 24;
+    // The car comes down the real carriageway beside spawn_mammacat and pulls over at the kerb.
+    const plan = this.planDropoff({ x: spawnX, y: spawnY });
+    const roadY = plan?.start.y ?? spawnY + 32;
+    const carOffscreenX = plan?.start.x ?? spawnX + 400;
+    const carStop = plan?.stop ?? { x: spawnX + 24, y: roadY };
+    const carExit = plan?.exit ?? { x: carOffscreenX + 200, y: roadY };
+    const dropAt = plan ? this.kerbDropPoint(plan, { x: spawnX, y: spawnY }) : { x: carStop.x - 20, y: roadY - 4 };
 
     const car = this.addDropoffVehicle(carOffscreenX, roadY);
+    if (plan) car.setRotation(plan.rotation).setFlipX(plan.flipX);
+    if (plan) this.traffic.reserve(plan.stop, 700);
 
     this.queueIntroDelayed(4500, () => {
       this.queueIntroTween({
         targets: car,
-        x: carStopX,
+        x: carStop.x,
+        y: carStop.y,
         duration: 2000,
         ease: "Cubic.easeOut",
       });
     });
 
     this.queueIntroDelayed(7500, () => {
-      this.player.setPosition(carStopX - 20, roadY - 4);
+      this.player.setPosition(dropAt.x, dropAt.y);
       this.player.setVisible(true);
       this.player.enterForcedCrouchPose();
     });
@@ -837,7 +968,8 @@ export class GameScene extends Phaser.Scene {
     this.queueIntroDelayed(9000, () => {
       this.queueIntroTween({
         targets: car,
-        x: carOffscreenX + 200,
+        x: carExit.x,
+        y: carExit.y,
         duration: 2500,
         ease: "Cubic.easeIn",
         onComplete: () => car.destroy(),
@@ -862,6 +994,7 @@ export class GameScene extends Phaser.Scene {
 
   private endIntroCinematic(): void {
     this.cinematicActive = false;
+    this.traffic.release();
     // Route cleanup through the shared helper so any still-running tweens or
     // pending delayed calls are actually cancelled (not just dereferenced).
     // Today the final scheduled tween finishes at ~11.5s and endIntroCinematic
@@ -1020,9 +1153,34 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private togglePeekInput(): void {
-    this.isPeeking = !this.isPeeking;
-    this.cameras.main.zoomTo(this.isPeeking ? PEEK_ZOOM : DEFAULT_ZOOM, ZOOM_DURATION);
+  /** Tab: look around, and back. A quick double tap shows the whole map. */
+  private togglePeekInput(time: number): void {
+    const doubleTap = !this.showingFullMap && time - this.lastPeekTapAt < FULL_MAP_DOUBLE_TAP_MS;
+    this.lastPeekTapAt = doubleTap ? Number.NEGATIVE_INFINITY : time;
+    this.isPeeking = doubleTap || !this.isPeeking;
+    this.setCameraView(doubleTap ? "map" : this.isPeeking ? "peek" : "cat");
+  }
+
+  /** Follow Mamma Cat at the normal or peek zoom, or let go of her and fit the whole map in view. */
+  private setCameraView(view: "cat" | "peek" | "map"): void {
+    const cam = this.cameras.main;
+    const { widthInPixels: w, heightInPixels: h } = this.map;
+    if (view === "map") {
+      this.showingFullMap = true;
+      cam.stopFollow();
+      cam.removeBounds(); // bounds would pin the map to the view's left edge instead of centring it
+      cam.pan(w / 2, h / 2, ZOOM_DURATION, "Sine.easeInOut", true);
+      cam.zoomTo(Math.min(cam.width / w, cam.height / h), ZOOM_DURATION, "Sine.easeInOut", true);
+      return;
+    }
+    if (this.showingFullMap) {
+      this.showingFullMap = false;
+      cam.panEffect.reset();
+      cam.setBounds(0, 0, w, h);
+      cam.startFollow(this.player, true, 0.08, 0.08);
+      cam.setDeadzone(50, 50);
+    }
+    cam.zoomTo(view === "peek" ? PEEK_ZOOM : DEFAULT_ZOOM, ZOOM_DURATION, undefined, true);
   }
 
   private tryPrimaryInteract(time: number): void {
@@ -1037,7 +1195,8 @@ export class GameScene extends Phaser.Scene {
     );
 
     if (usedSource) {
-      this.scoring.discoverFoodSource(this.foodSourceKey(usedSource));
+      if (usedSource.type === "open_water") this.player.faceToward(usedSource.x, usedSource.y);
+      else this.scoring.discoverFoodSource(this.foodSourceKey(usedSource)); // the water's own 💧 spots count as finds
       // Play the directional drinking / eating animation as feedback.
       // Shared by every FoodSource type (water_bowl, fountain,
       // feeding_station, restaurant_scraps, bugs); startConsuming() is a
@@ -1058,6 +1217,12 @@ export class GameScene extends Phaser.Scene {
   }
 
   update(time: number, delta: number): void {
+    this.roadMarkings?.update(); // camera culling only; runs during cinematics too
+    // Story moments need the camera back on her.
+    if (this.showingFullMap && (this.cinematicActive || this.playerInputFrozen)) {
+      this.isPeeking = false;
+      this.setCameraView("cat");
+    }
     if (this.cinematicActive) return;
 
     // Dialogue engagement release (close / out-of-range / flee / destroy)
@@ -1097,6 +1262,8 @@ export class GameScene extends Phaser.Scene {
 
     const deltaSec = delta / 1000;
     this.dayNight.update(delta);
+    this.traffic.update(delta, this.dayNight);
+    this.nightLights?.setLevel(nightLevel(this.dayNight.currentPhase, this.dayNight.phaseProgress));
     this.camille.trySpawnAmbientDawnVisit();
 
     this.player.speedMultiplier = this.stats.speedMultiplier;
@@ -1119,18 +1286,19 @@ export class GameScene extends Phaser.Scene {
       this.foodSources.update(this.dayNight.currentPhase, time);
       this.guard.update(delta);
       this.guardIndicator.update();
+      this.crowd?.update(delta, this.dayNight.currentPhase, this.dayNight.phaseProgress);
       return;
     }
 
     // ──── Tab peek (toggle) ────
     const peekRequested = (this.tabKey && Phaser.Input.Keyboard.JustDown(this.tabKey)) || this.consumeTouchPeekQueue();
     if (peekRequested) {
-      if (!this.playerInputFrozen) this.togglePeekInput();
+      if (!this.playerInputFrozen) this.togglePeekInput(time);
     }
     if (this.isPeeking) {
       if (this.player.isMoving) {
         this.isPeeking = false;
-        this.cameras.main.zoomTo(DEFAULT_ZOOM, ZOOM_DURATION);
+        this.setCameraView("cat");
       } else {
         this.player.setVelocity(0);
         this.updateNPCs(delta);
@@ -1138,6 +1306,7 @@ export class GameScene extends Phaser.Scene {
         this.foodSources.update(this.dayNight.currentPhase, time);
         this.guard.update(delta);
         this.guardIndicator.update();
+        this.crowd?.update(delta, this.dayNight.currentPhase, this.dayNight.phaseProgress);
         return;
       }
     }
@@ -1266,6 +1435,7 @@ export class GameScene extends Phaser.Scene {
     this.foodSources.update(this.dayNight.currentPhase, time);
     this.guard.update(delta);
     this.guardIndicator.update();
+    this.crowd?.update(delta, this.dayNight.currentPhase, this.dayNight.phaseProgress);
     this.updateNPCs(delta);
     this.updateHumansAndHazards(delta);
 
@@ -1435,12 +1605,17 @@ export class GameScene extends Phaser.Scene {
   // ──────────── Chapter 4: Territory ────────────
 
   /**
-   * Track when the player first enters Zone 6 (The Shops area).
-   * Zone 6 is approximately x > 2100, y < 700.
+   * Track when the player first enters Zone 6 (The Shops area): the map's
+   * `zone_shops` rect around the sunken plaza, Starbucks and the NE steps.
    */
   private checkZone6Visit(): void {
     if (this.registry.get("VISITED_ZONE_6")) return;
-    if (this.player.x > 2100 && this.player.y < 700) {
+    const zone = placeNamed(this.places, "zone_shops")?.rect;
+    const steps = this.map.findObject("spawns", (o) => o.name === "poi_pyramid_steps");
+    const inShops = zone
+      ? pointInRect(this.player, zone)
+      : Boolean(steps) && Phaser.Math.Distance.Between(this.player.x, this.player.y, steps?.x ?? 0, steps?.y ?? 0) < 400;
+    if (inShops) {
       this.registry.set("VISITED_ZONE_6", true);
     }
   }
@@ -1546,7 +1721,7 @@ export class GameScene extends Phaser.Scene {
     if (!this.territory.isClaimed) return false;
     const shopsPOI = this.map.findObject("spawns", (o) => o.name === "poi_pyramid_steps");
     if (!shopsPOI) return false;
-    return Phaser.Math.Distance.Between(x, y, shopsPOI.x ?? 0, shopsPOI.y ?? 0) < 120;
+    return Phaser.Math.Distance.Between(x, y, shopsPOI.x ?? 0, shopsPOI.y ?? 0) < TERRITORY_RADIUS_PX;
   }
 
   // ──────────── Chapter 6: Home ────────────
@@ -1611,6 +1786,7 @@ export class GameScene extends Phaser.Scene {
       this.territory.toJSON(),
       this.lives,
       this.scoring.toJSON(),
+      this.mapRevision,
     );
     if (ok) {
       const hud = this.scene.get("HUDScene") as HUDScene | undefined;
@@ -1666,10 +1842,57 @@ export class GameScene extends Phaser.Scene {
     return Boolean(groundTile?.collides || objectTile?.collides);
   }
 
+  /** Like {@link isExplorationCellBlocked}, but roads are open: where Mamma Cat herself can stand. */
+  private isPlayerCellBlocked(tileX: number, tileY: number): boolean {
+    const groundTile = this.groundLayer?.getTileAt(tileX, tileY);
+    const objectTile = this.objectsLayer?.getTileAt(tileX, tileY);
+    return Boolean((groundTile?.collides && !isRoadTile(groundTile)) || objectTile?.collides);
+  }
+
+  /** True on a road tile: only Mamma Cat can be there, so traffic and scripted cars must yield to her. */
+  isOnRoad(x: number, y: number): boolean {
+    return isRoadTile(this.groundLayer?.getTileAtWorldXY(x, y));
+  }
+
+  /** Mamma Cat as the drivers see her; null while she is out of the world (intro car, carried off). */
+  private catForTraffic(): TrafficCat | null {
+    const body = this.player?.body as Phaser.Physics.Arcade.Body | null | undefined;
+    if (!this.player?.active || !this.player.visible || !body) return null;
+    const { x, y } = body.center;
+    return {
+      x,
+      y,
+      radius: this.player.isResting ? 12 : 10,
+      onRoad: this.isOnRoad(x, y),
+      settled: this.player.isResting || this.player.isCatloaf || this.stats.collapsed,
+    };
+  }
+
+  /** 0..1 loudness of a sound at world (x, y) for the camera's ear. */
+  earVolume(x: number, y: number): number {
+    const { midPoint } = this.cameras.main;
+    return Math.max(0, 1 - Phaser.Math.Distance.Between(x, y, midPoint.x, midPoint.y) / SFX_EAR_RANGE_PX);
+  }
+
+  /** A car braked hard for her: tyres screech, and if it stopped right by her she jumps. */
+  private onCarScreech(x: number, y: number): void {
+    this.audio?.playTyreScreech(this.earVolume(x, y));
+    if (!this.player?.visible || this.player.isResting) return;
+    if (Phaser.Math.Distance.Between(x, y, this.player.x, this.player.y) > CAR_FRIGHT_RADIUS_PX) return;
+    this.emotes.show(this, this.player, "alert");
+    this.player.startle();
+  }
+
+  /** True on the park's explorable ground (not a road, a median or the city across the road). */
+  isInPark(x: number, y: number): boolean {
+    return this.territory.visitCell(Math.floor(x / TILE_SIZE), Math.floor(y / TILE_SIZE), this.map.width) !== null;
+  }
+
   /** Exposed so {@link SnatcherSystem} can route snatcher patrol paths. */
   createHumanNavigationGrid(): NavigationGrid {
+    if (this.humanNavGrid) return this.humanNavGrid;
     const clearance = GP.HUMAN_NAV_CLEARANCE_CHEBYSHEV_TILES;
-    return createNavigationGrid({
+    this.humanNavGrid = createNavigationGrid({
       width: this.map.width,
       height: this.map.height,
       tileSize: TILE_SIZE,
@@ -1687,6 +1910,7 @@ export class GameScene extends Phaser.Scene {
         return false;
       },
     });
+    return this.humanNavGrid;
   }
 
   /** Exposed so {@link SnatcherSystem} can route snatcher patrol paths. */
@@ -1711,7 +1935,7 @@ export class GameScene extends Phaser.Scene {
         return hops.length > 0 ? hops : null;
       },
       routeToExit: (from, exits) => {
-        const nearest = this.nearestExitPoint(from, exits);
+        const nearest = this.nearestExitPoint(from, this.parkExits.length > 0 ? this.parkExits : exits);
         if (!nearest) return [from];
         return [from, ...routeHumanPath([from, nearest], navigationGrid).path];
       },
@@ -1758,6 +1982,28 @@ export class GameScene extends Phaser.Scene {
     const tileY = Math.floor(this.player.y / TILE_SIZE);
     const key = this.territory.visitCell(tileX, tileY, this.map.width);
     if (key !== null) this.scoring.visitCell(key);
+  }
+
+  /** True on a cell of open water (pond, fountain pool, waterfall) — every cat drinks there. */
+  private isWaterCell = (cx: number, cy: number): boolean => isWaterTile(this.groundLayer?.getTileAt(cx, cy));
+
+  private startWaterTrips(): void {
+    const spots = drinkSpots(this.map.width, this.map.height, TILE_SIZE, this.isWaterCell, (cx, cy) => !this.isExplorationCellBlocked(cx, cy));
+    this.waterTrips = new CatWaterTrips<NPCCat>({
+      cats: () => this.npcs.map(({ cat }) => cat),
+      spots,
+      route: (from, to) => {
+        const { path } = routeHumanPath([from, to], this.createHumanNavigationGrid());
+        const end = path[path.length - 1];
+        // The nav grid keeps a tile clear of obstacles, so the last few steps to the water's edge are walked straight.
+        const blockedAt = (x: number, y: number) => this.isExplorationCellBlocked(Math.floor(x / TILE_SIZE), Math.floor(y / TILE_SIZE));
+        const hop = end && Math.hypot(end.x - to.x, end.y - to.y) <= LAST_HOP_TILES * TILE_SIZE && hasLineOfSightTiles(end.x, end.y, to.x, to.y, TILE_SIZE, blockedAt);
+        return hop ? [...path, to] : null;
+      },
+      player: () => this.player,
+      storyMoment: () => this.cinematicActive || this.playerInputFrozen || this.dialogue.isActive,
+      onDrink: (cat) => this.emotes.show(this, cat, "drink"),
+    });
   }
 
   private foodSourceKey(source: { type: SourceType; x: number; y: number }): string {
@@ -1840,6 +2086,7 @@ export class GameScene extends Phaser.Scene {
 
   private updateNPCs(delta: number): void {
     const now = this.time.now;
+    this.waterTrips?.update(delta);
     const hud = this.scene.get("HUDScene") as HUDScene | undefined;
 
     for (const { cat, indicator } of this.npcs) {
@@ -1857,7 +2104,8 @@ export class GameScene extends Phaser.Scene {
       // Logic lives in {@link CatDialogueController.refreshLastPartner}.
       this.catDialogue.refreshLastPartner(cat, dist, now);
 
-      if (!indicator.known) {
+      // Colony cats' names are learned by greeting them (ColonyDynamicsSystem.learnName), not by passing by.
+      if (!indicator.known && !cat.npcName.startsWith("Colony Cat")) {
         if (dist < LEARN_NAME_DISTANCE) {
           indicator.reveal();
           this.addKnownCat(cat.npcName);
@@ -1976,9 +2224,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   private spawnGingerTwins(): void {
-    const ginger = this.spawnNPC("Ginger", "fluffy", "spawn_ginger", "wary", 200, 774, 1378);
+    const ginger = this.spawnNPC("Ginger", "fluffy", "spawn_ginger", "wary", 200, 3696, 3536);
     ginger.setTint(0xffaa44);
-    const gingerB = this.spawnNPC("Ginger B", "fluffy", "spawn_ginger", "wary", 200, 774, 1378, {
+    const gingerB = this.spawnNPC("Ginger B", "fluffy", "spawn_ginger", "wary", 200, 3696, 3536, {
       offsetX: 60,
     });
     gingerB.setTint(0xffaa44);
@@ -2006,10 +2254,16 @@ export class GameScene extends Phaser.Scene {
       this.snatcher.checkDetection();
     }
 
-    // Crossfade background music to the danger theme whenever any
-    // snatcher exists in the park. setDanger() is idempotent, so
-    // calling it every frame is cheap.
-    this.audio.setDanger(this.snatcher.hasAnyActive);
+    // Crossfade background music to the danger theme while a snatcher is
+    // out and within earshot — since 0.5.0 the park is too big for
+    // "anywhere". setDanger() is idempotent, so calling it every frame is cheap.
+    this.audio.setDanger(
+      this.snatcher.activeSnatchers.some(
+        (s) =>
+          s.visible &&
+          Phaser.Math.Distance.Between(s.x, s.y, this.player.x, this.player.y) <= GP.SNATCHER_DANGER_MUSIC_DIST,
+      ),
+    );
 
     // NPC cats flee from snatchers.
     if (this.snatcher.hasAnyActive) {
@@ -2048,14 +2302,56 @@ export class GameScene extends Phaser.Scene {
       const obj = poi(poiName);
       if (obj) this.foodSources.addSource(type, obj.x ?? 0, obj.y ?? 0);
     }
-    this.foodSources.addBugSpawns(this.map, 20);
+    // Bugs only where Mamma Cat can reach (the sealed park), scaled with its area.
+    this.foodSources.addBugSpawns(
+      this.map,
+      60,
+      (x, y) => this.territory.visitCell(Math.floor(x / TILE_SIZE), Math.floor(y / TILE_SIZE), this.map.width) !== null,
+    );
   }
 
   // ──────────── Environment ────────────
 
-  /** True when Mamma Cat is within radial distance of the Makati Ave road centreline. */
+  /** True when Mamma Cat is within {@link GP.MAKATI_AVE_WITNESS_DIST} of the Makati Ave carriageway. */
   isNearMakatiAve(worldX: number, worldY: number): boolean {
-    return Phaser.Math.Distance.Between(worldX, worldY, GP.MAKATI_AVE_CENTER_X, worldY) <= GP.MAKATI_AVE_WITNESS_DIST;
+    const lane = placeNamed(this.places, "traffic_makati_southbound")?.polyline;
+    if (!lane) return false;
+    return closestOnPolyline(lane, { x: worldX, y: worldY }).distance <= GP.MAKATI_AVE_WITNESS_DIST;
+  }
+
+  /** Vertices of a named `route` polyline from the map (ambient humans, snatcher patrols), or null. */
+  routePoints(name: string): Pt[] | null {
+    const route = placeNamed(this.places, name)?.polyline;
+    return route && route.length > 1 ? route.map(({ x, y }) => ({ x, y })) : null;
+  }
+
+  /** Kerbside pull-over on the triangle-side carriageway nearest `near` (intro cinematic + dumping events). */
+  planDropoff(near: Pt): DropoffPlan | null {
+    let best: DropoffPlan | null = null;
+    let bestDist = Infinity;
+    for (const name of ["traffic_makati_southbound", "traffic_paseo_eastbound", "traffic_ayala_westbound"]) {
+      const lane = placeNamed(this.places, name);
+      if (!lane?.polyline) continue;
+      const dist = closestOnPolyline(lane.polyline, near).distance;
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = planKerbsideDropoff(lane.polyline, this.traffic.lanesFor(name) || Number(lane.props.lanes) || 2, near);
+      }
+    }
+    return best;
+  }
+
+  /** First spot Mamma Cat can reach between a stopped car and `near` — where a dropped cat lands (never a traffic island). */
+  kerbDropPoint(plan: DropoffPlan, near: Pt): Pt {
+    const total = Phaser.Math.Distance.Between(plan.stop.x, plan.stop.y, near.x, near.y);
+    for (let d = 0; d <= total; d += TILE_SIZE / 2) {
+      const x = plan.stop.x + plan.towardKerb.x * d;
+      const y = plan.stop.y + plan.towardKerb.y * d;
+      if (this.territory.visitCell(Math.floor(x / TILE_SIZE), Math.floor(y / TILE_SIZE), this.map.width) !== null) {
+        return { x, y };
+      }
+    }
+    return near;
   }
 
   /** Approximate line-of-sight check by raymarching through collision tiles. */
@@ -2101,7 +2397,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   isNearShelter(worldX: number, worldY: number): boolean {
-    return this.shelterPoints.some((s) => Phaser.Math.Distance.Between(worldX, worldY, s.x, s.y) < 80);
+    return this.shelterPoints.some((s) => Phaser.Math.Distance.Between(worldX, worldY, s.x, s.y) < SHELTER_RADIUS_PX);
   }
 
   private cacheShelterPoints(): void {
@@ -2171,6 +2467,13 @@ export class GameScene extends Phaser.Scene {
       if (this.camille.tryAcceptBeat5Decision()) {
         this.logInteractDiag("consumed by Beat-5 decision", null, Infinity, nearestRawEntry, nearestRawDist);
         this.audio.playMeow();
+        return;
+      }
+      // A morsel a picnicker / diner tossed her (AmbientCrowdSystem) — after cats and the
+      // beat-5 answer, so a treat never steals a press meant for the story.
+      if ((this.crowd?.tryEatTreat(this.player.x, this.player.y, this.stats) ?? 0) > 0) {
+        this.logInteractDiag("ate a crowd morsel", null, Infinity, nearestRawEntry, nearestRawDist);
+        this.player.startConsuming();
         return;
       }
       // No cat in range — space becomes a free Mamma-Cat greeting action.

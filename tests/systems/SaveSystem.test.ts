@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { isValidSave, SaveSystem } from '../../src/systems/SaveSystem'
+import { CURRENT_VERSION, isValidSave, SaveSystem } from '../../src/systems/SaveSystem'
 import { DEFAULT_RUN_SCORE_STATE } from '../../src/systems/ScoringSystem'
 import { StoryKeys } from '../../src/registry/storyKeys'
 
@@ -123,7 +123,11 @@ describe('isValidSave', () => {
   })
 
   it('rejects future version', () => {
-    expect(isValidSave(validSaveData({ version: 3 }))).toBe(false)
+    expect(isValidSave(validSaveData({ version: CURRENT_VERSION + 1 }))).toBe(false)
+  })
+
+  it('rejects a non-string mapRevision', () => {
+    expect(isValidSave(validSaveData({ mapRevision: 7 }))).toBe(false)
   })
 
   it('rejects invalid timeOfDay', () => {
@@ -359,9 +363,30 @@ describe('SaveSystem.save / load / hasSave / clear', () => {
     ).toBe(true)
 
     const loaded = SaveSystem.load()
-    expect(loaded?.version).toBe(2)
+    expect(loaded?.version).toBe(3)
     expect(loaded?.lives).toBe(2)
     expect(loaded?.runScore).toEqual(runScore)
+    expect(loaded?.mapRevision).toBeUndefined()
+  })
+
+  it('round-trips the map revision so positions are only trusted on the same map', () => {
+    expect(
+      SaveSystem.save(10, 20, { hunger: 1, thirst: 2, energy: 3 }, 'day', 1, stubRegistry({}), undefined, undefined, undefined, 3, undefined, 'osm-2m-v1'),
+    ).toBe(true)
+    expect(SaveSystem.load()?.mapRevision).toBe('osm-2m-v1')
+  })
+
+  it('migrates v2 saves to v3 keeping lives and run score but dropping the map revision', () => {
+    const runScore = { ...DEFAULT_RUN_SCORE_STATE, visitedCells: [5, 6], foodSourcesDiscovered: ['fountain:1:2'] }
+    store['ayala_save'] = JSON.stringify(validSaveData({ version: 2, lives: 1, runScore, mapRevision: 'old' }))
+
+    const loaded = SaveSystem.load()
+
+    expect(loaded?.version).toBe(3)
+    expect(loaded?.lives).toBe(1)
+    expect(loaded?.runScore).toEqual(runScore)
+    expect(loaded?.mapRevision).toBeUndefined()
+    expect(loaded?.playerPosition).toEqual({ x: 100, y: 200 })
   })
 
   it('migrates v1 saves with default lives and empty run score', () => {
@@ -369,7 +394,7 @@ describe('SaveSystem.save / load / hasSave / clear', () => {
 
     const loaded = SaveSystem.load()
 
-    expect(loaded?.version).toBe(2)
+    expect(loaded?.version).toBe(3)
     expect(loaded?.lives).toBe(3)
     expect(loaded?.runScore).toEqual(DEFAULT_RUN_SCORE_STATE)
   })

@@ -138,6 +138,28 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
     return this.playerState === "resting";
   }
 
+  /**
+   * A small startled hop (a car just screeched to a halt beside her). Visual
+   * only: the lift is applied as per-frame deltas, so her movement carries on.
+   */
+  startle(): void {
+    if (this.playerState === "resting" || this.playerState === "waking") return;
+    const hop = { h: 0 };
+    let lifted = 0;
+    this.scene.tweens.add({
+      targets: hop,
+      h: 6,
+      duration: 110,
+      yoyo: true,
+      ease: "Quad.easeOut",
+      onUpdate: () => {
+        if (!this.active) return;
+        this.y -= hop.h - lifted;
+        lifted = hop.h;
+      },
+    });
+  }
+
   get isCatloaf(): boolean {
     return this.playerState === "catloaf";
   }

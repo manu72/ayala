@@ -1,0 +1,753 @@
+{
+  "frames": {
+    "sedan_white": {
+      "frame": {
+        "x": 372,
+        "y": 158,
+        "w": 72,
+        "h": 33
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 72,
+        "h": 33
+      },
+      "sourceSize": {
+        "w": 72,
+        "h": 33
+      }
+    },
+    "sedan_silver": {
+      "frame": {
+        "x": 298,
+        "y": 158,
+        "w": 72,
+        "h": 33
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 72,
+        "h": 33
+      },
+      "sourceSize": {
+        "w": 72,
+        "h": 33
+      }
+    },
+    "sedan_black": {
+      "frame": {
+        "x": 392,
+        "y": 122,
+        "w": 72,
+        "h": 33
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 72,
+        "h": 33
+      },
+      "sourceSize": {
+        "w": 72,
+        "h": 33
+      }
+    },
+    "sedan_red": {
+      "frame": {
+        "x": 224,
+        "y": 158,
+        "w": 72,
+        "h": 33
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 72,
+        "h": 33
+      },
+      "sourceSize": {
+        "w": 72,
+        "h": 33
+      }
+    },
+    "sedan_blue": {
+      "frame": {
+        "x": 2,
+        "y": 158,
+        "w": 72,
+        "h": 33
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 72,
+        "h": 33
+      },
+      "sourceSize": {
+        "w": 72,
+        "h": 33
+      }
+    },
+    "sedan_grey": {
+      "frame": {
+        "x": 76,
+        "y": 158,
+        "w": 72,
+        "h": 33
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 72,
+        "h": 33
+      },
+      "sourceSize": {
+        "w": 72,
+        "h": 33
+      }
+    },
+    "sedan_maroon": {
+      "frame": {
+        "x": 150,
+        "y": 158,
+        "w": 72,
+        "h": 33
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 72,
+        "h": 33
+      },
+      "sourceSize": {
+        "w": 72,
+        "h": 33
+      }
+    },
+    "sedan_beige": {
+      "frame": {
+        "x": 318,
+        "y": 122,
+        "w": 72,
+        "h": 33
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 72,
+        "h": 33
+      },
+      "sourceSize": {
+        "w": 72,
+        "h": 33
+      }
+    },
+    "hatch_white": {
+      "frame": {
+        "x": 274,
+        "y": 193,
+        "w": 64,
+        "h": 32
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 64,
+        "h": 32
+      },
+      "sourceSize": {
+        "w": 64,
+        "h": 32
+      }
+    },
+    "hatch_red": {
+      "frame": {
+        "x": 76,
+        "y": 193,
+        "w": 64,
+        "h": 32
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 64,
+        "h": 32
+      },
+      "sourceSize": {
+        "w": 64,
+        "h": 32
+      }
+    },
+    "hatch_yellow": {
+      "frame": {
+        "x": 340,
+        "y": 193,
+        "w": 64,
+        "h": 32
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 64,
+        "h": 32
+      },
+      "sourceSize": {
+        "w": 64,
+        "h": 32
+      }
+    },
+    "hatch_teal": {
+      "frame": {
+        "x": 208,
+        "y": 193,
+        "w": 64,
+        "h": 32
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 64,
+        "h": 32
+      },
+      "sourceSize": {
+        "w": 64,
+        "h": 32
+      }
+    },
+    "hatch_silver": {
+      "frame": {
+        "x": 142,
+        "y": 193,
+        "w": 64,
+        "h": 32
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 64,
+        "h": 32
+      },
+      "sourceSize": {
+        "w": 64,
+        "h": 32
+      }
+    },
+    "suv_white": {
+      "frame": {
+        "x": 239,
+        "y": 122,
+        "w": 77,
+        "h": 34
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 77,
+        "h": 34
+      },
+      "sourceSize": {
+        "w": 77,
+        "h": 34
+      }
+    },
+    "suv_silver": {
+      "frame": {
+        "x": 160,
+        "y": 122,
+        "w": 77,
+        "h": 34
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 77,
+        "h": 34
+      },
+      "sourceSize": {
+        "w": 77,
+        "h": 34
+      }
+    },
+    "suv_black": {
+      "frame": {
+        "x": 330,
+        "y": 86,
+        "w": 77,
+        "h": 34
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 77,
+        "h": 34
+      },
+      "sourceSize": {
+        "w": 77,
+        "h": 34
+      }
+    },
+    "suv_green": {
+      "frame": {
+        "x": 2,
+        "y": 122,
+        "w": 77,
+        "h": 34
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 77,
+        "h": 34
+      },
+      "sourceSize": {
+        "w": 77,
+        "h": 34
+      }
+    },
+    "suv_navy": {
+      "frame": {
+        "x": 81,
+        "y": 122,
+        "w": 77,
+        "h": 34
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 77,
+        "h": 34
+      },
+      "sourceSize": {
+        "w": 77,
+        "h": 34
+      }
+    },
+    "suv_bronze": {
+      "frame": {
+        "x": 409,
+        "y": 86,
+        "w": 77,
+        "h": 34
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 77,
+        "h": 34
+      },
+      "sourceSize": {
+        "w": 77,
+        "h": 34
+      }
+    },
+    "taxi": {
+      "frame": {
+        "x": 2,
+        "y": 193,
+        "w": 72,
+        "h": 33
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 72,
+        "h": 33
+      },
+      "sourceSize": {
+        "w": 72,
+        "h": 33
+      }
+    },
+    "jeepney_a": {
+      "frame": {
+        "x": 390,
+        "y": 2,
+        "w": 104,
+        "h": 36
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 104,
+        "h": 36
+      },
+      "sourceSize": {
+        "w": 104,
+        "h": 36
+      }
+    },
+    "jeepney_b": {
+      "frame": {
+        "x": 2,
+        "y": 48,
+        "w": 104,
+        "h": 36
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 104,
+        "h": 36
+      },
+      "sourceSize": {
+        "w": 104,
+        "h": 36
+      }
+    },
+    "jeepney_c": {
+      "frame": {
+        "x": 108,
+        "y": 48,
+        "w": 104,
+        "h": 36
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 104,
+        "h": 36
+      },
+      "sourceSize": {
+        "w": 104,
+        "h": 36
+      }
+    },
+    "jeepney_d": {
+      "frame": {
+        "x": 214,
+        "y": 48,
+        "w": 104,
+        "h": 36
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 104,
+        "h": 36
+      },
+      "sourceSize": {
+        "w": 104,
+        "h": 36
+      }
+    },
+    "bus_a": {
+      "frame": {
+        "x": 2,
+        "y": 2,
+        "w": 192,
+        "h": 44
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 192,
+        "h": 44
+      },
+      "sourceSize": {
+        "w": 192,
+        "h": 44
+      }
+    },
+    "bus_b": {
+      "frame": {
+        "x": 196,
+        "y": 2,
+        "w": 192,
+        "h": 44
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 192,
+        "h": 44
+      },
+      "sourceSize": {
+        "w": 192,
+        "h": 44
+      }
+    },
+    "moto_a": {
+      "frame": {
+        "x": 472,
+        "y": 193,
+        "w": 32,
+        "h": 13
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 13
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 13
+      }
+    },
+    "moto_b": {
+      "frame": {
+        "x": 2,
+        "y": 228,
+        "w": 32,
+        "h": 13
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 13
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 13
+      }
+    },
+    "moto_c": {
+      "frame": {
+        "x": 36,
+        "y": 228,
+        "w": 32,
+        "h": 13
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 13
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 13
+      }
+    },
+    "moto_d": {
+      "frame": {
+        "x": 70,
+        "y": 228,
+        "w": 32,
+        "h": 13
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 13
+      },
+      "sourceSize": {
+        "w": 32,
+        "h": 13
+      }
+    },
+    "story_suv": {
+      "frame": {
+        "x": 320,
+        "y": 48,
+        "w": 80,
+        "h": 34
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 80,
+        "h": 34
+      },
+      "sourceSize": {
+        "w": 80,
+        "h": 34
+      }
+    },
+    "story_suv_black": {
+      "frame": {
+        "x": 402,
+        "y": 48,
+        "w": 80,
+        "h": 34
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 80,
+        "h": 34
+      },
+      "sourceSize": {
+        "w": 80,
+        "h": 34
+      }
+    },
+    "story_suv_yellow": {
+      "frame": {
+        "x": 248,
+        "y": 86,
+        "w": 80,
+        "h": 34
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 80,
+        "h": 34
+      },
+      "sourceSize": {
+        "w": 80,
+        "h": 34
+      }
+    },
+    "story_suv_green": {
+      "frame": {
+        "x": 84,
+        "y": 86,
+        "w": 80,
+        "h": 34
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 80,
+        "h": 34
+      },
+      "sourceSize": {
+        "w": 80,
+        "h": 34
+      }
+    },
+    "story_suv_orange": {
+      "frame": {
+        "x": 166,
+        "y": 86,
+        "w": 80,
+        "h": 34
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 80,
+        "h": 34
+      },
+      "sourceSize": {
+        "w": 80,
+        "h": 34
+      }
+    },
+    "story_suv_blue": {
+      "frame": {
+        "x": 2,
+        "y": 86,
+        "w": 80,
+        "h": 34
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 80,
+        "h": 34
+      },
+      "sourceSize": {
+        "w": 80,
+        "h": 34
+      }
+    },
+    "story_corolla": {
+      "frame": {
+        "x": 406,
+        "y": 193,
+        "w": 64,
+        "h": 32
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 64,
+        "h": 32
+      },
+      "sourceSize": {
+        "w": 64,
+        "h": 32
+      }
+    }
+  },
+  "meta": {
+    "image": "vehicles.png",
+    "size": {
+      "w": 506,
+      "h": 243
+    },
+    "scale": "1",
+    "pxPerMetre": 16
+  }
+}

@@ -1,0 +1,148 @@
+{
+  "_about": "Provenance + packing config for scripts/build-pixellab-extras.py. Download zips from https://api.pixellab.ai/mcp/characters/<id>/download to /tmp/pixellab-extras/<key>.zip (kish, kishdale, catcat, mittens, ella), then run python3 scripts/build-pixellab-extras.py.",
+  "kishdale": {
+    "_about": "Kish (same NPC) in a different outfit; files mirror Kish's layout exactly. Kish_stand.png order (verified pixel-for-pixel against Kish's PixelLab rotations): S, SE, E, NE, N, NW, W, SW.",
+    "kish_id": "ee8595c1-1e4f-434d-a793-f32a79bafac8",
+    "id": "a9913d61-39b1-43e4-889a-c3dc7fcd7a45",
+    "description": "cute Filipina teenage girl in casual wear long grey tights and yellow tee shirt long black wavy hair, wearing a canvas tote bag (Kish's alternate outfit)",
+    "kish_walk_anim": "Walking",
+    "kish_crouch_anim": "Crouching",
+    "walk_anim": "Walking",
+    "walk_template": "walking-8-frames",
+    "walk_group_id": "d5694d0d-7b9f-4d1c-9280-cdcabab50120",
+    "crouch_anim": "Crouching",
+    "crouch_template": "crouching",
+    "crouch_group_id": "fdf36b68-8dcf-4800-890a-ab462dfc03ef",
+    "outputs": {
+      "kishdale_walk_{east,west,north,south}.png": "544x68, 8 frames of 68x68",
+      "Kishdale_stand.png": "544x68, 8 rotations S, SE, E, NE, N, NW, W, SW",
+      "kishdale_crouch_{east,west}.png": "340x68, 5 frames"
+    },
+    "known_issues": "Kishdale's base art has long loose hair (Kish has a ponytail); the canvas tote bag is mostly hidden in the south walk; north walk legs alternate dark grey / blue-grey. Walk template could not be read back from Kish's 'Walking' group, so walking-8-frames was used; crouch uses the 'crouching' template like Kish (5 frames, last frames lift off the ground in both)."
+  },
+  "pets": {
+    "catcat": {
+      "cell": 92,
+      "cols": 8,
+      "rows": 9,
+      "id": "783ab5b9-c0b2-478a-aa0d-fd1ab675b54b",
+      "name": "cat cat",
+      "description": "Cute domestic grey tabby cat with white chest and paws (PixelLab quadruped 'cat' template, 8 directions, 92x92). The base state is drawn SITTING and its north rotation is a front view, so walking/standing come from a 'Standing' state.",
+      "states": {
+        "Standing": {
+          "id": "c407bc25-5a56-48ef-9d75-3aae87d15668",
+          "edit_description": "standing up on all four legs in a relaxed neutral stance, ready to walk, tail raised. The north view shows the cat from behind: its back, tail and the backs of its ears, no face."
+        }
+      },
+      "feet_from": {
+        "state": "c407bc25-5a56-48ef-9d75-3aae87d15668",
+        "rotation": "south"
+      },
+      "feet_row": 76,
+      "_feet_row_why": "Standing south rotation feet are row 72, but the skeleton-v3 south walk holds the tail ~10 px higher; feet on row 76 keeps every strip inside the 92 px cell",
+      "cells": [
+        { "row": 0, "col": 0, "state": "c407bc25-5a56-48ef-9d75-3aae87d15668", "anim": "walk_south_v2", "dir": "south", "note": "real (skeleton-v3 walk-8-frames; the template walk south drew the cat at half size)" },
+        { "row": 1, "col": 0, "state": "c407bc25-5a56-48ef-9d75-3aae87d15668", "anim": "walk", "dir": "east", "note": "real (template walk-8-frames)" },
+        { "row": 2, "col": 0, "state": "c407bc25-5a56-48ef-9d75-3aae87d15668", "anim": "walk", "dir": "north", "note": "real" },
+        { "row": 3, "col": 0, "state": "c407bc25-5a56-48ef-9d75-3aae87d15668", "anim": "walk", "dir": "west", "note": "real" },
+        { "row": 4, "col": 0, "state": "c407bc25-5a56-48ef-9d75-3aae87d15668", "anim": "run", "dir": "east", "note": "real (template running-8-frames)" },
+        { "row": 5, "col": 0, "state": "c407bc25-5a56-48ef-9d75-3aae87d15668", "anim": "run", "dir": "east", "mirror": true, "note": "MIRRORED run east (the generated run west reads as a stretched pounce, inconsistent with east)" },
+        { "row": 6, "col": 0, "rotation": "south", "note": "real: base sitting rotation" },
+        { "row": 6, "col": 1, "rotation": "east", "note": "real: base sitting rotation" },
+        { "row": 6, "col": 2, "state": "c407bc25-5a56-48ef-9d75-3aae87d15668", "anim": "sitting", "dir": "north", "frames": [7], "note": "real: last frame of template 'sitting' north (from behind; base north rotation is a front view)" },
+        { "row": 6, "col": 3, "rotation": "west", "note": "real: base sitting rotation" },
+        { "row": 6, "col": 4, "anim": "idle", "dir": "south", "frames": [0, 2, 4, 6], "note": "real: template 'idle' south (sitting idle loop), every other frame" },
+        { "row": 7, "col": 0, "anim": "sleep", "dir": "south", "note": "real: v3 custom 'lies down and curls up ... to sleep' from the sitting pose; ends lying with eyes closed (not a tight curl)" },
+        { "row": 8, "col": 0, "state": "c407bc25-5a56-48ef-9d75-3aae87d15668", "rotation": "south", "note": "real" },
+        { "row": 8, "col": 1, "state": "c407bc25-5a56-48ef-9d75-3aae87d15668", "rotation": "east", "note": "real" },
+        { "row": 8, "col": 2, "state": "c407bc25-5a56-48ef-9d75-3aae87d15668", "rotation": "north", "note": "real" },
+        { "row": 8, "col": 3, "state": "c407bc25-5a56-48ef-9d75-3aae87d15668", "rotation": "west", "note": "real" }
+      ],
+      "unused_animations": "base 'walk' (S/E/N/W, drawn from the sitting base: south is a shrunken sitting bob, north faces the camera), base 'sitting'/'seated-on-belly-idle' south (no visible change), Standing 'run' west, Standing 'walk' south (half-size cat)",
+      "known_issues": "The template 'idle' (sitting loop, row 6 cols 4-7) draws the cat ~10% smaller than the base sitting rotations in row 6 cols 0-3, so switching sit S -> idle loop pops in size. Sit N is the last frame of a template 'sitting' on the Standing state and reads much like a standing cat from behind. Sleep is a sit -> lie-down with eyes closed, not a tight curl. Template walks (rows 1-3) draw the cat slightly smaller than the Standing rotations (row 8)."
+    },
+    "mittens": {
+      "cell": 92,
+      "cols": 8,
+      "rows": 9,
+      "id": "5e13e6de-b0c2-455a-9b18-99ea3a5bf832",
+      "name": "mittens",
+      "description": "Cute black and white tuxedo cat (PixelLab quadruped 'cat' template, 8 directions, 92x92). Base south rotation is sitting, E/W are a low standing stance, and the base north/north-east/north-west rotations are broken (north is a front view), so north walk, sits and stands come from 'Standing'/'Sitting' states.",
+      "states": {
+        "Standing": {
+          "id": "baaa0316-6f35-49b1-867a-5cd4e1d1233d",
+          "edit_description": "standing up on all four legs in a relaxed neutral stance, ready to walk, tail raised. The north view shows the cat from behind: its back, tail and the backs of its ears, no face."
+        },
+        "Sitting": {
+          "id": "a40966ca-888f-460d-a59b-81faebc29647",
+          "source": "baaa0316-6f35-49b1-867a-5cd4e1d1233d",
+          "edit_description": "sitting upright on its haunches, front legs straight, tail curled around the front paws. The north view shows the sitting cat from behind: its back, tail and the backs of its ears, no face."
+        }
+      },
+      "feet_from": {
+        "state": "baaa0316-6f35-49b1-867a-5cd4e1d1233d",
+        "rotation": "south"
+      },
+      "cells": [
+        { "row": 0, "col": 0, "anim": "walk", "dir": "south", "note": "real (template walk-8-frames on the base)" },
+        { "row": 1, "col": 0, "anim": "walk", "dir": "east", "note": "real" },
+        { "row": 2, "col": 0, "state": "baaa0316-6f35-49b1-867a-5cd4e1d1233d", "anim": "walk_north_v2", "dir": "north", "note": "real (skeleton-v3 on Standing; the template north walk on Standing was a thin stretched figure, on the base it failed)" },
+        { "row": 3, "col": 0, "anim": "walk", "dir": "west", "note": "real" },
+        { "row": 4, "col": 0, "anim": "run", "dir": "east", "note": "real (template running-8-frames)" },
+        { "row": 5, "col": 0, "anim": "run", "dir": "east", "mirror": true, "note": "MIRRORED run east" },
+        { "row": 6, "col": 0, "state": "a40966ca-888f-460d-a59b-81faebc29647", "rotation": "south", "align": "raw", "note": "real: Sitting state, raw canvas position (its lowest pixels are the tail curled in front of the paws; paws end on the feet row)" },
+        { "row": 6, "col": 1, "state": "a40966ca-888f-460d-a59b-81faebc29647", "rotation": "east", "align": "raw", "note": "real: Sitting state, raw canvas position (its lowest pixels are the tail curled in front of the paws; paws end on the feet row)" },
+        { "row": 6, "col": 2, "state": "a40966ca-888f-460d-a59b-81faebc29647", "rotation": "north", "align": "raw", "note": "real: Sitting state, raw canvas position (its lowest pixels are the tail curled in front of the paws; paws end on the feet row)" },
+        { "row": 6, "col": 3, "state": "a40966ca-888f-460d-a59b-81faebc29647", "rotation": "west", "align": "raw", "note": "real: Sitting state, raw canvas position (its lowest pixels are the tail curled in front of the paws; paws end on the feet row)" },
+        { "row": 6, "col": 4, "anim": "idle", "dir": "south", "frames": [0, 2, 4, 6], "note": "real: template 'idle' south (sitting idle loop), every other frame" },
+        { "row": 7, "col": 0, "anim": "sleep", "dir": "south", "note": "real: v3 custom lie-down-to-sleep from the sitting pose; ends as a low loaf with eyes closed (not a tight curl)" },
+        { "row": 8, "col": 0, "state": "baaa0316-6f35-49b1-867a-5cd4e1d1233d", "rotation": "south", "note": "real" },
+        { "row": 8, "col": 1, "state": "baaa0316-6f35-49b1-867a-5cd4e1d1233d", "rotation": "east", "note": "real" },
+        { "row": 8, "col": 2, "state": "baaa0316-6f35-49b1-867a-5cd4e1d1233d", "rotation": "north", "note": "real" },
+        { "row": 8, "col": 3, "state": "baaa0316-6f35-49b1-867a-5cd4e1d1233d", "rotation": "west", "note": "real" }
+      ],
+      "unused_animations": "Standing 'walk' north (thin stretched figure), Standing 'sitting' north (front view, off-style) and west (never sits), base 'sitting' south (same as idle)",
+      "known_issues": "Base north/north-east/north-west rotations are broken (north is a front view); everything north comes from the Standing/Sitting states. The Sitting state cat is a little bulkier than the walking cat. North walk (skeleton-v3) is a mostly black silhouette from behind with white paws and tail tip. Sleep ends as a low loaf with eyes closed (not a tight curl); frame 2 is an awkward face-down transition."
+    },
+    "ella": {
+      "cell": 92,
+      "cols": 8,
+      "rows": 9,
+      "id": "801a0180-0df1-4241-b357-9c247800dc41",
+      "name": "Ella",
+      "description": "Ella, long-haired miniature dachshund, black and tan (PixelLab quadruped 'dog' template, 8 directions, 92x92). The dog template has no sit animation, so row 6 is the standing idle.",
+      "feet_from": {
+        "rotation": "south"
+      },
+      "cells": [
+        { "row": 0, "col": 0, "anim": "walk", "dir": "south", "note": "real (template walk-8-frames)" },
+        { "row": 1, "col": 0, "anim": "walk", "dir": "east", "note": "real" },
+        { "row": 2, "col": 0, "anim": "walk", "dir": "north", "note": "real" },
+        { "row": 3, "col": 0, "anim": "walk", "dir": "west", "note": "real" },
+        { "row": 4, "col": 0, "anim": "Run", "dir": "east", "note": "real (pre-existing running-8-frames east)" },
+        { "row": 5, "col": 0, "anim": "Run", "dir": "east", "mirror": true, "note": "MIRRORED run east" },
+        { "row": 6, "col": 0, "anim": "idle_sn", "dir": "south", "frames": [0], "note": "real: idle (standing) south frame 0" },
+        { "row": 6, "col": 1, "anim": "Idle", "dir": "east", "frames": [0], "note": "real: pre-existing idle east frame 0" },
+        { "row": 6, "col": 2, "anim": "idle_sn", "dir": "north", "frames": [0], "note": "real: idle north frame 0" },
+        { "row": 6, "col": 3, "anim": "Idle", "dir": "east", "frames": [0], "mirror": true, "note": "MIRRORED idle east frame 0" },
+        { "row": 6, "col": 4, "anim": "idle_sn", "dir": "south", "frames": [0, 2, 4, 6], "note": "real: idle south loop, every other frame" },
+        { "row": 7, "col": 0, "anim": "crouch_flat_and_lay_on_its_belly_with_legs_stretch", "dir": "east", "frames": [1, 2, 3, 4, 5, 6, 7, 8], "note": "real: pre-existing lie-flat-on-belly (east, frames 1-8 of 9); ends lying flat" },
+        { "row": 8, "col": 0, "rotation": "south", "note": "real" },
+        { "row": 8, "col": 1, "rotation": "east", "note": "real" },
+        { "row": 8, "col": 2, "rotation": "north", "note": "real" },
+        { "row": 8, "col": 3, "rotation": "west", "note": "real" }
+      ],
+      "known_issues": "No sit animation exists for the dog template, so row 6 is a standing idle. The pre-existing Run east (rows 4-5) is drawn ~20% larger than the template walk; the west walk is drawn slightly smaller than the east walk. Row 7 is the pre-existing lie-flat-on-belly (east only; no west version in the sheet)."
+    }
+  },
+  "pets_layout": {
+    "row_0_3": "walk S/E/N/W, 8 frames",
+    "row_4": "run east, 8 frames",
+    "row_5": "run west, 8 frames (mirror of run east for all three pets)",
+    "row_6": "cols 0-3 sit/idle S/E/N/W (one frame each); cols 4-7 idle loop south (every other frame of the 8-frame loop: 0,2,4,6)",
+    "row_7": "sleep / lie down, up to 8 frames (a one-shot lie-down: play once and hold the last frame)",
+    "row_8": "cols 0-3 stand rotations S/E/N/W",
+    "frame_index": "row*8+col (walk S 0-7, E 8-15, N 16-23, W 24-31, run E 32-39, run W 40-47, sit S/E/N/W 48-51, idle S 52-55, sleep 56-63, stand S/E/N/W 64-67)",
+    "alignment": "each cell entry (strip) gets one vertical offset so its lowest opaque row = the character's feet row (feet_from rotation's lowest opaque row); canvas centred horizontally; never rescaled"
+  }
+}

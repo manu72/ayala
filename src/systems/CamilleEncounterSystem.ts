@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import type { GameScene } from "../scenes/GameScene";
 import type { HUDScene } from "../scenes/HUDScene";
 import { HumanNPC, type HumanConfig } from "../sprites/HumanNPC";
+import { kishProfileForDay } from "../sprites/SpriteProfiles";
 import { StoryKeys } from "../registry/storyKeys";
 import { GP, CAMILLE_BEAT5_DECISION_MS } from "../config/gameplayConstants";
 import { AI_PERSONAS } from "../ai/personas";
@@ -9,7 +10,7 @@ import { FallbackDialogueService } from "../services/FallbackDialogueService";
 import type { ConversationEntry, DialogueRequest } from "../services/DialogueService";
 import { calculateRelationshipStage } from "../services/DialogueRelationship";
 import { getConversationCount, getRecentConversations, storeConversation } from "../services/ConversationStore";
-import { buildCamilleEraCareRoutes } from "../utils/camilleCareRoute";
+import { buildCamilleEraCareRoutes, canAdoptAmbientCareGroup } from "../utils/camilleCareRoute";
 import {
   CAMILLE_ENCOUNTER_BEATS,
   CAMILLE_ENCOUNTER_5_PREDECISION_STEPS,
@@ -364,13 +365,22 @@ export class CamilleEncounterSystem {
    * path in {@link GameScene.create} can re-spawn Camille after load.
    */
   startEncounter(encounterNum: number): void {
-    this.cleanupNPCs();
-    this.encounterActive = true;
-    this.spawnCareRouteNPCs({
-      includeManu: encounterNum >= 2,
-      includeKish: encounterNum >= 3,
-      sustainAcrossInactivePhases: false,
+    // Same group either way (Manu from encounter 2, Kish from 3), so keep a
+    // still-walking ambient visit rather than teleporting it to the underpass.
+    const adopt = canAdoptAmbientCareGroup({
+      camille: this.camilleNPC,
+      encounterActive: this.encounterActive,
+      teardownPending: this.eraTeardownPending,
     });
+    if (!adopt) this.cleanupNPCs();
+    this.encounterActive = true;
+    if (!adopt) {
+      this.spawnCareRouteNPCs({
+        includeManu: encounterNum >= 2,
+        includeKish: encounterNum >= 3,
+        sustainAcrossInactivePhases: false,
+      });
+    }
     this.scene.registry.set(StoryKeys.CAMILLE_AMBIENT_EVENING_DAY, this.scene.dayNight.dayCount);
     this.pendingEncounter = encounterNum;
   }
@@ -503,6 +513,7 @@ export class CamilleEncounterSystem {
     if (includeKish) {
       const kishConfig: HumanConfig = {
         type: "kish",
+        profile: kishProfileForDay(scene.dayNight?.dayCount ?? 1), // a different outfit on alternate days
         speed: 50,
         path: routes.kish.map((w) => ({ x: w.x, y: w.y })),
         waypointPauseMs: routes.kish.map((w) => w.pauseMs),

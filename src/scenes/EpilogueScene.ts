@@ -43,6 +43,7 @@ const CREDITS = [
   "",
   "Based on the real cat colony at",
   "Ayala Triangle Gardens, Makati, Manila",
+  "Map data © OpenStreetMap contributors",
   "",
   "For Mamma Cat, and all the cats still waiting.",
 ];

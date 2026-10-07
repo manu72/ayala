@@ -34,15 +34,23 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 
 ### What exists now
 
-- 100x80 tile map of Ayala Triangle Gardens with 7 distinct zones, roads, and landmarks
+- 290x229 tile map (2 m per tile, north up) of the real Ayala Triangle Gardens, built from OpenStreetMap: the triangle inside Paseo de Roxas, Makati Avenue and Ayala Avenue, with its real walkways, buildings, underpasses, steps, pond, fountains and landmarks
 - Mamma Cat player character with walk, run, crouch, and rest animations
 - **Survival system:** hunger, thirst, and energy stats with environmental modifiers and collapse mechanics
+- **Real water:** the PSE pond, the McMicking water-curtain pool and the Starbucks waterfall are drinkable all along their edges and never run out (Space beside the water). The colony cats, named story cats included, walk there now and then (a few times a day, at most four at once), drink a while (💧) and walk home, as the real ATG cats do (`CatWaterTrips`, `src/utils/waterEdge.ts`)
+- **Colony cats have names:** greet one (Space beside it) and Mamma Cat learns its name, shown over it from then on. Names and looks stay with each cat across saves, and a cat lost to a snatcher doesn't come back
 - **Food and water sources** scattered across the map with cooldowns and time-of-day availability
 - **Day/night cycle** (dawn, day, evening, night) with smooth colour transitions and a game clock
 - **8 named NPC cats** (Blacky, Tiger, Jayco, Jayco Jr, Fluffy, Pedigree, Ginger, Ginger B) with unique dispositions and multi-stage dialogue
-- **12 background colony cats** with randomised appearances and behaviours
-- **Guard NPC** that patrols and chases the player away from food scraps
-- **Human NPCs** (joggers, feeders, dog walkers) following waypoint paths on time-of-day schedules
+- **Up to 24 background colony cats** with randomised appearances and behaviours
+- **Guard NPC** that patrols and chases the player away from food scraps, plus **10 more security guards** at real posts (mostly passive, three friendly who stop and look at Mamma Cat, one more hostile; a smaller night shift)
+- **Human NPCs** (joggers, feeders, dog walkers) following routes along the real walkways on time-of-day schedules
+- **Park crowd:** walkers, office workers on breaks, tourists taking selfies, joggers, diners at the restaurant row and Starbucks, picnickers, bench sitters, lunch eaters and smokers, busiest at lunch and after work and almost gone at night (`AmbientCrowdSystem`, tuned in `src/data/ambient-roles.ts`). Anonymous park people drawn with PixelLab in the same style as Camille and Manu (`public/assets/sprites/crowd/`, packed by `scripts/build-crowd-sheets.py`, provenance in `scripts/pixellab-crowd.json`). People notice Mamma Cat (a heart, a curious look, a tourist's camera flash), and someone eating may toss her a morsel if she lingers — eat it with the interact key (+8 hunger, at most 4 a day; no story effects)
+- **Traffic** on Paseo de Roxas, Makati Avenue and Ayala Avenue in their real lanes and directions, with morning and evening rush hours: sedans, taxis, jeepneys, P2P buses and motorbikes, drawn top-down with soft shadows and headlights after dusk (`TrafficSystem`), plus painted lane lines and zebra crossings (`RoadMarkings`)
+- **Crossing the roads**: Mamma Cat (only her — people, snatchers and the other cats are still kept off the asphalt) can cross every road and explore the whole map. Cars are never allowed to run her over: drivers who see her ahead brake calmly, one she darts out in front of screeches to a halt (tyre screech) and may honk until she moves, and if she sits, sleeps or collapses on the road they slow to a crawl and steer round her, borrowing the next lane only when it is clear. Motorbikes don't wait for her to settle: they squeeze past slowly through far smaller gaps, on either side, a wheel on the pavement if need be. She can slip under a stopped car; a car never moves while she is under or against it. The screech and horn are synthesised by `scripts/generate-sfx.mjs`
+- **Night lights:** lamp posts along the walks light warm pools on the ground from dusk to dawn (`NightLights`)
+- **More park animals:** Cat cat and Mittens live in the colony and Ella the long-haired dachshund comes out with a dog walker — PixelLab sheets in `public/assets/sprites/pets/` (layout in `src/data/pets.ts`, packed by `scripts/build-pixellab-extras.py`, provenance in `scripts/pixellab-extras.json`)
+- **Kish's wardrobe:** Kish wears her usual clothes on odd days and her other outfit on even days (`kishProfileForDay`; same girl, same behaviour)
 - **Dogs** that follow dog walkers, bark and lunge when the player gets close
 - **Trust and reputation system** tracking global colony trust and per-cat relationships
 - **Emote system** showing floating mood indicators above cats
@@ -84,12 +92,13 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 | Any movement key, Space, or Z       | Wake up from rest                                                                                                            |
 | J                                   | Open colony journal                                                                                                          |
 | Tab (toggle)                        | Look around -- camera zooms out to survey the area, press again to return                                                    |
+| Tab Tab (quick double tap)          | Whole map -- camera lets go of Mamma Cat and fits the full map in view; Tab or moving returns to her                         |
 | Escape                              | Pause menu (Save Game, Colony Journal, Resume, Quit to Title)                                                                |
 
 ### Tips
 
-- **Survival stats** (hunger, thirst, energy) are shown as bars in the top-left corner alongside the in-game clock. Keep them topped up by finding food sources, water, and safe resting spots around the park.
-- **Running** is costly -- it drains energy fast and should be used to escape threats, not for casual travel.
+- **Survival stats** (hunger, thirst, energy) are shown as bars in the top-left corner alongside the in-game clock. Keep them topped up by finding food sources, water, and safe resting spots around the park. Any pond, fountain pool or waterfall edge is drinkable.
+- **Running** is costly -- it burns 2.5x the energy per metre of walking and makes her thirsty three times as fast (worse in the midday sun), so use it to escape threats, not for casual travel.
 - **Crouching** near bushes or tree canopy makes Mamma Cat much harder for the guard to spot.
 - **Resting** requires you to hold Z for 2 seconds while standing still. A progress ring appears so you know it's working. Energy restores faster in shade and even faster at designated safe spots.
 - **Look around** (Tab) is useful for spotting food, water, threats, and other cats before committing to a direction.
@@ -108,7 +117,7 @@ The game is inspired by the real cat colony at Ayala Triangle Gardens and the vo
 | [Vitest](https://vitest.dev)                 | 3.x     | Unit testing with V8 coverage                  |
 | [pngjs](https://github.com/lukeapage/pngjs)  | 7.x     | Dev-only procedural tileset and map generation |
 
-Maps are generated programmatically via Node.js scripts (not via the Tiled GUI), exported as Tiled-compatible JSON consumed by Phaser's tilemap loader.
+Maps are generated programmatically via Node.js scripts from OpenStreetMap data (not via the Tiled GUI), exported as Tiled-compatible JSON consumed by Phaser's tilemap loader.
 
 ## Getting Started
 
@@ -474,19 +483,25 @@ ayala/
 │   │   ├── SmallDog.png               #     Dog spritesheet (32x32 frames)
 │   │   ├── BrownDog.png               #     Dog spritesheet (32x32 frames)
 │   │   ├── WhiteDog.png               #     Dog spritesheet (32x32 frames)
+│   │   ├── vehicles.png / .json       #     Top-down traffic + story cars atlas (generated)
 │   │   ├── ginger-IDLE.png            #     Ginger cat strip (64x64 frames)
 │   │   ├── ginger-WALK.png            #     Ginger cat strip
 │   │   ├── ginger-RUN.png             #     Ginger cat strip
 │   │   └── Black-*.png                #     Additional black cat animation strips
 │   ├── tilemaps/
-│   │   └── atg.json                    #   100x80 Tiled JSON map (generated)
+│   │   └── atg.json                    #   290x229 Tiled JSON map, 2 m/tile (generated from OSM)
 │   └── tilesets/
 │       └── park-tiles.png              #   40-tile textured tileset (generated)
 │
 ├── scripts/                             # Dev-time asset generators + CI helpers (Node.js)
 │   ├── generate-tileset.mjs            #   Generates park-tiles.png + tile-indices.json
-│   ├── generate-map.mjs               #   Generates atg.json from tile indices
+│   ├── generate-map.mjs               #   Generates atg.json from the OSM extract + PLACES table
+│   ├── generate-vehicles.mjs           #   Generates the top-down vehicles.png + vehicles.json atlas
 │   ├── tile-indices.json               #   Named tile ID map (generated output)
+│   ├── fetch-osm.mjs                   #   Pulls the OpenStreetMap extract (Overpass → GeoJSON)
+│   ├── atg-osm.geojson                 #   Saved OSM extract of ATG (© OpenStreetMap contributors)
+│   ├── atg-stamps.json                 #   Tree/plant stamps (trees-pale, plants) reused by the generator
+│   ├── render-map.mjs                  #   Renders atg.json to a PNG overview for review
 │   └── check-dist-leaks.mjs            #   CI: fail if secret-like patterns in dist/
 │
 ├── src/                                 # Game source (TypeScript)
@@ -561,14 +576,32 @@ ayala/
 
 ## Asset Generation
 
-The tileset and map are generated procedurally, not drawn in a GUI. To regenerate after editing the scripts:
+The tileset is generated procedurally and the map is generated from real OpenStreetMap geometry; neither is drawn in a GUI. Don't hand-edit the committed PNG or JSON — change the scripts and regenerate:
 
 ```bash
 node scripts/generate-tileset.mjs   # Regenerates park-tiles.png and tile-indices.json
-node scripts/generate-map.mjs       # Regenerates atg.json (reads tile-indices.json)
+node scripts/generate-map.mjs       # Regenerates atg.json + atg-ground.png from atg-osm.geojson (reads tile-indices.json, atg-stamps.json)
+node scripts/render-map.mjs         # Optional: PNG overview of atg.json (default: your temp dir) for review
+node scripts/generate-vehicles.mjs  # Regenerates sprites/vehicles.png + vehicles.json (top-down traffic and story cars)
 ```
 
-Both scripts use `pngjs` (dev dependency) and write to `public/assets/`. The generated files are committed to git so the game runs without needing to regenerate them.
+The generators use `pngjs` (dev dependency) and write to `public/assets/`. The generated files are committed to git so the game runs without needing to regenerate them.
+
+`generate-map.mjs` works at 2 m per 32 px tile, north up. It rasterises the extract onto the existing park-tiles indices: the three bounding roads (and every street in frame) collide, so the park is sealed for people and NPC cats (road tiles also carry a `road` property: Mamma Cat's collider ignores those, so only she can cross; water tiles carry `water`, which every cat drinks from); footways become stone paths, buildings and towers become solid blocks, the PSE pond and fountains become water. Places OSM doesn't map are in the `PLACES` table at the top of the script (the sunken plaza with the northern Starbucks and its waterfall, the steps down to the mall and up to the towers, the triangular cat shelter, the playground, smoking areas). Trees and plants are scattered from `scripts/atg-stamps.json`, stamps extracted from the earlier hand-made map. Every spawn/POI is snapped to reachable ground with one tile of clearance for human routing, and a `places` object layer is emitted for the game (traffic lanes, park exits, the chapter-4 shops zone, benches, dining tables, picnic spots, smoking areas, selfie spots, guard posts, ambient/snatcher routes, colony zones), read through `src/utils/mapPlaces.ts`. The script fails loudly if the park is not sealed or a POI is unreachable, and `tests/map/atgGeography.test.ts` pins the key places (Blacky's underpass, Starbucks beside the mall steps, the pyramid steps by the glass, …).
+
+The ground the player sees is not the gameplay `ground` layer (that one stays hidden and only carries collision). `generate-map.mjs` bakes it into `public/assets/tilesets/atg-ground.png` with the painters in `scripts/terrain-art.mjs`, as three layers offset by half a tile: `groundArt`, `shade` and `roofArt`. Each art tile's corners sit on four cell centres (dual-grid autotiling), so lawns, paths and paving blend with organic edges, while kerbs, rooflines and pool rims follow signed distances to the real OSM lines and run straight at any angle. Cell centres are kept clear of drawn edges, so ground the cat can walk on never reads as asphalt, roof or water. There is one light direction throughout, from the north-west. Trees, shelters and buildings cast soft shadows down-right in the `shade` layer, roofs and kerbs are lit on their NW edges, stairs darken towards the bottom, and the Sedeño escalator falls away into the dark mouth of the underpass. Monuments and the McMicking / Starbucks water curtains are painted as one-off decals. Identical tiles are deduplicated and the atlas is written as an 8-bit palette PNG (`scripts/png-indexed.mjs`). Lane lines, zebra crossings (OSM `footway=crossing`, emitted as `crossing` places) and tyre-polished wheel tracks are drawn at runtime by `src/systems/RoadMarkings.ts` along the fitted traffic lanes.
+
+`generate-vehicles.mjs` draws every car at the map's real scale (16 px per metre), seen straight down with the nose pointing east (rotation = heading, never mirrored) and shading symmetric about the long axis; the drop shadow is added at runtime. It bakes sedans, hatchbacks, SUVs, a taxi, jeepneys, P2P/city buses and motorbikes with riders in several colours, plus the story drop-off cars (`story_suv*`, `story_corolla`). `src/data/vehicles.ts` lists the frames and traffic mix, and `tests/data/vehicles.test.ts` keeps it in step with the atlas.
+
+Real-world ground plan comes from OpenStreetMap. `scripts/atg-osm.geojson` is a saved extract (park, footways, roads, buildings, steps, underpasses, everything tagged in the bbox) so the generators run offline. Refresh it only when you want newer OSM data:
+
+```bash
+node scripts/fetch-osm.mjs          # Overpass API → scripts/atg-osm.geojson
+```
+
+[docs/atg-osm-preview.svg](docs/atg-osm-preview.svg) is the baseline ground plan drawn from that extract, with the key places numbered (underpasses, the pond, Openbook, the restaurant row, the steps, the monuments).
+
+Map data © OpenStreetMap contributors, available under the [Open Database License](https://www.openstreetmap.org/copyright). The credit also appears in the in-game end credits (`EpilogueScene`).
 
 Cat spritesheets use a mix of 32x32 grid sheets (mammacat, blacky, tiger, jayco, fluffy) and 64x64 strip sheets (ginger cats, though ginger cats currently use fluffy with an orange tint in-game). Human NPCs use per-type spritesheets: `girl.png` for joggers, `dogwalker.png` for dog walkers, and the guard spritesheet with a green tint for feeders. Dog walkers are accompanied by dog sprites (`SmallDog.png`, `BrownDog.png`, `WhiteDog.png`).
 
@@ -579,7 +612,7 @@ The game uses Phaser 3's scene system with six scenes:
 1. **BootScene** preloads all assets (tileset image, tilemap JSON, spritesheets)
 2. **StartScene** shows the title screen with Continue (if save exists), New Game, and New Game+ (if completed) options
 3. **GameScene** is the main gameplay loop:
-   - Creates a 3-layer tilemap (ground, objects with collision, overhead canopy)
+   - Creates the tilemap: a hidden gameplay `ground` layer (collision), the baked `groundArt` + `shade` art layers, `objects` (collision), the `overhead` canopy and `roofArt` shelter roofs
    - Spawns player, NPC cats, guard, human NPCs, and dogs
    - Runs day/night cycle, stat decay, trust ticking, and chapter progression (Chapters 1-6)
    - Manages snatchers (night threat), colony dynamics, territory, and Camille encounter sequences
@@ -618,6 +651,8 @@ Read the full document: [docs/Ayala_GDD_v0.1.md](docs/Ayala_GDD_v0.1.md)
 ## License
 
 TBD
+
+Map data © OpenStreetMap contributors (ODbL) — see [openstreetmap.org/copyright](https://www.openstreetmap.org/copyright).
 
 ---
 

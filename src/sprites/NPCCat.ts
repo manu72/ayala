@@ -4,6 +4,7 @@ import { speakerPoseToAnimMode } from "../utils/dialoguePoseAnim";
 import type { TimeOfDay } from "../systems/DayNightCycle";
 import { BaseNPC } from "./BaseNPC";
 import type { CatState, Disposition } from "./types";
+import { petAnims, petBody } from "../data/pets";
 
 export type { CatState, Disposition } from "./types";
 
@@ -24,6 +25,11 @@ export interface NPCCatConfig {
   walkSpeed?: number;
   /** Whether to shorten pause durations (e.g. kittens). */
   hyperactive?: boolean;
+  /**
+   * "pixellab": a 92 px PixelLab pet sheet (src/data/pets.ts) with 4-direction
+   * walks; the default is the legacy 32 px cat sheet.
+   */
+  layout?: "legacy" | "pixellab";
 }
 
 /**
@@ -38,6 +44,10 @@ const BEHAVIOUR_WEIGHTS: Record<TimeOfDay, Record<string, number>> = {
 };
 
 const WALK_SPEED = 35;
+/** A route waypoint counts as reached this close. */
+const ROUTE_ARRIVE_PX = 6;
+/** No progress toward a route waypoint for this long (pressed against something): move on to the next. */
+const ROUTE_STALL_MS = 1_500;
 const FLEE_SPEED = 120;
 const PAUSE_MIN_MS = 2_000;
 const PAUSE_MAX_MS = 5_000;
@@ -83,6 +93,14 @@ export class NPCCat extends BaseNPC {
   /** Reference to the current phase (set externally each frame). */
   private currentPhase: TimeOfDay = "day";
 
+  /** A route being walked (world px waypoints), e.g. to water and back; null when roaming freely. */
+  private route: Array<{ x: number; y: number }> | null = null;
+  private routeIndex = 0;
+  private routeDone: (() => void) | null = null;
+  private routeBest = Infinity;
+  private routeStallMs = 0;
+  private drinkDone: (() => void) | null = null;
+
   constructor(scene: Phaser.Scene, config: NPCCatConfig) {
     super(scene, config.x, config.y, config.spriteKey);
     this.npcName = config.name;
@@ -99,7 +117,12 @@ export class NPCCat extends BaseNPC {
       this.setScale(config.scale);
     }
 
-    this.setupPhysicsBody(18, 18, 7, 12);
+    if (config.layout === "pixellab") {
+      const b = petBody(config.scale ?? 1);
+      this.setupPhysicsBody(b.w, b.h, b.offsetX, b.offsetY);
+    } else {
+      this.setupPhysicsBody(18, 18, 7, 12);
+    }
 
     this.createAnimations(scene, this.animPrefix);
     this.anims.play(`${this.animPrefix}-sit-down`, true);
@@ -112,11 +135,87 @@ export class NPCCat extends BaseNPC {
     this.currentPhase = phase;
   }
 
+  get home(): { x: number; y: number } {
+    return { x: this.homeX, y: this.homeY };
+  }
+
+  get inDialogue(): boolean {
+    return this.dialogueEngaged;
+  }
+
+  /** Walking a route or drinking at the end of one. */
+  get onErrand(): boolean {
+    return this.route !== null || this.state === "drinking";
+  }
+
+  /**
+   * Walk `route` (world px waypoints, e.g. from the nav grid), then call `done`.
+   * Fleeing, an alert or dialogue cancels it without calling `done`.
+   */
+  followRoute(route: ReadonlyArray<{ x: number; y: number }>, done: () => void): void {
+    this.cancelErrand();
+    this.route = route.map(({ x, y }) => ({ x, y }));
+    this.routeIndex = 0;
+    this.routeDone = done;
+    this.routeBest = Infinity;
+    this.routeStallMs = 0;
+    this.state = "walking";
+    this.setAlpha(1);
+  }
+
+  /** Sit at the water's edge facing `water` and drink for `ms`, then call `done`. Cancelled like a route. */
+  drink(water: { x: number; y: number }, ms: number, done: () => void): void {
+    this.cancelErrand();
+    this.lastDirection = BaseNPC.directionFromComponents(water.x - this.x, water.y - this.y);
+    this.state = "drinking";
+    this.stateTimer = ms;
+    this.drinkDone = done;
+    this.setVelocity(0);
+    this.setAlpha(1);
+    this.anims.play(`${this.animPrefix}-sit-${this.lastDirection}`, true);
+  }
+
+  private cancelErrand(): void {
+    this.route = null;
+    this.routeDone = null;
+    this.drinkDone = null;
+  }
+
+  /** Head for the next route waypoint; past the last one, finish the route. */
+  private stepRoute(delta: number): void {
+    const route = this.route;
+    const next = route?.[this.routeIndex];
+    if (!route || !next) {
+      const done = this.routeDone;
+      this.cancelErrand();
+      this.enterState("idle");
+      done?.();
+      return;
+    }
+    const dx = next.x - this.x;
+    const dy = next.y - this.y;
+    const d = Math.hypot(dx, dy);
+    if (d < this.routeBest - 1) {
+      this.routeBest = d;
+      this.routeStallMs = 0;
+    } else this.routeStallMs += delta;
+    if (d < ROUTE_ARRIVE_PX || this.routeStallMs > ROUTE_STALL_MS) {
+      this.routeIndex += 1;
+      this.routeBest = Infinity;
+      this.routeStallMs = 0;
+      return;
+    }
+    this.walkDir.set(dx / d, dy / d);
+    (this.body as Phaser.Physics.Arcade.Body).setVelocity(this.walkDir.x * this.walkSpeed, this.walkDir.y * this.walkSpeed);
+    this.playWalkAnim();
+  }
+
   /**
    * Freeze AI and face a dialogue partner.
    * Maps {@link SpeakerPose} to the best available sprite row (sit / walk / rest).
    */
   engageDialogue(targetX: number, targetY: number, pose?: SpeakerPose | string): void {
+    this.cancelErrand();
     this.dialogueEngaged = true;
     this.setVelocity(0);
     const dx = targetX - this.x;
@@ -171,6 +270,10 @@ export class NPCCat extends BaseNPC {
     }
 
     this.stateTimer -= delta;
+    if (this.route) {
+      this.stepRoute(delta);
+      return;
+    }
 
     switch (this.state) {
       case "idle":
@@ -212,10 +315,21 @@ export class NPCCat extends BaseNPC {
         if (this.stateTimer <= 0) this.enterState("alert");
         break;
       }
+
+      case "drinking":
+        this.setVelocity(0);
+        if (this.stateTimer <= 0) {
+          const done = this.drinkDone;
+          this.drinkDone = null;
+          this.enterState("idle");
+          done?.();
+        }
+        break;
     }
   }
 
   private enterState(next: CatState): void {
+    if (next === "alert" || next === "fleeing") this.cancelErrand(); // a scare ends any errand
     this.state = next;
 
     switch (next) {
@@ -290,11 +404,19 @@ export class NPCCat extends BaseNPC {
     this.lastDirection = this.directionFromVector(this.walkDir);
 
     const animKey = this.state === "fleeing" ? `${this.animPrefix}-run` : `${this.animPrefix}-walk`;
-    this.anims.play(animKey, true);
+    // 4-direction sheets (PixelLab pets) face the way they walk
+    const directional = `${animKey}-${this.lastDirection}`;
+    this.anims.play(this.scene.anims.exists(directional) ? directional : animKey, true);
   }
 
   private createAnimations(scene: Phaser.Scene, prefix: string): void {
     if (scene.anims.exists(`${prefix}-sit-down`)) return;
+
+    if (this.config.layout === "pixellab") {
+      for (const a of petAnims(prefix))
+        scene.anims.create({ key: a.key, frames: scene.anims.generateFrameNumbers(this.texture.key, { frames: a.frames }), frameRate: a.frameRate, repeat: a.repeat });
+      return;
+    }
 
     const tex = this.texture.key;
     const row = (r: number, count = 4) => BaseNPC.rowFrames(r, COLS, count);

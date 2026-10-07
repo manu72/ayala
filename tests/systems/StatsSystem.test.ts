@@ -8,6 +8,7 @@ import {
   STATS_RESET_MIN_HUNGER,
   STATS_RESET_MIN_THIRST,
   STATS_REST_DECAY_MULTIPLIER,
+  STATS_RUNNING_THIRST_MULTIPLIER,
   STATS_REST_RATE_OPEN,
   STATS_REST_RATE_SAFE,
   STATS_REST_RATE_SHADE,
@@ -158,6 +159,21 @@ describe('StatsSystem', () => {
       const deltaSec = 10
       stats.update(deltaSec, true, true, false, false, false)
       expect(stats.energy).toBeCloseTo(100 - STATS_DECAY.energyRunning * deltaSec, 5)
+    })
+
+    it('makes running cost more energy per metre than walking, and more thirst per second', () => {
+      // running is 2x walking speed (MammaCat RUN_SPEED / BASE_SPEED)
+      expect(STATS_DECAY.energyRunning / 2).toBeGreaterThan(STATS_DECAY.energyMoving * 2)
+      const walker = new StatsSystem()
+      walker.update(10, true, false, false, false, false)
+      stats.update(10, true, true, false, false, false)
+      expect(100 - stats.thirst).toBeCloseTo((100 - walker.thirst) * STATS_RUNNING_THIRST_MULTIPLIER, 5)
+      // too tired to run: she walks, at walking cost
+      const tired = new StatsSystem()
+      tired.energy = 19
+      tired.update(10, true, true, false, false, false)
+      expect(tired.thirst).toBeCloseTo(walker.thirst, 5)
+      expect(tired.energy).toBeCloseTo(19 - STATS_DECAY.energyMoving * 10, 5)
     })
 
     it('does not update when collapsed', () => {

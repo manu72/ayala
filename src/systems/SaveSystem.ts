@@ -19,10 +19,15 @@ export interface SaveData {
   territory?: { claimed: boolean; claimedOnDay: number }
   lives: number
   runScore: RunScoreState
+  /** Tilemap `mapRevision` the positions were saved on; positions are ignored on any other map. */
+  mapRevision?: string
 }
 
-const CURRENT_VERSION = 2
+/** v3 (0.5.0): the map was rebuilt from OpenStreetMap at 2 m/tile; saves now record `mapRevision`. */
+export const CURRENT_VERSION = 3
 const LEGACY_VERSION = 1
+/** First version that stored lives + run score. */
+const RUN_SCORE_VERSION = 2
 
 const TRACKED_KEYS = [
   'MET_BLACKY', 'TIGER_TALKS', 'JAYCO_TALKS', 'KNOWN_CATS',
@@ -34,7 +39,7 @@ const TRACKED_KEYS = [
   'CAMILLE_AMBIENT_DAWN_DAY', 'CAMILLE_AMBIENT_EVENING_DAY',
   'MANU_VISITED_FLUFFY_DAY',
   'ENCOUNTER_5_COMPLETE',
-  'COLONY_COUNT', 'DUMPING_EVENTS_SEEN', 'CATS_SNATCHED',
+  'COLONY_COUNT', 'COLONY_NAMED', 'COLONY_LOST', 'DUMPING_EVENTS_SEEN', 'CATS_SNATCHED',
   'GAME_COMPLETED', 'GAME_OVER', 'NEW_GAME_PLUS', 'INTRO_SEEN', 'FIRST_SNATCHER_SEEN',
   'COLLAPSE_COUNT', 'PLAYER_SNATCHED_COUNT', 'SNATCHED_THIS_NIGHT',
 ] as const
@@ -76,7 +81,9 @@ export function isValidSave(data: unknown): data is SaveData {
     }
   }
 
-  if (d.version >= CURRENT_VERSION) {
+  if (d.mapRevision !== undefined && typeof d.mapRevision !== 'string') return false
+
+  if (d.version >= RUN_SCORE_VERSION) {
     if (
       typeof d.lives !== 'number' ||
       !Number.isFinite(d.lives) ||
@@ -124,12 +131,11 @@ function isStringArray(data: unknown): boolean {
 
 function migrateSave(data: SaveData): SaveData {
   if (data.version >= CURRENT_VERSION) return data
-  return {
-    ...data,
-    version: CURRENT_VERSION,
-    lives: DEFAULT_LIVES,
-    runScore: createDefaultRunScoreState(),
-  }
+  const withScore =
+    data.version < RUN_SCORE_VERSION ? { ...data, lives: DEFAULT_LIVES, runScore: createDefaultRunScoreState() } : data
+  // Pre-v3 saves were made on the hand-drawn map: no mapRevision, so GameScene
+  // keeps their story/stats but not their world positions.
+  return { ...withScore, version: CURRENT_VERSION, mapRevision: undefined }
 }
 
 export const SaveSystem = {
@@ -149,6 +155,7 @@ export const SaveSystem = {
     territory?: { claimed: boolean; claimedOnDay: number },
     lives = DEFAULT_LIVES,
     runScore: RunScoreState = createDefaultRunScoreState(),
+    mapRevision?: string,
   ): boolean {
     const variables: Record<string, unknown> = {}
     for (const key of TRACKED_KEYS) {
@@ -168,6 +175,7 @@ export const SaveSystem = {
       territory,
       lives,
       runScore,
+      mapRevision,
     }
 
     try {

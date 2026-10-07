@@ -5,7 +5,7 @@
 
 import Phaser from "phaser";
 
-export type EmoteType = "heart" | "alert" | "curious" | "sleep" | "hostile" | "danger";
+export type EmoteType = "heart" | "alert" | "curious" | "sleep" | "hostile" | "danger" | "drink";
 
 const EMOTE_GLYPHS: Record<EmoteType, string> = {
   heart: "\u2665",
@@ -14,6 +14,7 @@ const EMOTE_GLYPHS: Record<EmoteType, string> = {
   sleep: "z z z",
   hostile: "!!",
   danger: "!!!",
+  drink: "\u{1F4A7}",
 };
 
 const EMOTE_COLORS: Record<EmoteType, string> = {
@@ -23,6 +24,7 @@ const EMOTE_COLORS: Record<EmoteType, string> = {
   sleep: "#95a5a6",
   hostile: "#e74c3c",
   danger: "#c0392b",
+  drink: "#4488ff",
 };
 
 /** Minimum ms between emotes on the same target to prevent spam. */
@@ -31,10 +33,12 @@ const COOLDOWN_MS = 3_000;
 export class EmoteSystem {
   private cooldowns = new WeakMap<Phaser.GameObjects.Sprite, number>();
 
+  /** `offsetY` lowers the glyph for sprites whose head sits lower than usual (scaled-down guards). */
   show(
     scene: Phaser.Scene,
     target: Phaser.GameObjects.Sprite,
     emote: EmoteType,
+    offsetY = 0,
   ): void {
     const now = scene.time.now;
     const lastShown = this.cooldowns.get(target) ?? 0;
@@ -45,7 +49,7 @@ export class EmoteSystem {
     const color = EMOTE_COLORS[emote];
 
     const text = scene.add
-      .text(target.x, target.y - 24, glyph, {
+      .text(target.x, target.y - 24 + offsetY, glyph, {
         fontSize: "14px",
         fontFamily: "monospace",
         color,
@@ -70,7 +74,7 @@ export class EmoteSystem {
 
     scene.tweens.add({
       targets: text,
-      y: target.y - 44,
+      y: target.y - 44 + offsetY,
       alpha: 0,
       duration: 1500,
       ease: "Power2",

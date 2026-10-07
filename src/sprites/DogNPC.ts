@@ -4,6 +4,7 @@ import type { HumanNPC } from "./HumanNPC";
 import type { MammaCat } from "./MammaCat";
 import type { NPCCat } from "./NPCCat";
 import type { EmoteSystem } from "../systems/EmoteSystem";
+import { PETS, petAnims } from "../data/pets";
 
 const BARK_RANGE = 96;
 const BARK_COOLDOWN_MS = 8_000;
@@ -34,6 +35,9 @@ export class DogNPC extends Phaser.GameObjects.Sprite {
     scene.add.existing(this);
     this.setDepth(3);
     this.setOrigin(0.5);
+    // PixelLab pets (Ella) come on a 92 px sheet; draw them at dog size
+    const pet = Object.values(PETS).find((p) => p.texture === spriteKey);
+    if (pet) this.setScale(pet.scale);
 
     this.createAnimations(scene);
     this.anims.play(`${this.spriteKey}-idle`, true);
@@ -177,6 +181,12 @@ export class DogNPC extends Phaser.GameObjects.Sprite {
   private createAnimations(scene: Phaser.Scene): void {
     const key = this.spriteKey;
     if (scene.anims.exists(`${key}-idle`)) return;
+
+    if (Object.values(PETS).some((p) => p.texture === key)) {
+      for (const a of petAnims(key))
+        scene.anims.create({ key: a.key, frames: scene.anims.generateFrameNumbers(key, { frames: a.frames }), frameRate: a.frameRate, repeat: a.repeat });
+      return;
+    }
 
     const row = (r: number, count = COLS) => BaseNPC.rowFrames(r, COLS, count);
 

@@ -341,10 +341,16 @@ export const CAT_DIALOGUE_SCRIPTS: Record<string, DialogueScript[]> = {
 };
 
 /**
- * Returns a random colony dialogue line (for unnamed cats).
+ * Returns a random colony dialogue line, about `name` once Mamma Cat knows it.
  * Colony cats bypass the normal DialogueService flow since
  * they don't track conversation history or trust.
  */
-export function getRandomColonyLine(): string {
-  return COLONY_LINES[Math.floor(Math.random() * COLONY_LINES.length)]!;
+export function getRandomColonyLine(name?: string): string {
+  const line = COLONY_LINES[Math.floor(Math.random() * COLONY_LINES.length)]!;
+  return name ? line.replace("This cat", name) : line;
+}
+
+/** The first greeting of a colony cat: Mamma Cat learns its name. */
+export function colonyIntroLine(name: string): string {
+  return `*You and the cat size each other up. This one is ${name}.*`;
 }

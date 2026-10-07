@@ -209,18 +209,15 @@ describe("routeHumanPath", () => {
     expect(result.path).toEqual([{ x: 5, y: 5 }]);
   });
 
-  it("keeps the male jogger's Paseo underpass segment as turn points instead of tile-step targets", () => {
+  it("keeps the male jogger's Paseo sidewalk segment as turn points instead of tile-step targets", () => {
     const grid = navigationGridFromAtgMap();
-    const routed = routeHumanPath(
-      [
-        { x: 16, y: 1392 },
-        { x: 1008, y: 432 },
-      ],
-      grid,
-    );
+    // First leg of the perimeter loop: W tip along the Paseo sidewalk to the Sedeño underpass.
+    const [start, end] = routePolyline("route_jogger_male");
+    if (!start || !end) throw new Error("route_jogger_male needs at least two vertices");
+    const routed = routeHumanPath([start, end], grid);
 
-    expect(routed.path[0]).toEqual({ x: 16, y: 1392 });
-    expect(routed.path[routed.path.length - 1]).toEqual({ x: 1008, y: 432 });
+    expect(routed.path[0]).toEqual(start);
+    expect(routed.path[routed.path.length - 1]).toEqual(end);
     expect(routed.path.length).toBeLessThan(10);
     const firstMoveTileDistance = Math.max(
       Math.abs(toCell(routed.path[1]!, grid).x - toCell(routed.path[0]!, grid).x),
@@ -302,6 +299,13 @@ function findAtgObject(name: string) {
   const layer = atgMap.layers.find((candidate) => candidate.name === "spawns");
   if (!layer || !("objects" in layer) || !Array.isArray(layer.objects)) return undefined;
   return layer.objects.find((object) => object.name === name);
+}
+
+function routePolyline(name: string): RoutePoint[] {
+  const layer = atgMap.layers.find((candidate) => candidate.name === "places");
+  const route = layer && "objects" in layer ? layer.objects?.find((object) => object.name === name) : undefined;
+  if (!route || !("polyline" in route) || !Array.isArray(route.polyline)) throw new Error(`Missing route ${name}`);
+  return route.polyline.map((p: { x: number; y: number }) => ({ x: route.x + p.x, y: route.y + p.y }));
 }
 
 function toCell(point: RoutePoint, grid: NavigationGrid): { x: number; y: number } {
