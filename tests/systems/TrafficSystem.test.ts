@@ -381,3 +381,139 @@ describe("TrafficSystem", () => {
     expect(traffic.lanesFor("nope")).toBe(0);
   });
 });
+
+describe("Mamma Cat on the road", () => {
+  const WIDTH_BY_FRAME = new Map(
+    Object.values(VEHICLE_CLASSES).flatMap((c) => c.frames.map((f) => [f, c.width] as const)),
+  );
+  /** Distance from her centre to the drawn car body (0 when inside it). */
+  const gapTo = (img: ImageMock, cat: { x: number; y: number }) => {
+    const halfL = lengthOf(img) / 2;
+    const halfW = (WIDTH_BY_FRAME.get(img.frame) ?? Number.NaN) / 2;
+    const dx = cat.x - img.x;
+    const dy = cat.y - img.y;
+    const u = dx * Math.cos(img.rotation) + dy * Math.sin(img.rotation);
+    const v = -dx * Math.sin(img.rotation) + dy * Math.cos(img.rotation);
+    return Math.hypot(Math.max(0, Math.abs(u) - halfL), Math.max(0, Math.abs(v) - halfW));
+  };
+  /** Both test carriageways are two lanes wide; the pavement starts a lane width off each centre line. */
+  const isDrivable = (_x: number, y: number) => Math.abs(y - 200) <= 52.8 || Math.abs(y - 600) <= 52.8;
+  const RADIUS = 10;
+  /** Separating-axis test on two drawn car bodies (oriented rectangles). */
+  const carsOverlap = (a: ImageMock, b: ImageMock) => {
+    const box = (img: ImageMock) => ({
+      x: img.x,
+      y: img.y,
+      hl: lengthOf(img) / 2,
+      hw: (WIDTH_BY_FRAME.get(img.frame) ?? Number.NaN) / 2,
+      ux: Math.cos(img.rotation),
+      uy: Math.sin(img.rotation),
+    });
+    const A = box(a);
+    const B = box(b);
+    const reach = (r: typeof A, ax: number, ay: number) => r.hl * Math.abs(r.ux * ax + r.uy * ay) + r.hw * Math.abs(-r.uy * ax + r.ux * ay);
+    for (const [ax, ay] of [[A.ux, A.uy], [-A.uy, A.ux], [B.ux, B.uy], [-B.uy, B.ux]] as const) {
+      if (Math.abs((B.x - A.x) * ax + (B.y - A.y) * ay) >= reach(A, ax, ay) + reach(B, ax, ay)) return false;
+    }
+    return true;
+  };
+
+  it("never drives a car onto her, whether she stands, sits or wanders across the road", () => {
+    const { scene, images } = makeScene();
+    const her = { x: 2000, y: 226.4, radius: RADIUS, onRoad: true, settled: false };
+    const traffic = new TrafficSystem(scene, places, { maxCars: 40, rng: seeded(), isDrivable, cat: () => her });
+    let worstWhileStill = Infinity;
+    let movedOntoHer = 0;
+    let carCrashes = 0;
+    const passedWhileSitting = new Set<ImageMock>();
+    const last = new Map<ImageMock, { x: number; y: number; rotation: number }>();
+    const frame = (walking: boolean) => {
+      traffic.update(1000 / 60, RUSH);
+      for (const img of shownCars(images)) {
+        const gap = gapTo(img, her);
+        const prev = last.get(img);
+        if (!walking) worstWhileStill = Math.min(worstWhileStill, gap);
+        // She may walk under a stopped car (cats do); a car touching her must not move.
+        if (gap < RADIUS && prev && (prev.x !== img.x || prev.y !== img.y || prev.rotation !== img.rotation)) movedOntoHer++;
+        if (her.settled && img.y < 400 && (prev?.x ?? Infinity) < her.x && img.x >= her.x) passedWhileSitting.add(img);
+        last.set(img, { x: img.x, y: img.y, rotation: img.rotation });
+      }
+      const drawn = shownCars(images);
+      for (let i = 0; i < drawn.length; i++) for (let j = i + 1; j < drawn.length; j++) if (carsOverlap(drawn[i]!, drawn[j]!)) carCrashes++;
+    };
+    for (let i = 0; i < 20 * 60; i++) frame(false); // standing in the kerb lane
+    her.settled = true;
+    for (let i = 0; i < 40 * 60; i++) frame(false); // sitting there
+    her.settled = false;
+    for (let i = 0; i < 8 * 60; i++) {
+      her.y = 140 + (130 * i) / (8 * 60); // strolling across both lanes
+      frame(true);
+    }
+    expect(worstWhileStill).toBeGreaterThanOrEqual(RADIUS);
+    expect(movedOntoHer).toBe(0);
+    expect(carCrashes).toBe(0); // steering round her never runs into the next lane's traffic
+    expect(passedWhileSitting.size).toBeGreaterThan(5); // drove round her, not just once
+  });
+
+  it("lets motorbikes squeeze past her while cars wait, even when she won't stay put", () => {
+    /** 60 s of rush hour with her fidgeting in the kerb lane (never still long enough for cars to go round). */
+    const fidget = (rng: () => number) => {
+      const { scene, images } = makeScene();
+      const her = { x: 2000, y: 226.4, radius: RADIUS, onRoad: true, settled: false };
+      const traffic = new TrafficSystem(scene, places, { maxCars: 40, rng, isDrivable, cat: () => her });
+      const passed = { moto: 0, other: 0 };
+      let movedOntoHer = 0;
+      const last = new Map<ImageMock, { x: number; y: number; rotation: number }>();
+      for (let i = 0; i < 60 * 60; i++) {
+        her.x = Math.floor(i / 90) % 2 === 0 ? 2000 : 2008;
+        traffic.update(1000 / 60, RUSH);
+        for (const img of shownCars(images)) {
+          const prev = last.get(img);
+          if (gapTo(img, her) < RADIUS && prev && (prev.x !== img.x || prev.y !== img.y || prev.rotation !== img.rotation)) movedOntoHer++;
+          // her lane (kerb lane, y 226.4), including a bike squeezing by on its inside
+          if (prev && img.y > 195 && img.y < 300 && prev.x < her.x && img.x >= her.x) passed[img.frame.startsWith("moto") ? "moto" : "other"]++;
+          last.set(img, { x: img.x, y: img.y, rotation: img.rotation });
+        }
+      }
+      return { passed, movedOntoHer };
+    };
+    const bikes = fidget(() => 0.999); // the last vehicle class: every spawn is a motorbike
+    expect(bikes.movedOntoHer).toBe(0);
+    expect(bikes.passed.moto).toBeGreaterThan(3);
+    const mixed = fidget(seeded(3));
+    expect(mixed.movedOntoHer).toBe(0);
+    expect(mixed.passed.other).toBe(0);
+  });
+
+  it("screeches when she darts out just ahead of a moving car, and the driver honks while she stays", () => {
+    const { scene, images } = makeScene();
+    let her: { x: number; y: number; radius: number; onRoad: boolean; settled: boolean } | null = null;
+    const onScreech = vi.fn();
+    const onHorn = vi.fn();
+    const traffic = new TrafficSystem(scene, places, { maxCars: 40, rng: () => 0.05, isDrivable, cat: () => her, onScreech, onHorn });
+    let victim: ImageMock | undefined;
+    for (let i = 0; i < 1200 && !victim; i++) {
+      traffic.update(1000 / 60, RUSH);
+      victim = shownCars(images).find((img) => img.y < 400 && img.x > 800 && img.x < 2500);
+    }
+    expect(victim).toBeDefined();
+    her = { x: victim!.x + lengthOf(victim!) / 2 + 30 + RADIUS, y: victim!.y, radius: RADIUS, onRoad: true, settled: false };
+    for (let i = 0; i < 90; i++) {
+      traffic.update(1000 / 60, RUSH);
+      for (const img of shownCars(images)) expect(gapTo(img, her)).toBeGreaterThanOrEqual(RADIUS);
+    }
+    expect(onScreech).toHaveBeenCalledTimes(1);
+    expect(Math.hypot(onScreech.mock.calls[0]![0] - her.x, onScreech.mock.calls[0]![1] - her.y)).toBeLessThan(120);
+    expect(onHorn).toHaveBeenCalled();
+  });
+
+  it("leaves traffic alone when she is off the road", () => {
+    const run = (cat?: () => null) => {
+      const { scene, images } = makeScene();
+      const traffic = new TrafficSystem(scene, places, { maxCars: 40, rng: seeded(), cat });
+      for (let i = 0; i < 600; i++) traffic.update(1000 / 60, RUSH);
+      return shownCars(images).map((img) => [img.x, img.y, img.rotation]);
+    };
+    expect(run(() => null)).toEqual(run());
+  });
+});

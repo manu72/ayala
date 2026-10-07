@@ -180,3 +180,9 @@ export const NAMED_AND_MAMMA_COUNT = 9;
  * narrative total lives independently in `COLONY_COUNT`.
  */
 export const VISIBLE_BACKGROUND_CAP = 24;
+
+/** A car that screeches to a halt within this many px of Mamma Cat makes her jump (alert emote + hop). */
+export const CAR_FRIGHT_RADIUS_PX = 110;
+
+/** World sounds (tyre screech, horn) fade to silence this many px from the camera centre. */
+export const SFX_EAR_RANGE_PX = 700;

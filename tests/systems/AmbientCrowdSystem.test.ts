@@ -125,11 +125,15 @@ const m = map as unknown as {
   layers: Array<{ name: string; data?: number[]; objects?: TiledObjectLike[] }>
 }
 const colliding = new Set<number>()
+const roadGids = new Set<number>()
 for (const ts of m.tilesets) {
   for (const t of ts.tiles ?? []) {
     if ((t.properties ?? []).some((p) => p.name === 'collides' && p.value === true)) colliding.add(ts.firstgid + t.id)
+    if ((t.properties ?? []).some((p) => p.name === 'road' && p.value === true)) roadGids.add(ts.firstgid + t.id)
   }
 }
+/** Extra ground cells (y * width + x) a test wants read as road. */
+const testRoadCells = new Set<number>()
 const fakeLayer = (name: string) => {
   const data = m.layers.find((l) => l.name === name)?.data ?? []
   return {
@@ -138,7 +142,9 @@ const fakeLayer = (name: string) => {
       const tx = Math.floor(x / m.tilewidth)
       const ty = Math.floor(y / m.tilewidth)
       if (tx < 0 || ty < 0 || tx >= m.width || ty >= m.height) return null
-      return { collides: colliding.has(data[ty * m.width + tx] ?? 0), properties: {} }
+      const k = ty * m.width + tx
+      const road = name === 'ground' && (roadGids.has(data[k] ?? 0) || testRoadCells.has(k))
+      return { collides: road || colliding.has(data[k] ?? 0), properties: road ? { road: true } : {} }
     },
   }
 }
@@ -528,6 +534,36 @@ describe('AmbientCrowdSystem', () => {
     expect(crowd.tryEatTreat(t.x + 5, t.y, stats as never)).toBe(T.treatHunger)
     expect(stats.restore).toHaveBeenCalledWith('hunger', T.treatHunger)
     expect(internals.treats.length).toBe(before - 1)
+  })
+
+  it('never tosses a morsel while Mamma Cat is standing on a road', () => {
+    let seed = 12345
+    const seeded = vi.spyOn(Math, 'random').mockImplementation(() => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x80000000))
+    const { crowd, player, run } = setup(restaurantRow)
+    run(40, 'day', 0.35)
+    seeded.mockRestore()
+    const internals = crowd as unknown as {
+      active: Array<CrowdPerson & { mode: string; treatRolled: boolean }>
+      treats: unknown[]
+    }
+    const diner = internals.active.find((p) => p.mode === 'still' && p.visible && ['diner', 'lunch_eater', 'picnicker'].includes(CROWD_ROLES[p.role]?.id ?? ''))
+    expect(diner).toBeDefined()
+    player.x = diner!.x + 20
+    player.y = diner!.y + 10
+    const cell = Math.floor(player.y / m.tilewidth) * m.width + Math.floor(player.x / m.tilewidth)
+    const rnd = vi.spyOn(Math, 'random').mockReturnValue(0) // every roll would succeed
+    try {
+      testRoadCells.add(cell)
+      run(T.treatLingerMs / 1000 + 0.5, 'day', 0.36)
+      expect(internals.treats).toHaveLength(0)
+      expect(diner!.treatRolled).toBe(false) // still owed: she can come back to the pavement
+      testRoadCells.delete(cell)
+      run(T.treatLingerMs / 1000 + 0.5, 'day', 0.36)
+      expect(internals.treats.length).toBeGreaterThan(0)
+    } finally {
+      testRoadCells.clear()
+      rnd.mockRestore()
+    }
   })
 
   it('survives a map with no places at all', () => {

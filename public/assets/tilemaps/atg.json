@@ -50,6 +50,11 @@
        "name": "collides",
        "type": "bool",
        "value": true
+      },
+      {
+       "name": "road",
+       "type": "bool",
+       "value": true
       }
      ]
     },
@@ -110,6 +115,11 @@
        "name": "collides",
        "type": "bool",
        "value": true
+      },
+      {
+       "name": "road",
+       "type": "bool",
+       "value": true
       }
      ]
     },
@@ -140,6 +150,11 @@
        "name": "collides",
        "type": "bool",
        "value": true
+      },
+      {
+       "name": "road",
+       "type": "bool",
+       "value": true
       }
      ]
     },
@@ -148,6 +163,11 @@
      "properties": [
       {
        "name": "collides",
+       "type": "bool",
+       "value": true
+      },
+      {
+       "name": "road",
        "type": "bool",
        "value": true
       }

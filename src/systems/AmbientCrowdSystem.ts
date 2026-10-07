@@ -8,6 +8,7 @@ import type { EmoteSystem } from "./EmoteSystem";
 import type { StatsSystem } from "./StatsSystem";
 import { DAY_NIGHT_PHASES, type TimeOfDay } from "./DayNightCycle";
 import { placeNamed, placesOfType, type MapPlace } from "../utils/mapPlaces";
+import { isRoadTile } from "../utils/roadTiles";
 import {
   buildWalkwayGraph,
   degree,
@@ -214,6 +215,8 @@ export class AmbientCrowdSystem {
   private shedTimer = 0;
   private timeMs = 0;
   private readonly emotes: EmoteSystem;
+  /** Road tiles: Mamma Cat may stand there, nobody tosses food onto them. */
+  private readonly isOnRoad: (x: number, y: number) => boolean;
   /** Morsels on the ground, waiting for Mamma Cat. */
   private readonly treats: Array<{ x: number; y: number; gfx: Phaser.GameObjects.Graphics; expiresAt: number; giver: Person }> = [];
   private treatsToday = 0;
@@ -237,6 +240,7 @@ export class AmbientCrowdSystem {
     this.player = deps.player;
     this.emotes = deps.emotes;
     this.worldH = deps.groundLayer?.tilemap.heightInPixels ?? 8192;
+    this.isOnRoad = (x, y) => isRoadTile(deps.groundLayer?.getTileAtWorldXY(x, y));
     this.createAnimations();
 
     const isClear = makeSegmentClear([deps.groundLayer, deps.objectsLayer]);
@@ -583,7 +587,8 @@ export class AmbientCrowdSystem {
       }
     }
     if (!TREAT_ROLES.has(roleId) || p.mode !== "still" || p.treatRolled) return;
-    if (d2 > T.treatRadius * T.treatRadius) {
+    // Nobody tosses a morsel into traffic: wait until she's back on the pavement.
+    if (d2 > T.treatRadius * T.treatRadius || this.isOnRoad(this.player.x, this.player.y)) {
       p.lingerMs = 0;
       return;
     }

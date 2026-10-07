@@ -29,6 +29,18 @@ const CAT_GROWL_VOLUME = 0.7;
  */
 const CAT_GROWL_COOLDOWN_MS = 1500;
 
+/**
+ * Traffic SFX for cars reacting to Mamma Cat on the road. Callers pass a 0..1
+ * distance multiplier on top of these base volumes. Each sound is globally
+ * rate-limited so several braking cars can't stack into a chorus, and plays
+ * attenuated to near-silence are skipped without spending the cooldown.
+ */
+const TYRE_SCREECH_VOLUME = 0.55;
+const CAR_HORN_VOLUME = 0.45;
+const TYRE_SCREECH_COOLDOWN_MS = 700;
+const CAR_HORN_COOLDOWN_MS = 1200;
+const MIN_SFX_VOLUME = 0.02;
+
 const MUTE_STORAGE_KEY = "ayala.audio.muted";
 
 export const AUDIO_MUTED_CHANGED = "audio:muted-changed" as const;
@@ -63,6 +75,8 @@ export class AudioSystem {
    * than `CAT_GROWL_COOLDOWN_MS` on the first call.
    */
   private lastCatGrowlAt = Number.NEGATIVE_INFINITY;
+  /** Last play time per traffic SFX key, for the global per-sound cooldowns. */
+  private readonly lastTrafficSfxAt = new Map<string, number>();
 
   constructor() {
     this.muted = AudioSystem.readMutedFromStorage();
@@ -120,6 +134,16 @@ export class AudioSystem {
     this.scene.sound.play("sfx_cat_growl_warning", { volume: CAT_GROWL_VOLUME });
   }
 
+  /** One-shot tyre screech for a car braking hard. `volume` is a 0..1 distance multiplier. */
+  playTyreScreech(volume = 1): void {
+    this.playTrafficSfx("sfx_tyre_screech", TYRE_SCREECH_VOLUME, TYRE_SCREECH_COOLDOWN_MS, volume);
+  }
+
+  /** One-shot "beep-beeep" car horn. `volume` is a 0..1 distance multiplier. */
+  playCarHorn(volume = 1): void {
+    this.playTrafficSfx("sfx_car_horn", CAR_HORN_VOLUME, CAR_HORN_COOLDOWN_MS, volume);
+  }
+
   isMuted(): boolean {
     return this.muted;
   }
@@ -149,6 +173,20 @@ export class AudioSystem {
     this.snatcher = null;
     this.scene = null;
     this.started = false;
+  }
+
+  private playTrafficSfx(key: string, baseVolume: number, cooldownMs: number, volume: number): void {
+    if (this.muted || !this.scene) return;
+    // Negated so NaN is skipped too.
+    if (!(volume > MIN_SFX_VOLUME)) return;
+    // Called from the traffic update loop: an asset that failed to load or
+    // decode would otherwise throw (Phaser throws on unknown audio keys).
+    if (!this.scene.cache.audio.exists(key)) return;
+    const now = this.scene.time.now;
+    const last = this.lastTrafficSfxAt.get(key) ?? Number.NEGATIVE_INFINITY;
+    if (now - last < cooldownMs) return;
+    this.lastTrafficSfxAt.set(key, now);
+    this.scene.sound.play(key, { volume: baseVolume * Math.min(1, volume) });
   }
 
   private currentTargets(): { ayala: number; snatcher: number } {

@@ -33,10 +33,14 @@ describe("vehicle catalogue", () => {
       for (const name of spec.frames) {
         expect(frames[name], name).toBeDefined();
         expect(frames[name]?.frame.w).toBe(spec.length);
+        expect(frames[name]?.frame.h).toBe(spec.width);
         expect(frames[name]?.frame.h).toBeLessThan(spec.length); // long axis along x: nose east
       }
     }
-    for (const { frame, length } of Object.values(STORY_VEHICLES)) expect(frames[frame]?.frame.w).toBe(length);
+    for (const { frame, length, width } of Object.values(STORY_VEHICLES)) {
+      expect(frames[frame]?.frame.w).toBe(length);
+      expect(frames[frame]?.frame.h).toBe(width);
+    }
     for (const frame of STORY_SUV_COLOUR_CYCLE) expect(frames[frame]?.frame.w).toBe(STORY_VEHICLES.suv.length);
     expect(atlas.meta.image).toBe("vehicles.png");
     expect(atlas.meta.size.w).toBeLessThanOrEqual(1024);

@@ -1,3 +1,4 @@
+import type Phaser from "phaser";
 import type { GameScene } from "../scenes/GameScene";
 import type { HUDScene } from "../scenes/HUDScene";
 import { NPCCat } from "../sprites/NPCCat";
@@ -10,8 +11,13 @@ import {
 } from "../config/gameplayConstants";
 import { backgroundCatLook, computeBackgroundSpawnCount, decrementColonyTotal } from "../utils/colonySpawn";
 import { placesOfType } from "../utils/mapPlaces";
+import { inCarPath } from "../utils/kerbsideDropoff";
 
 const DUMPED_COMFORT_WINDOW_MS = 5_000;
+/** A dumping car holds while Mamma Cat is on the road this close past its nose (or under / beside it). */
+const DUMPING_CAR_YIELD_PX = 64;
+/** ...and honks once if she is still in the way after this long. */
+const DUMPING_CAR_HONK_AFTER_MS = 900;
 
 /**
  * Owns the dynamic colony population model and scripted dumping events.
@@ -141,8 +147,10 @@ export class ColonyDynamicsSystem {
 
   /**
    * Arm dumping events based on chapter thresholds; only fires when
-   * Mamma Cat is near the Makati Ave road. Called from the 5s polled
-   * check block in {@link GameScene.update}.
+   * Mamma Cat is near the Makati Ave road and on park ground (the car
+   * pulls over at the park kerb by her, so it waits, still armed, while
+   * she is on the road or across it). Called from the 5s polled check
+   * block in {@link GameScene.update}.
    */
   tick(): void {
     if (this.scene.dialogue.isActive || this.dumpingInProgressFlag) return;
@@ -165,7 +173,8 @@ export class ColonyDynamicsSystem {
     }
 
     if (this.dumpingArmed > 0 && this.dumpingArmed === dumpingSeen + 1) {
-      if (this.scene.isNearMakatiAve(this.scene.player.x, this.scene.player.y)) {
+      const { x, y } = this.scene.player;
+      if (this.scene.isNearMakatiAve(x, y) && this.scene.isInPark(x, y)) {
         this.playDumpingSequence(this.dumpingArmed);
         this.dumpingArmed = 0;
       }
@@ -217,7 +226,7 @@ export class ColonyDynamicsSystem {
     if (plan) car.setRotation(plan.rotation).setFlipX(plan.flipX);
     const reservation = plan ? this.scene.traffic.reserve(plan.stop, 700, 300) : undefined;
 
-    this.scene.tweens.add({
+    const arrive = this.scene.tweens.add({
       targets: car,
       x: stop.x,
       y: stop.y,
@@ -233,7 +242,7 @@ export class ColonyDynamicsSystem {
 
           this.scene.time.delayedCall(500, () => {
             this.scene.time.delayedCall(300, () => {
-              this.scene.tweens.add({
+              const leave = this.scene.tweens.add({
                 targets: car,
                 x: exit.x,
                 y: exit.y,
@@ -244,6 +253,7 @@ export class ColonyDynamicsSystem {
                   if (reservation !== undefined) this.scene.traffic.release(reservation);
                 },
               });
+              this.yieldToMamma(car, leave, exit);
 
               this.scene.time.delayedCall(1500, () => {
                 this.showDumpingNarration(eventNum, dumpedCat);
@@ -253,6 +263,38 @@ export class ColonyDynamicsSystem {
         });
       },
     });
+    this.yieldToMamma(car, arrive, stop);
+  }
+
+  /**
+   * Tweened story cars don't see Mamma Cat the way ambient traffic does: hold
+   * the tween while she is on the road in the car's way, resume once she's clear.
+   */
+  private yieldToMamma(car: Phaser.GameObjects.Image, tween: Phaser.Tweens.Tween, to: { x: number; y: number }): void {
+    let heldSince: number | null = null;
+    let honked = false;
+    const check = (): void => {
+      if (!car.active || tween.isFinished() || tween.isDestroyed()) {
+        this.scene.events.off("update", check);
+        return;
+      }
+      const { x, y } = this.scene.player;
+      const inWay =
+        this.scene.isOnRoad(x, y) &&
+        inCarPath(car, to, { x, y }, car.displayWidth / 2, car.displayHeight / 2 + 8, DUMPING_CAR_YIELD_PX);
+      if (inWay) {
+        tween.pause();
+        heldSince ??= this.scene.time.now;
+        if (!honked && this.scene.time.now - heldSince > DUMPING_CAR_HONK_AFTER_MS) {
+          honked = true;
+          this.scene.audio?.playCarHorn(this.scene.earVolume(car.x, car.y));
+        }
+      } else {
+        heldSince = null;
+        tween.resume();
+      }
+    };
+    this.scene.events.on("update", check);
   }
 
   /**

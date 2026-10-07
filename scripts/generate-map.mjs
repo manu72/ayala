@@ -1025,8 +1025,11 @@ if (ART_IMG_H > 4096) throw new Error(`atg-ground.png would be ${ART_IMG_W}x${AR
 // TILED JSON OUTPUT
 // ─────────────────────────────────────────
 
+// Road tiles still collide (traffic's isDrivable and the human nav grid read `collides`);
+// `road` lets Mamma Cat — and only her — walk across them.
+const ROAD_TILES = new Set([T.ROAD, T.ROAD_LINE, T.ROAD_SOLID_LINE, T.ROAD_EDGE])
 const tileProperties = [...COLLIDES].sort((a, b) => a - b).map((id) => ({
-  id, properties: [{ name: 'collides', type: 'bool', value: true }],
+  id, properties: [{ name: 'collides', type: 'bool', value: true }, ...(ROAD_TILES.has(id) ? [{ name: 'road', type: 'bool', value: true }] : [])],
 }))
 
 let nextId = 1

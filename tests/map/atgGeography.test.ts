@@ -36,6 +36,11 @@ const colliding = new Set(
     .filter((t) => t.properties?.some((p) => p.name === "collides" && p.value === true))
     .map((t) => t.id + 1),
 );
+const roadTiles = new Set(
+  (parkTiles && "tiles" in parkTiles ? parkTiles.tiles ?? [] : [])
+    .filter((t) => t.properties?.some((p) => p.name === "road" && p.value === true))
+    .map((t) => t.id + 1),
+);
 const gid = (index: number): number => index + 1;
 const cellIndex = (x: number, y: number): number => y * W + x;
 const blocked = (x: number, y: number): boolean =>
@@ -78,6 +83,26 @@ const reachable = (() => {
   return seen;
 })();
 
+/** Mamma Cat's own reach: like `reachable`, but she may walk on road tiles (nobody else can). */
+const catReachable = (() => {
+  const seen = new Uint8Array(W * H);
+  const [sx, sy] = cellOf(spawn("spawn_mammacat"));
+  const queue = [cellIndex(sx, sy)];
+  seen[queue[0]!] = 1;
+  const open = (x: number, y: number) => x >= 0 && y >= 0 && x < W && y < H && (!blocked(x, y) || roadTiles.has(ground[cellIndex(x, y)] ?? 0));
+  for (let head = 0; head < queue.length; head++) {
+    const i = queue[head]!;
+    const x = i % W;
+    const y = (i - x) / W;
+    for (const [nx, ny] of [[x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]] as const) {
+      if (!open(nx, ny) || seen[cellIndex(nx, ny)]) continue;
+      seen[cellIndex(nx, ny)] = 1;
+      queue.push(cellIndex(nx, ny));
+    }
+  }
+  return seen;
+})();
+
 const DECORATIVE = new Set(["poi_monument", "poi_gabriela_silang"]);
 
 describe("atg.json structure", () => {
@@ -90,6 +115,12 @@ describe("atg.json structure", () => {
     ]);
     for (const index of [T.ROAD, T.BUILDING, T.TOWER, T.WATER, T.STARBUCKS]) expect(colliding.has(gid(index))).toBe(true);
     for (const index of [T.SIDEWALK, T.STONE_PATH, T.STEPS, T.ESCALATOR, T.GRASS_LIGHT]) expect(colliding.has(gid(index))).toBe(false);
+  });
+
+  it("marks the road tiles road=true and keeps them colliding (traffic and the human nav grid read collides)", () => {
+    const roads = [T.ROAD, T.ROAD_LINE, T.ROAD_SOLID_LINE, T.ROAD_EDGE].map(gid);
+    expect([...roadTiles].sort((a, b) => a - b)).toEqual(roads.sort((a, b) => a - b));
+    for (const g of roads) expect(colliding.has(g)).toBe(true);
   });
 
   it("hides the gameplay ground under half-tile-offset art layers that cover the whole map", () => {
@@ -123,9 +154,33 @@ describe("atg.json structure", () => {
 });
 
 describe("park geography", () => {
-  it("is sealed by roads: Mamma Cat's reachable area never touches the map edge", () => {
+  it("is sealed by roads: the park (her explorable ground, everyone else's world) never touches the map edge", () => {
     for (let x = 0; x < W; x++) expect(reachable[cellIndex(x, 0)] || reachable[cellIndex(x, H - 1)]).toBeFalsy();
     for (let y = 0; y < H; y++) expect(reachable[cellIndex(0, y)] || reachable[cellIndex(W - 1, y)]).toBeFalsy();
+  });
+
+  it("lets Mamma Cat cross both carriageways of all three bordering roads, with nothing colliding on the asphalt", () => {
+    let roadCells = 0;
+    for (let i = 0; i < W * H; i++) {
+      if (!roadTiles.has(ground[i] ?? 0)) continue;
+      roadCells++;
+      expect(colliding.has(objects[i] ?? 0), `object on road cell ${i}`).toBe(false);
+    }
+    expect(roadCells).toBeGreaterThan(1000);
+    const lanes = places.filter((p) => p.type === "traffic");
+    expect(lanes).toHaveLength(6);
+    for (const lane of lanes) {
+      const onLane = (lane.polyline ?? []).some((v) => {
+        const [x, y] = cellOf(v);
+        return x >= 0 && y >= 0 && x < W && y < H && catReachable[cellIndex(x, y)] === 1;
+      });
+      expect(onLane, `${lane.name} reachable on foot`).toBe(true);
+    }
+    // ...and on past them into the city, out to the edge of the map
+    let edge = false;
+    for (let x = 0; x < W; x++) edge ||= catReachable[cellIndex(x, 0)] === 1 || catReachable[cellIndex(x, H - 1)] === 1;
+    for (let y = 0; y < H; y++) edge ||= catReachable[cellIndex(0, y)] === 1 || catReachable[cellIndex(W - 1, y)] === 1;
+    expect(edge).toBe(true);
   });
 
   it("puts every gameplay spawn/POI on reachable ground with human-routing clearance", () => {

@@ -53,3 +53,20 @@ export function planKerbsideDropoff(
   const shift = (p: Pt): Pt => ({ x: p.x + towardKerb.x * kerbLaneOffset, y: p.y + towardKerb.y * kerbLaneOffset });
   return { start: shift(startOnLine), stop, exit: shift(exitOnLine), ...topDownPose(heading), towardKerb };
 }
+
+/**
+ * True when `p` is in the way of a car driving from `car` (its centre) straight toward `to`:
+ * under or beside its body (`halfLength` either side of the centre) or up to `clearance` px past
+ * its nose, and within `halfWidth` of its centre line. A car already at `to` is in nobody's way.
+ */
+export function inCarPath(car: Pt, to: Pt, p: Pt, halfLength: number, halfWidth: number, clearance: number): boolean {
+  const dx = to.x - car.x;
+  const dy = to.y - car.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1) return false;
+  const rx = p.x - car.x;
+  const ry = p.y - car.y;
+  const along = (rx * dx + ry * dy) / len;
+  const side = Math.abs(rx * dy - ry * dx) / len;
+  return along >= -halfLength && along <= halfLength + clearance && side <= halfWidth;
+}

@@ -144,6 +144,71 @@ export interface LaneCar {
   speed: number;
   cruise: number;
   length: number;
+  /** Side to side, px (default {@link DEFAULT_CAR_WIDTH_PX}). */
+  width?: number;
+  /** Right-of-travel offset from the lane centre, px, while steering round Mamma Cat (default 0). */
+  lat?: number;
+  /** A motorbike: squeezes past her through a much smaller gap, and always slowly. */
+  agile?: boolean;
+  /** Written by stepLane: Mamma Cat is in this car's path and it is stopping or holding for her. */
+  blocked?: boolean;
+  /** Written by stepLane: braking harder than a calm stop (the tyre screech). */
+  hardBraking?: boolean;
+}
+
+/**
+ * Mamma Cat as one lane sees her. Roads are open to her, and cars must never
+ * run her over: whatever the cat does, a car whose path she is in stops short
+ * of her (see {@link stepLane}).
+ */
+export interface LaneObstacle {
+  /** Along-lane position of her centre, px. */
+  along: number;
+  /** Right-of-travel offset of her centre from the lane centre, px. */
+  lateral: number;
+  radius: number;
+  /** Standing on asphalt (not the pavement beside it): drivers slow down near her. */
+  onRoad: boolean;
+  /** Sitting, asleep or stood still a while: drivers crawl round her instead of waiting. */
+  still: boolean;
+}
+
+export const DEFAULT_CAR_WIDTH_PX = 32;
+/** Nose to cat when a car has stopped for her. */
+export const CAT_GAP_PX = 10;
+/** Body side to cat when a car passes her; a motorbike squeezes by closer. */
+export const CAT_SIDE_GAP_PX = 6;
+export const AGILE_SIDE_GAP_PX = 2;
+/** A driver who has seen her early: from 200 px/s this stops ~290 px back. */
+export const CALM_BRAKE_PX_S2 = 70;
+/** Emergency stop when she darts out: 200 px/s to rest in about 22 px. */
+export const HARD_BRAKE_PX_S2 = 900;
+/** Slower than this a hard stop makes no screech. */
+export const SCREECH_MIN_SPEED = 70;
+/** Drivers ease off when she is on the road this far ahead and within a lane of their path. */
+export const CAUTION_PX = 260;
+export const CAUTION_SPEED = 90;
+/** ...counting her as near when she is within a lane and a half of their path. */
+const CAUTION_LATERAL_PX = LANE_WIDTH_PX * 1.5;
+/** Every car near a sitting or sleeping cat (her lane or the next) crawls past her. */
+export const PASS_SPEED = 45;
+
+/** Lateral room a car needs between its centre line and the cat's centre to pass her. */
+export const passClearance = (car: LaneCar, cat: LaneObstacle): number =>
+  (car.width ?? DEFAULT_CAR_WIDTH_PX) / 2 + cat.radius + (car.agile ? AGILE_SIDE_GAP_PX : CAT_SIDE_GAP_PX);
+
+/** True if the car body, at its lateral offset, would touch the cat if it drove on. */
+export function catInPath(car: LaneCar, cat: LaneObstacle): boolean {
+  return Math.abs(cat.lateral - (car.lat ?? 0)) < passClearance(car, cat);
+}
+
+/** True while some part of the car is level with, or behind, the cat's far edge. */
+export const notPastCat = (car: LaneCar, cat: LaneObstacle): boolean => car.dist - car.length / 2 < cat.along + cat.radius;
+
+export interface LaneHazards {
+  /** More stop lines like `stopLine`, e.g. behind a car steering into this lane round the cat. */
+  stops?: ReadonlyArray<number>;
+  cat?: LaneObstacle | null;
 }
 
 /**
@@ -152,16 +217,47 @@ export interface LaneCar {
  * FOLLOW_HEADWAY_S behind the car ahead and never closes within MIN_GAP_PX of
  * its rear bumper. `stopLine` (lane px) holds back every car whose nose has not
  * crossed it yet; cars already past it drive on.
+ *
+ * `hazards.cat`: a car with Mamma Cat in its path brakes for her — calmly if it
+ * can, hard (`hardBraking`) if she is too close — and never moves on past
+ * CAT_GAP_PX short of her; a car already alongside her freezes where it is.
+ * Cars near her on the road slow down, to a crawl if she is sitting or asleep.
  */
-export function stepLane(cars: ReadonlyArray<LaneCar>, dtSec: number, stopLine: number | null = null): void {
+export function stepLane(
+  cars: ReadonlyArray<LaneCar>,
+  dtSec: number,
+  stopLine: number | null = null,
+  hazards: LaneHazards = {},
+): void {
+  const cat = hazards.cat ?? null;
   let ahead: LaneCar | undefined;
   for (const car of cars) {
     const half = car.length / 2;
+    const nose = car.dist + half;
     let limit = ahead ? ahead.dist - ahead.length / 2 - MIN_GAP_PX - half : Infinity;
-    if (stopLine !== null && car.dist + half <= stopLine) limit = Math.min(limit, stopLine - half);
-    const target = Math.max(0, Math.min(car.cruise, (limit - car.dist) / FOLLOW_HEADWAY_S));
+    if (stopLine !== null && nose <= stopLine) limit = Math.min(limit, stopLine - half);
+    for (const stop of hazards.stops ?? []) if (nose <= stop) limit = Math.min(limit, stop - half);
+    let target = Math.max(0, Math.min(car.cruise, (limit - car.dist) / FOLLOW_HEADWAY_S));
+    car.blocked = false;
+    car.hardBraking = false;
+    if (cat && notPastCat(car, cat)) {
+      if (catInPath(car, cat)) {
+        // Braking physics, not the follow rule: a calm stop if there is room, else as hard as tyres allow.
+        const hold = Math.max(car.dist, cat.along - cat.radius - CAT_GAP_PX - half);
+        const calm = Math.sqrt(2 * CALM_BRAKE_PX_S2 * (hold - car.dist));
+        target = Math.min(target, Math.max(calm, car.speed - HARD_BRAKE_PX_S2 * dtSec));
+        limit = Math.min(limit, hold);
+        car.blocked = true;
+        car.hardBraking = car.speed > SCREECH_MIN_SPEED && car.speed > calm + 15;
+      } else if (cat.onRoad && cat.along - cat.radius - nose < CAUTION_PX && Math.abs(cat.lateral - (car.lat ?? 0)) < CAUTION_LATERAL_PX) {
+        target = Math.min(target, Math.max(cat.still || car.agile ? PASS_SPEED : CAUTION_SPEED, car.speed - 2 * CALM_BRAKE_PX_S2 * dtSec));
+      }
+    }
+    const before = car.dist;
     car.speed = Math.min(target, car.speed + ACCEL_PX_S2 * dtSec);
     car.dist = Math.min(car.dist + car.speed * dtSec, Math.max(car.dist, limit));
+    // Stopped dead at her: no speed left over to carry into the next frame.
+    if (car.blocked && dtSec > 0) car.speed = Math.min(car.speed, (car.dist - before) / dtSec);
     ahead = car;
   }
 }

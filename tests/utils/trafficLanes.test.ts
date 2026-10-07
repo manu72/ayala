@@ -19,6 +19,11 @@ import {
   offsetPolyline,
   reservedStretch,
   stepLane,
+  CAT_GAP_PX,
+  PASS_SPEED,
+  CAUTION_SPEED,
+  passClearance,
+  type LaneObstacle,
   trafficDensity,
   type LaneCar,
 } from "../../src/utils/trafficLanes";
@@ -146,6 +151,105 @@ describe("stepLane", () => {
     const cars = [car(0, 200, 0)];
     stepLane(cars, 0.5);
     expect(cars[0]!.speed).toBeCloseTo(45);
+  });
+});
+
+describe("stepLane with Mamma Cat on the road", () => {
+  const car = (dist: number, speed: number, lat = 0): LaneCar => ({ dist, speed, cruise: 200, length: 72, width: 33, lat });
+  const cat = (along: number, extra: Partial<LaneObstacle> = {}): LaneObstacle => ({ along, lateral: 0, radius: 10, onRoad: true, still: false, ...extra });
+  const nose = (c: LaneCar) => c.dist + c.length / 2;
+  const run = (cars: LaneCar[], her: LaneObstacle, frames: number, dt = 1 / 60) => {
+    let hard = false;
+    let closest = Infinity;
+    for (let i = 0; i < frames; i++) {
+      stepLane(cars, dt, null, { cat: her });
+      hard ||= cars.some((c) => c.hardBraking);
+      closest = Math.min(closest, her.along - her.radius - nose(cars[cars.length - 1]!));
+    }
+    return { hard, closest };
+  };
+
+  it("screeches to a halt short of her when she darts out just ahead, then holds", () => {
+    const cars = [car(0, 200)];
+    const her = cat(36 + 40); // 40 px past the nose
+    const { hard } = run(cars, her, 120);
+    expect(hard).toBe(true);
+    expect(nose(cars[0]!)).toBeLessThanOrEqual(her.along - her.radius);
+    expect(cars[0]!.speed).toBe(0);
+    expect(cars[0]!.blocked).toBe(true);
+  });
+
+  it("brakes calmly, with no screech, for a cat seen well ahead and stops CAT_GAP_PX short", () => {
+    const cars = [car(0, 200)];
+    const her = cat(800);
+    const { hard } = run(cars, her, 900);
+    expect(hard).toBe(false);
+    expect(her.along - her.radius - nose(cars[0]!)).toBeCloseTo(CAT_GAP_PX, 0);
+  });
+
+  it("freezes a car she steps beside, and never moves it over her even on a long frame hitch", () => {
+    const alongside = [car(100, 200)];
+    stepLane(alongside, 2, null, { cat: cat(110) });
+    expect(alongside[0]!.dist).toBe(100);
+    const hitch = [car(0, 200)];
+    stepLane(hitch, 2, null, { cat: cat(120) });
+    expect(nose(hitch[0]!)).toBeLessThanOrEqual(120 - 10 - CAT_GAP_PX + 1e-9);
+  });
+
+  it("queues followers behind the stopped car without overlapping", () => {
+    const cars = [car(300, 200), car(150, 200), car(0, 200)];
+    run(cars, cat(500), 900);
+    for (let i = 1; i < cars.length; i++) {
+      expect(cars[i - 1]!.dist - 36 - (cars[i]!.dist + 36)).toBeGreaterThanOrEqual(MIN_GAP_PX - 1e-9);
+    }
+  });
+
+  it("ignores her once past her or when she is out of the car's path, but eases off nearby", () => {
+    const past = [car(500, 200)];
+    stepLane(past, 1 / 60, null, { cat: cat(450) });
+    expect(past[0]!.blocked).toBe(false);
+    expect(past[0]!.speed).toBe(200);
+    const beside = [car(0, 200)];
+    const herInNextLane = cat(200, { lateral: 45 });
+    for (let i = 0; i < 120; i++) stepLane(beside, 1 / 60, null, { cat: herInNextLane });
+    expect(beside[0]!.blocked).toBe(false);
+    expect(beside[0]!.speed).toBeLessThanOrEqual(CAUTION_SPEED + 1e-9);
+    // a lane over from a sitting cat drivers crawl past her too
+    const nextLane = [car(0, 200, -LANE_WIDTH_PX)];
+    for (let i = 0; i < 120; i++) stepLane(nextLane, 1 / 60, null, { cat: cat(200, { still: true }) });
+    expect(nextLane[0]!.speed).toBeCloseTo(PASS_SPEED, 5);
+  });
+
+  it("crawls past a still cat once steered clear of her", () => {
+    const her = cat(300, { still: true });
+    const cars = [car(0, 200, passClearance(car(0, 0), her) + 1)];
+    for (let i = 0; i < 600; i++) {
+      stepLane(cars, 1 / 60, null, { cat: her });
+      if (nose(cars[0]!) > her.along - 40 && cars[0]!.dist - 36 < her.along + 10) expect(cars[0]!.speed).toBeLessThanOrEqual(PASS_SPEED + 1e-9);
+    }
+    expect(cars[0]!.blocked).toBe(false);
+    expect(cars[0]!.dist - 36).toBeGreaterThan(her.along + 10); // got by
+  });
+
+  it("lets a motorbike squeeze by through a far smaller gap, slowly, without waiting for her to settle", () => {
+    const her = cat(300); // standing, not still
+    const moto: LaneCar = { dist: 0, speed: 200, cruise: 200, length: 32, width: 13, agile: true };
+    expect(passClearance(moto, her)).toBeLessThan(passClearance(car(0, 0), her) - 10);
+    moto.lat = passClearance(moto, her) + 1;
+    let fastest = 0;
+    for (let i = 0; i < 900; i++) {
+      stepLane([moto], 1 / 60, null, { cat: her });
+      if (moto.dist + 16 > her.along - 40 && moto.dist - 16 < her.along + 10) fastest = Math.max(fastest, moto.speed);
+    }
+    expect(moto.dist - 16).toBeGreaterThan(her.along + 10);
+    expect(fastest).toBeLessThanOrEqual(PASS_SPEED + 1e-9);
+  });
+
+  it("holds cars behind extra stop lines, like stopLine", () => {
+    const cars = [car(0, 200)];
+    for (let i = 0; i < 600; i++) stepLane(cars, 1 / 60, null, { stops: [400] });
+    expect(nose(cars[0]!)).toBeLessThanOrEqual(400 + 1e-9);
+    expect(cars[0]!.speed).toBeLessThan(1);
   });
 });
 

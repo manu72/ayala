@@ -19,7 +19,7 @@ import { ColonyDynamicsSystem } from "../systems/ColonyDynamicsSystem";
 import { SnatcherSystem } from "../systems/SnatcherSystem";
 import { HumanPresenceSystem } from "../systems/HumanPresenceSystem";
 import { CollapseSystem } from "../systems/CollapseSystem";
-import { TrafficSystem } from "../systems/TrafficSystem";
+import { TrafficSystem, type TrafficCat } from "../systems/TrafficSystem";
 import { RoadMarkings } from "../systems/RoadMarkings";
 import { NightLights } from "../systems/NightLights";
 import { nightLevel } from "../utils/nightLevel";
@@ -34,6 +34,8 @@ import {
   TERRITORY_JAYCO_TRUST_REQUIRED,
   TERRITORY_RADIUS_PX,
   SHELTER_RADIUS_PX,
+  CAR_FRIGHT_RADIUS_PX,
+  SFX_EAR_RANGE_PX,
 } from "../config/gameplayConstants";
 import { StoryKeys, migrateLegacyIntroFlag } from "../registry/storyKeys";
 import {
@@ -48,6 +50,7 @@ import { NPC_DIALOGUE_SCRIPTS } from "../data/npc-dialogue";
 import { AudioSystem } from "../systems/AudioSystem";
 import { CamilleEncounterSystem } from "../systems/CamilleEncounterSystem";
 import { hasLineOfSightTiles } from "../utils/lineOfSight";
+import { exposeFacesTowardRoads, isRoadTile } from "../utils/roadTiles";
 import { createNavigationGrid, routeHumanPath, type NavigationGrid } from "../utils/humanRoutePath";
 import {
   closestOnPolyline,
@@ -391,6 +394,9 @@ export class GameScene extends Phaser.Scene {
     if (rawGroundLayer && "setCollisionByProperty" in rawGroundLayer) {
       this.groundLayer = rawGroundLayer as Phaser.Tilemaps.TilemapLayer;
       this.groundLayer.setCollisionByProperty({ collides: true });
+      // Mamma Cat walks on roads (see the player's ground collider), so buildings need their road-side edges back.
+      const ground = this.groundLayer;
+      exposeFacesTowardRoads(this.map.width, this.map.height, (x, y) => ground.getTileAt(x, y));
       this.groundLayer.setVisible(false); // Phaser ignores Tiled's layer visibility; collision doesn't need drawing
     }
     this.map.createLayer("groundArt", tilesets);
@@ -417,6 +423,9 @@ export class GameScene extends Phaser.Scene {
       isDrivable,
       maxCars: 140,
       isCovered: (x, y) => this.overheadLayer?.getTileAtWorldXY(x, y) != null,
+      cat: () => this.catForTraffic(),
+      onScreech: (x, y) => this.onCarScreech(x, y),
+      onHorn: (x, y) => this.audio?.playCarHorn(this.earVolume(x, y)),
     });
     this.roadMarkings = new RoadMarkings(this, this.places, {
       lanesFor: (name) => this.traffic.lanesFor(name),
@@ -430,6 +439,7 @@ export class GameScene extends Phaser.Scene {
     const spawnPoint = this.map.findObject("spawns", (obj) => obj.name === "spawn_mammacat");
     let spawnX = spawnPoint?.x ?? this.map.widthInPixels / 2;
     let spawnY = spawnPoint?.y ?? this.map.heightInPixels / 2;
+    const parkSpawn = { x: spawnX, y: spawnY };
 
     this.stats = new StatsSystem();
     this.dayNight = new DayNightCycle(this);
@@ -532,7 +542,7 @@ export class GameScene extends Phaser.Scene {
         const sameMap = save.mapRevision === this.mapRevision;
         const savedTileX = Math.floor(save.playerPosition.x / TILE_SIZE);
         const savedTileY = Math.floor(save.playerPosition.y / TILE_SIZE);
-        if (sameMap && !this.isExplorationCellBlocked(savedTileX, savedTileY)) {
+        if (sameMap && !this.isPlayerCellBlocked(savedTileX, savedTileY)) {
           spawnX = save.playerPosition.x;
           spawnY = save.playerPosition.y;
         }
@@ -574,12 +584,19 @@ export class GameScene extends Phaser.Scene {
     }
 
     if (this.groundLayer) {
-      this.physics.add.collider(this.player, this.groundLayer);
+      // Roads collide for everyone else (traffic lanes, human nav grid, NPC cats); Mamma Cat may cross them.
+      this.physics.add.collider(
+        this.player,
+        this.groundLayer,
+        undefined,
+        (_player, tile) => !isRoadTile(tile as Phaser.Tilemaps.Tile),
+      );
     }
     if (this.objectsLayer) {
       this.physics.add.collider(this.player, this.objectsLayer);
     }
-    this.initialiseTerritoryExploration(spawnX, spawnY);
+    // Explorable ground is the park, flooded from the map spawn: a save may leave her on or across a road.
+    this.initialiseTerritoryExploration(parkSpawn.x, parkSpawn.y);
 
     const savedKnown = this.registry.get("KNOWN_CATS") as string[] | undefined;
     this.knownCats = new Set(savedKnown ?? []);
@@ -1773,6 +1790,52 @@ export class GameScene extends Phaser.Scene {
     const groundTile = this.groundLayer?.getTileAt(tileX, tileY);
     const objectTile = this.objectsLayer?.getTileAt(tileX, tileY);
     return Boolean(groundTile?.collides || objectTile?.collides);
+  }
+
+  /** Like {@link isExplorationCellBlocked}, but roads are open: where Mamma Cat herself can stand. */
+  private isPlayerCellBlocked(tileX: number, tileY: number): boolean {
+    const groundTile = this.groundLayer?.getTileAt(tileX, tileY);
+    const objectTile = this.objectsLayer?.getTileAt(tileX, tileY);
+    return Boolean((groundTile?.collides && !isRoadTile(groundTile)) || objectTile?.collides);
+  }
+
+  /** True on a road tile: only Mamma Cat can be there, so traffic and scripted cars must yield to her. */
+  isOnRoad(x: number, y: number): boolean {
+    return isRoadTile(this.groundLayer?.getTileAtWorldXY(x, y));
+  }
+
+  /** Mamma Cat as the drivers see her; null while she is out of the world (intro car, carried off). */
+  private catForTraffic(): TrafficCat | null {
+    const body = this.player?.body as Phaser.Physics.Arcade.Body | null | undefined;
+    if (!this.player?.active || !this.player.visible || !body) return null;
+    const { x, y } = body.center;
+    return {
+      x,
+      y,
+      radius: this.player.isResting ? 12 : 10,
+      onRoad: this.isOnRoad(x, y),
+      settled: this.player.isResting || this.player.isCatloaf || this.stats.collapsed,
+    };
+  }
+
+  /** 0..1 loudness of a sound at world (x, y) for the camera's ear. */
+  earVolume(x: number, y: number): number {
+    const { midPoint } = this.cameras.main;
+    return Math.max(0, 1 - Phaser.Math.Distance.Between(x, y, midPoint.x, midPoint.y) / SFX_EAR_RANGE_PX);
+  }
+
+  /** A car braked hard for her: tyres screech, and if it stopped right by her she jumps. */
+  private onCarScreech(x: number, y: number): void {
+    this.audio?.playTyreScreech(this.earVolume(x, y));
+    if (!this.player?.visible || this.player.isResting) return;
+    if (Phaser.Math.Distance.Between(x, y, this.player.x, this.player.y) > CAR_FRIGHT_RADIUS_PX) return;
+    this.emotes.show(this, this.player, "alert");
+    this.player.startle();
+  }
+
+  /** True on the park's explorable ground (not a road, a median or the city across the road). */
+  isInPark(x: number, y: number): boolean {
+    return this.territory.visitCell(Math.floor(x / TILE_SIZE), Math.floor(y / TILE_SIZE), this.map.width) !== null;
   }
 
   /** Exposed so {@link SnatcherSystem} can route snatcher patrol paths. */
