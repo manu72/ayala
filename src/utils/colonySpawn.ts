@@ -1,3 +1,5 @@
+import { PETS } from "../data/pets";
+import type { NPCCatConfig } from "../sprites/NPCCat";
 /**
  * Pure helpers for the dynamic colony-count model.
  *
@@ -45,4 +47,17 @@ export function decrementColonyTotal(current: number, floor: number): number {
   const safeCurrent = Number.isFinite(current) ? Math.floor(current) : floor;
   const safeFloor = Number.isFinite(floor) ? Math.floor(floor) : 0;
   return Math.max(safeFloor, safeCurrent - 1);
+}
+
+const LEGACY_CAT_SHEETS = ["mammacat", "blacky", "tiger", "jayco", "fluffy"];
+
+/**
+ * Look for a background colony cat. The first two of the initial roster are
+ * Cat cat and Mittens (PixelLab, 4-direction walks) — one of each, they are
+ * individuals; everyone else uses the legacy sheets.
+ */
+export function backgroundCatLook(index?: number, rng: () => number = Math.random): Pick<NPCCatConfig, "spriteKey" | "scale" | "layout"> {
+  const pet = index === 0 ? PETS.catcat : index === 1 ? PETS.mittens : null;
+  if (pet) return { spriteKey: pet.texture, scale: pet.scale, layout: "pixellab" };
+  return { spriteKey: LEGACY_CAT_SHEETS[Math.floor(rng() * LEGACY_CAT_SHEETS.length)] ?? "blacky" };
 }

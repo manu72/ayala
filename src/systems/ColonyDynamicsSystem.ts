@@ -8,7 +8,7 @@ import {
   NAMED_AND_MAMMA_COUNT,
   VISIBLE_BACKGROUND_CAP,
 } from "../config/gameplayConstants";
-import { computeBackgroundSpawnCount, decrementColonyTotal } from "../utils/colonySpawn";
+import { backgroundCatLook, computeBackgroundSpawnCount, decrementColonyTotal } from "../utils/colonySpawn";
 import { placesOfType } from "../utils/mapPlaces";
 
 const DUMPED_COMFORT_WINDOW_MS = 5_000;
@@ -95,7 +95,6 @@ export class ColonyDynamicsSystem {
    * from `create()` after named cats are spawned.
    */
   spawnInitialBackgroundCats(): void {
-    const sprites = ["mammacat", "blacky", "tiger", "jayco", "fluffy"];
     const dispositions: Array<"neutral" | "wary" | "friendly" | "territorial"> = [
       "neutral",
       "neutral",
@@ -120,13 +119,12 @@ export class ColonyDynamicsSystem {
     for (let i = 0; i < count; i++) {
       const zone = zones[i % zones.length]!;
       const { x, y } = this.pickReachablePointInZone(zone);
-      const sprite = sprites[Math.floor(Math.random() * sprites.length)]!;
       const disp = dispositions[Math.floor(Math.random() * dispositions.length)]!;
       const homeRadius = 80 + Math.random() * 80;
 
       const cat = new NPCCat(this.scene, {
         name: `Colony Cat ${this.scene.npcs.length + 1}`,
-        spriteKey: sprite,
+        ...backgroundCatLook(i),
         x,
         y,
         homeZone: { cx: x, cy: y, radius: homeRadius },
@@ -330,15 +328,13 @@ export class ColonyDynamicsSystem {
   }
 
   private addBackgroundCat(atX?: number, atY?: number): NPCCat {
-    const sprites = ["mammacat", "blacky", "tiger", "jayco", "fluffy"];
-    const sprite = sprites[Math.floor(Math.random() * sprites.length)]!;
     const fallbackZone = placesOfType(this.scene.places, "colony_zone")[0];
     const x = atX ?? fallbackZone?.x ?? this.scene.player.x;
     const y = atY ?? fallbackZone?.y ?? this.scene.player.y;
 
     const cat = new NPCCat(this.scene, {
       name: `Colony Cat ${this.scene.npcs.length + 1}`,
-      spriteKey: sprite,
+      ...backgroundCatLook(),
       x,
       y,
       homeZone: { cx: x, cy: y, radius: 100 },
@@ -354,3 +350,4 @@ export class ColonyDynamicsSystem {
   }
 
 }
+

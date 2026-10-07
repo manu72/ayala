@@ -4,6 +4,7 @@ import { speakerPoseToAnimMode } from "../utils/dialoguePoseAnim";
 import type { TimeOfDay } from "../systems/DayNightCycle";
 import { BaseNPC } from "./BaseNPC";
 import type { CatState, Disposition } from "./types";
+import { petAnims, petBody } from "../data/pets";
 
 export type { CatState, Disposition } from "./types";
 
@@ -24,6 +25,11 @@ export interface NPCCatConfig {
   walkSpeed?: number;
   /** Whether to shorten pause durations (e.g. kittens). */
   hyperactive?: boolean;
+  /**
+   * "pixellab": a 92 px PixelLab pet sheet (src/data/pets.ts) with 4-direction
+   * walks; the default is the legacy 32 px cat sheet.
+   */
+  layout?: "legacy" | "pixellab";
 }
 
 /**
@@ -99,7 +105,12 @@ export class NPCCat extends BaseNPC {
       this.setScale(config.scale);
     }
 
-    this.setupPhysicsBody(18, 18, 7, 12);
+    if (config.layout === "pixellab") {
+      const b = petBody(config.scale ?? 1);
+      this.setupPhysicsBody(b.w, b.h, b.offsetX, b.offsetY);
+    } else {
+      this.setupPhysicsBody(18, 18, 7, 12);
+    }
 
     this.createAnimations(scene, this.animPrefix);
     this.anims.play(`${this.animPrefix}-sit-down`, true);
@@ -290,11 +301,19 @@ export class NPCCat extends BaseNPC {
     this.lastDirection = this.directionFromVector(this.walkDir);
 
     const animKey = this.state === "fleeing" ? `${this.animPrefix}-run` : `${this.animPrefix}-walk`;
-    this.anims.play(animKey, true);
+    // 4-direction sheets (PixelLab pets) face the way they walk
+    const directional = `${animKey}-${this.lastDirection}`;
+    this.anims.play(this.scene.anims.exists(directional) ? directional : animKey, true);
   }
 
   private createAnimations(scene: Phaser.Scene, prefix: string): void {
     if (scene.anims.exists(`${prefix}-sit-down`)) return;
+
+    if (this.config.layout === "pixellab") {
+      for (const a of petAnims(prefix))
+        scene.anims.create({ key: a.key, frames: scene.anims.generateFrameNumbers(this.texture.key, { frames: a.frames }), frameRate: a.frameRate, repeat: a.repeat });
+      return;
+    }
 
     const tex = this.texture.key;
     const row = (r: number, count = 4) => BaseNPC.rowFrames(r, COLS, count);

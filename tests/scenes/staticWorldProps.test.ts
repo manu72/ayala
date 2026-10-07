@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import bootSceneSource from "../../src/scenes/BootScene.ts?raw";
 import gameSceneSource from "../../src/scenes/GameScene.ts?raw";
 import colonyDynamicsSystemSource from "../../src/systems/ColonyDynamicsSystem.ts?raw";
+import { STORY_SUV_COLOUR_CYCLE } from "../../src/data/vehicles";
 
 describe("static world props", () => {
   it("preloads the carabao playground sculpture as a plain image", () => {
@@ -13,9 +14,13 @@ describe("static world props", () => {
     expect(bootSceneSource).toContain('this.load.image("starbucks_logo", "assets/sprites/starbucks.png")');
   });
 
-  it("preloads the car sprites for drop-off vehicle sequences", () => {
-    expect(bootSceneSource).toContain('this.load.image("suv_small", "assets/sprites/suv_small.png")');
-    expect(bootSceneSource).toContain('this.load.image("corolla_small", "assets/sprites/corolla_small.png")');
+  it("preloads the top-down vehicle atlas for traffic and drop-off vehicle sequences", () => {
+    expect(bootSceneSource).toContain(
+      'this.load.atlas("vehicles", "assets/sprites/vehicles.png", "assets/sprites/vehicles.json")',
+    );
+    // The old side-view car art is no longer used anywhere.
+    expect(bootSceneSource).not.toContain("suv_small");
+    expect(bootSceneSource).not.toContain("corolla_small");
   });
 
   it("places the carabao and hornbill without adding physics or collision", () => {
@@ -65,7 +70,7 @@ describe("static world props", () => {
     expect(placementSource).not.toContain("physics.add.collider");
   });
 
-  it("uses the SUV image helper instead of generated placeholder car textures", () => {
+  it("uses the top-down story SUV helper instead of generated placeholder car textures", () => {
     // Intro cinematic stays on GameScene; dumping sequence moved to
     // ColonyDynamicsSystem in commit A but continues to call back into
     // `scene.addDropoffVehicle` so both paths share the same helper.
@@ -78,9 +83,12 @@ describe("static world props", () => {
 
     expect(introStart).toBeGreaterThanOrEqual(0);
     expect(dumpingStart).toBeGreaterThanOrEqual(0);
-    expect(gameSceneSource).toContain('const DROPOFF_SUV_TEXTURE = "suv_small";');
-    expect(gameSceneSource).toContain('const DROPOFF_COROLLA_TEXTURE = "corolla_small";');
+    expect(gameSceneSource).toContain("const DROPOFF_SUV_FRAME = STORY_VEHICLES.suv.frame;");
+    expect(gameSceneSource).toContain("const DROPOFF_COROLLA_FRAME = STORY_VEHICLES.corolla.frame;");
     expect(gameSceneSource).toContain("addDropoffVehicle(x: number, y: number, options: DropoffVehicleOptions");
+    expect(gameSceneSource).toContain("this.add.image(x, y, VEHICLE_ATLAS, frame)");
+    expect(gameSceneSource).not.toContain("suv_small");
+    expect(gameSceneSource).not.toContain("corolla_small");
     expect(gameSceneSource).not.toContain("generateCarTextures");
     expect(gameSceneSource).not.toContain("car_closed");
     expect(gameSceneSource).not.toContain("car_open");
@@ -90,8 +98,8 @@ describe("static world props", () => {
     );
   });
 
-  it("uses the Corolla for the first dumping event and then cycles SUV tints", () => {
-    const helperStart = gameSceneSource.indexOf("private tintForSuvDropoff(");
+  it("uses the Corolla for the first dumping event and then cycles baked SUV colours", () => {
+    const helperStart = gameSceneSource.indexOf("private frameForSuvDropoff(");
     const helperEnd = gameSceneSource.indexOf("\n  private ", helperStart + 1);
     const helperSource = gameSceneSource.slice(helperStart, helperEnd);
     const optionsStart = gameSceneSource.indexOf("vehicleOptionsForDumpingEvent(eventNum: number)");
@@ -106,16 +114,19 @@ describe("static world props", () => {
 
     expect(helperStart).toBeGreaterThanOrEqual(0);
     expect(optionsStart).toBeGreaterThanOrEqual(0);
-    expect(gameSceneSource).toContain("const DROPOFF_SUV_TINT_CYCLE: ReadonlyArray<number | null> = [");
-    expect(gameSceneSource).toContain("0x111111");
-    expect(gameSceneSource).toContain("0xffd43b");
-    expect(gameSceneSource).toContain("0x2f9e44");
-    expect(gameSceneSource).toContain("0xd9480f");
-    expect(gameSceneSource).toContain("0x1c7ed6");
-    expect(helperSource).toContain("DROPOFF_SUV_TINT_CYCLE[(sequenceIndex - 1) % DROPOFF_SUV_TINT_CYCLE.length]");
+    // Same order as the old tint cycle (0x111111, 0xffd43b, 0x2f9e44, 0xd9480f, 0x1c7ed6, untinted silver).
+    expect(STORY_SUV_COLOUR_CYCLE).toEqual([
+      "story_suv_black",
+      "story_suv_yellow",
+      "story_suv_green",
+      "story_suv_orange",
+      "story_suv_blue",
+      "story_suv",
+    ]);
+    expect(helperSource).toContain("STORY_SUV_COLOUR_CYCLE[(sequenceIndex - 1) % STORY_SUV_COLOUR_CYCLE.length]");
     expect(optionsSource).toContain("if (eventNum === 1)");
-    expect(optionsSource).toContain("texture: DROPOFF_COROLLA_TEXTURE");
-    expect(optionsSource).toContain("return { tint: this.tintForSuvDropoff(eventNum - 1) };");
+    expect(optionsSource).toContain("return { frame: DROPOFF_COROLLA_FRAME };");
+    expect(optionsSource).toContain("return { frame: this.frameForSuvDropoff(eventNum - 1) };");
     expect(introSource).toContain("this.addDropoffVehicle(carOffscreenX, roadY)");
     expect(introSource).not.toContain("vehicleOptionsForDumpingEvent");
     expect(dumpingSource).toContain(

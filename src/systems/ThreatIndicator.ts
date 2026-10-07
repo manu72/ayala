@@ -25,6 +25,7 @@ export class ThreatIndicator {
   private parent: Phaser.GameObjects.Sprite;
   private entityName: string;
   private _known = false;
+  private readonly offsetY: number;
 
   constructor(
     scene: Phaser.Scene,
@@ -32,8 +33,11 @@ export class ThreatIndicator {
     name: string,
     disposition: Disposition | "dangerous",
     known = false,
+    /** Lowers the marker for sprites whose head sits lower than usual (scaled-down guards). */
+    offsetY = 0,
   ) {
     this.parent = parent;
+    this.offsetY = offsetY;
     this.entityName = name;
     this._known = known;
 
@@ -88,8 +92,8 @@ export class ThreatIndicator {
   }
 
   private updatePosition(): void {
-    this.icon.setPosition(this.parent.x, this.parent.y - 16);
-    this.label.setPosition(this.parent.x, this.parent.y - 22);
+    this.icon.setPosition(this.parent.x, this.parent.y - 16 + this.offsetY);
+    this.label.setPosition(this.parent.x, this.parent.y - 22 + this.offsetY);
   }
 
   destroy(): void {

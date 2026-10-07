@@ -12,8 +12,12 @@ import {
   CROWD_LOOKS,
   CROWD_ROLES,
   CROWD_TEXTURES,
+  PIXEL_CROWD,
   type CrowdLook,
 } from '../../src/data/ambient-roles'
+
+/** Every packed PixelLab sheet, as data URLs keyed by path. */
+const crowdSheets = import.meta.glob('../../public/assets/sprites/crowd/*.png', { query: '?inline', import: 'default', eager: true }) as Record<string, string>
 
 /** Named characters and villains whose art the crowd must never wear. */
 const FORBIDDEN = /feeder|ben_|^ben|cam_|camille|manu|kish|snatcher|guard/i
@@ -67,6 +71,7 @@ describe('crowd looks', () => {
     expect(pngSize(girlPng)).toEqual({ w: 8 * 150, h: 6 * 85 })
     expect(pngSize(fedoraPng)).toEqual({ w: 14 * 25, h: 3 * 45 })
     const frameCount: Record<string, number> = { crowd_girl: 48, crowd_fedora: 42 }
+    for (const key of Object.keys(PIXEL_CROWD)) frameCount[`crowd_${key}`] = 8 * 6
     for (const a of CROWD_ANIMS) {
       for (const f of a.frames) expect(f).toBeLessThan(frameCount[a.texture] ?? 0)
     }
@@ -83,6 +88,15 @@ describe('crowd looks', () => {
     }
   })
 
+  it('ship a 544x408 PixelLab sheet (68 px cells, 8x6) for every PixelLab look, loaded by BootScene', () => {
+    for (const key of Object.keys(PIXEL_CROWD)) {
+      const png = crowdSheets[`../../public/assets/sprites/crowd/${key}.png`]
+      expect(png, `${key}.png is missing`).toBeDefined()
+      expect(pngSize(png ?? ''), key).toEqual({ w: 8 * 68, h: 6 * 68 })
+    }
+    expect(bootSceneSource).toMatch(/assets\/sprites\/crowd\/\$\{key\}\.png`, \{ frameWidth: 68, frameHeight: 68 \}/)
+  })
+
   it('are loaded by BootScene under new keys at the verified frame sizes', () => {
     expect(bootSceneSource).toMatch(/"crowd_girl", "assets\/sprites\/girl\.png", \{\s*frameWidth: 150,\s*frameHeight: 85/)
     expect(bootSceneSource).toMatch(
@@ -94,6 +108,17 @@ describe('crowd looks', () => {
 })
 
 describe('crowd roles', () => {
+  it('only cast people who have a real pose for the job (no cropped-standing sitters)', () => {
+    for (const role of CROWD_ROLES)
+      for (const id of role.looks) {
+        const look = CROWD_LOOKS[id]
+        if (role.pose === 'seated') expect(look.sitFrames ?? look.sitFrame, `${role.id}/${id}`).toBeDefined()
+        if (role.pose === 'groundSit') expect(look.groundSitFrames ?? look.groundSitFrame, `${role.id}/${id}`).toBeDefined()
+        if (role.pose === 'selfie') expect(look.selfieFrame ?? look.selfieAnim, `${role.id}/${id}`).toBeDefined()
+        if (role.prop === 'cigarette') expect(look.smokeFrame, `${role.id}/${id}`).toBeDefined()
+      }
+  })
+
   it('have unique ids', () => {
     expect(new Set(CROWD_ROLES.map((r) => r.id)).size).toBe(CROWD_ROLES.length)
   })

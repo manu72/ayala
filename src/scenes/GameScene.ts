@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 import { MammaCat } from "../sprites/MammaCat";
 import { NPCCat } from "../sprites/NPCCat";
-import { GuardNPC } from "../sprites/GuardNPC";
+import { GUARD_HEAD_DROP_PX, GuardNPC } from "../sprites/GuardNPC";
 import type { HumanConfig } from "../sprites/HumanNPC";
 import { DogNPC } from "../sprites/DogNPC";
 import { DayNightCycle } from "../systems/DayNightCycle";
@@ -20,6 +20,9 @@ import { SnatcherSystem } from "../systems/SnatcherSystem";
 import { HumanPresenceSystem } from "../systems/HumanPresenceSystem";
 import { CollapseSystem } from "../systems/CollapseSystem";
 import { TrafficSystem } from "../systems/TrafficSystem";
+import { RoadMarkings } from "../systems/RoadMarkings";
+import { NightLights } from "../systems/NightLights";
+import { nightLevel } from "../utils/nightLevel";
 import { AmbientCrowdSystem } from "../systems/AmbientCrowdSystem";
 import { CatDialogueController } from "../systems/CatDialogueController";
 import type { HUDScene } from "./HUDScene";
@@ -57,6 +60,7 @@ import {
   type Pt,
 } from "../utils/mapPlaces";
 import { planKerbsideDropoff, type DropoffPlan } from "../utils/kerbsideDropoff";
+import { STORY_SUV_COLOUR_CYCLE, STORY_VEHICLES, VEHICLE_ATLAS } from "../data/vehicles";
 import { applyLifeLoss, MAX_LIVES } from "../utils/lifeFlow";
 import { markGameOver } from "../utils/gameOverState";
 import { consumeSnatchedThisNight, restoreSnatchedThisNight } from "../utils/snatcherNightState";
@@ -73,26 +77,17 @@ const TILE_SIZE = GP.TILE_SIZE;
 const DEFAULT_ZOOM = 2.5;
 const PEEK_ZOOM = 0.5;
 const ZOOM_DURATION = 500;
-const DROPOFF_SUV_TEXTURE = "suv_small";
-const DROPOFF_COROLLA_TEXTURE = "corolla_small";
-const DROPOFF_SUV_DISPLAY_WIDTH = 72;
-const DROPOFF_SUV_DISPLAY_HEIGHT = 28;
-const DROPOFF_COROLLA_DISPLAY_WIDTH = 68;
-const DROPOFF_COROLLA_DISPLAY_HEIGHT = 28;
-const DROPOFF_SUV_TINT_CYCLE: ReadonlyArray<number | null> = [
-  0x111111,
-  0xffd43b,
-  0x2f9e44,
-  0xd9480f,
-  0x1c7ed6,
-  null,
-];
+/** Top-down story cars from the `vehicles` atlas, drawn at native (real) scale; nose east, rotation = heading. */
+const DROPOFF_SUV_FRAME = STORY_VEHICLES.suv.frame;
+const DROPOFF_COROLLA_FRAME = STORY_VEHICLES.corolla.frame;
+/** Same world-fixed soft shadow as ambient traffic (TrafficSystem). */
+const DROPOFF_SHADOW_ALPHA = 0.28;
+const DROPOFF_SHADOW_DX = 3;
+const DROPOFF_SHADOW_DY = 4;
 
 export interface DropoffVehicleOptions {
-  texture?: string;
-  displayWidth?: number;
-  displayHeight?: number;
-  tint?: number | null;
+  /** `vehicles` atlas frame; defaults to the silver story SUV. */
+  frame?: string;
 }
 
 export interface NPCEntry {
@@ -199,6 +194,8 @@ export class GameScene extends Phaser.Scene {
   snatcher!: SnatcherSystem;
   /** Ambient cars on the real carriageways (visual only; roads already block movement). */
   traffic!: TrafficSystem;
+  private roadMarkings?: RoadMarkings;
+  private nightLights?: NightLights;
   /** Anonymous park-goers and the extra security guards (no story effects). */
   private crowd?: AmbientCrowdSystem;
   /**
@@ -310,6 +307,8 @@ export class GameScene extends Phaser.Scene {
     // we chain into these (WORKING_MEMORY "Scene Lifecycle — shutdown is
     // NOT auto-wired").
     this.traffic?.destroy();
+    this.roadMarkings?.destroy();
+    this.nightLights?.destroy();
     this.crowd?.destroy();
     this.snatcher?.shutdown();
     this.colony?.shutdown();
@@ -373,20 +372,29 @@ export class GameScene extends Phaser.Scene {
     this.collapse = new CollapseSystem(this);
     this.collapse.resetTransient();
 
-    this.map = this.make.tilemap({ key: "atg" });
+    // insertNull: empty cells stay null instead of becoming Tile objects (the art/shade/roof
+    // layers are mostly empty and 291x230 each); every getTileAt call here already treats empty as null.
+    this.map = this.make.tilemap({ key: "atg", insertNull: true });
     const parkTileset = this.map.addTilesetImage("park-tiles", "park-tiles");
     if (!parkTileset) throw new Error('Failed to load tileset "park-tiles"');
     const treesTileset = this.map.addTilesetImage("trees-pale", "trees-pale");
     if (!treesTileset) throw new Error('Failed to load tileset "trees-pale"');
     const plantsTileset = this.map.addTilesetImage("plants", "plants");
     if (!plantsTileset) throw new Error('Failed to load tileset "plants"');
-    const tilesets = [parkTileset, treesTileset, plantsTileset].filter(Boolean) as Phaser.Tilemaps.Tileset[];
+    const groundArtTileset = this.map.addTilesetImage("atg-ground", "atg-ground");
+    if (!groundArtTileset) throw new Error('Failed to load tileset "atg-ground"');
+    const tilesets = [parkTileset, treesTileset, plantsTileset, groundArtTileset];
 
+    // `ground` is the gameplay layer (collision, tile queries) and is never drawn;
+    // `groundArt` + `shade` draw it, offset half a tile (dual-grid autotiles).
     const rawGroundLayer = this.map.createLayer("ground", tilesets, 0, 0);
     if (rawGroundLayer && "setCollisionByProperty" in rawGroundLayer) {
       this.groundLayer = rawGroundLayer as Phaser.Tilemaps.TilemapLayer;
       this.groundLayer.setCollisionByProperty({ collides: true });
+      this.groundLayer.setVisible(false); // Phaser ignores Tiled's layer visibility; collision doesn't need drawing
     }
+    this.map.createLayer("groundArt", tilesets);
+    this.map.createLayer("shade", tilesets);
 
     const rawObjectsLayer = this.map.createLayer("objects", tilesets, 0, 0);
     if (rawObjectsLayer && "setCollisionByProperty" in rawObjectsLayer) {
@@ -398,15 +406,23 @@ export class GameScene extends Phaser.Scene {
     if (this.overheadLayer) {
       this.overheadLayer.setDepth(10);
     }
+    this.map.createLayer("roofArt", tilesets)?.setDepth(10);
     this.places = readPlaces(this.map.getObjectLayer("places")?.objects ?? []);
     this.parkExits = placesOfType(this.places, "exit").map(({ x, y }) => ({ x, y }));
     this.mapRevision = String(tiledProps(this.map.properties).mapRevision ?? "");
     this.humanNavGrid = null;
+    const isDrivable = (x: number, y: number) => this.groundLayer?.getTileAtWorldXY(x, y)?.collides ?? true;
     this.traffic = new TrafficSystem(this, this.places, {
       bounds: { width: this.map.widthInPixels, height: this.map.heightInPixels },
-      isDrivable: (x, y) => this.groundLayer?.getTileAtWorldXY(x, y)?.collides ?? true,
+      isDrivable,
       maxCars: 140,
+      isCovered: (x, y) => this.overheadLayer?.getTileAtWorldXY(x, y) != null,
     });
+    this.roadMarkings = new RoadMarkings(this, this.places, {
+      lanesFor: (name) => this.traffic.lanesFor(name),
+      isDrivable,
+    });
+    this.nightLights = new NightLights(this, this.places);
     this.placePlaygroundCarabao();
     this.placeStarbucksLogo();
     this.cacheShelterPoints();
@@ -594,7 +610,7 @@ export class GameScene extends Phaser.Scene {
     if (this.objectsLayer) {
       this.physics.add.collider(this.guard, this.objectsLayer);
     }
-    this.guardIndicator = new ThreatIndicator(this, this.guard, "Guard", "dangerous", true);
+    this.guardIndicator = new ThreatIndicator(this, this.guard, "Guard", "dangerous", true, GUARD_HEAD_DROP_PX);
     this.crowd = new AmbientCrowdSystem(this, {
       places: this.places,
       spawns: readPlaces(this.map.getObjectLayer("spawns")?.objects ?? []),
@@ -765,38 +781,56 @@ export class GameScene extends Phaser.Scene {
     this.add.image(logoX, logoY, "starbucks_logo").setOrigin(0.5, 0.5).setScale(0.3).setDepth(4);
   }
 
-  private tintForSuvDropoff(sequenceIndex: number): number | null {
-    return DROPOFF_SUV_TINT_CYCLE[(sequenceIndex - 1) % DROPOFF_SUV_TINT_CYCLE.length] ?? null;
+  private frameForSuvDropoff(sequenceIndex: number): string {
+    // Baked colours replacing the old tint cycle: black, yellow, green, orange, blue, silver.
+    return STORY_SUV_COLOUR_CYCLE[(sequenceIndex - 1) % STORY_SUV_COLOUR_CYCLE.length] ?? DROPOFF_SUV_FRAME;
   }
 
   /** Called by the intro cinematic (this scene) and {@link ColonyDynamicsSystem} dumping events. */
   vehicleOptionsForDumpingEvent(eventNum: number): DropoffVehicleOptions {
     if (eventNum === 1) {
-      return {
-        texture: DROPOFF_COROLLA_TEXTURE,
-        displayWidth: DROPOFF_COROLLA_DISPLAY_WIDTH,
-        displayHeight: DROPOFF_COROLLA_DISPLAY_HEIGHT,
-      };
+      return { frame: DROPOFF_COROLLA_FRAME };
     }
 
-    return { tint: this.tintForSuvDropoff(eventNum - 1) };
+    return { frame: this.frameForSuvDropoff(eventNum - 1) };
   }
 
-  /** Called by the intro cinematic (this scene) and {@link ColonyDynamicsSystem} dumping events. */
+  /**
+   * Called by the intro cinematic (this scene) and {@link ColonyDynamicsSystem} dumping events.
+   * Callers tween the returned car; a world-fixed shadow follows it each frame and dies with it.
+   */
   addDropoffVehicle(x: number, y: number, options: DropoffVehicleOptions = {}): Phaser.GameObjects.Image {
-    const texture = options.texture ?? DROPOFF_SUV_TEXTURE;
-    const displayWidth = options.displayWidth ?? DROPOFF_SUV_DISPLAY_WIDTH;
-    const displayHeight = options.displayHeight ?? DROPOFF_SUV_DISPLAY_HEIGHT;
-    const tint = options.tint ?? null;
-
-    const vehicle = this.add
-      .image(x, y, texture)
-      .setDisplaySize(displayWidth, displayHeight)
-      .setDepth(4);
-
-    if (tint !== null) {
-      vehicle.setTint(tint);
-    }
+    const frame = options.frame ?? DROPOFF_SUV_FRAME;
+    const vehicle = this.add.image(x, y, VEHICLE_ATLAS, frame).setDepth(4);
+    const fx = this.sys.game.renderer.type === Phaser.WEBGL; // tint shadows and additive light need WebGL
+    const shadow = this.add.image(x, y, VEHICLE_ATLAS, frame).setDepth(4 - 0.01).setTint(0x000000);
+    // headlights after dusk (the intro drop happens at night), same look as the traffic
+    const beam = fx && this.textures.exists("light_beam")
+      ? this.add.image(x, y, "light_beam").setOrigin(0, 0.5).setDepth(51).setBlendMode(Phaser.BlendModes.ADD).setTint(0xfff1d0)
+      : null;
+    const follow = (): void => {
+      shadow
+        .setPosition(vehicle.x + DROPOFF_SHADOW_DX, vehicle.y + DROPOFF_SHADOW_DY)
+        .setRotation(vehicle.rotation)
+        .setAlpha(vehicle.alpha * DROPOFF_SHADOW_ALPHA)
+        .setVisible(vehicle.visible && fx);
+      if (beam) {
+        const night = this.dayNight ? nightLevel(this.dayNight.currentPhase, this.dayNight.phaseProgress) : 0;
+        const nose = vehicle.displayWidth / 2;
+        beam
+          .setPosition(vehicle.x + Math.cos(vehicle.rotation) * nose, vehicle.y + Math.sin(vehicle.rotation) * nose)
+          .setRotation(vehicle.rotation)
+          .setAlpha(vehicle.alpha * night * 0.32)
+          .setVisible(vehicle.visible && night > 0.02 && this.overheadLayer?.getTileAtWorldXY(beam.x, beam.y) == null);
+      }
+    };
+    follow();
+    this.events.on(Phaser.Scenes.Events.PRE_RENDER, follow);
+    vehicle.once(Phaser.GameObjects.Events.DESTROY, () => {
+      this.events.off(Phaser.Scenes.Events.PRE_RENDER, follow);
+      shadow.destroy();
+      beam?.destroy();
+    });
 
     return vehicle;
   }
@@ -1121,6 +1155,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   update(time: number, delta: number): void {
+    this.roadMarkings?.update(); // camera culling only; runs during cinematics too
     if (this.cinematicActive) return;
 
     // Dialogue engagement release (close / out-of-range / flee / destroy)
@@ -1161,6 +1196,7 @@ export class GameScene extends Phaser.Scene {
     const deltaSec = delta / 1000;
     this.dayNight.update(delta);
     this.traffic.update(delta, this.dayNight);
+    this.nightLights?.setLevel(nightLevel(this.dayNight.currentPhase, this.dayNight.phaseProgress));
     this.camille.trySpawnAmbientDawnVisit();
 
     this.player.speedMultiplier = this.stats.speedMultiplier;
@@ -2294,6 +2330,13 @@ export class GameScene extends Phaser.Scene {
       if (this.camille.tryAcceptBeat5Decision()) {
         this.logInteractDiag("consumed by Beat-5 decision", null, Infinity, nearestRawEntry, nearestRawDist);
         this.audio.playMeow();
+        return;
+      }
+      // A morsel a picnicker / diner tossed her (AmbientCrowdSystem) — after cats and the
+      // beat-5 answer, so a treat never steals a press meant for the story.
+      if ((this.crowd?.tryEatTreat(this.player.x, this.player.y, this.stats) ?? 0) > 0) {
+        this.logInteractDiag("ate a crowd morsel", null, Infinity, nearestRawEntry, nearestRawDist);
+        this.player.startConsuming();
         return;
       }
       // No cat in range — space becomes a free Mamma-Cat greeting action.

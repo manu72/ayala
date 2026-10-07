@@ -5,6 +5,7 @@ vi.mock("phaser", () => ({ default: { Events: { EventEmitter: class {} } } }));
 
 import type Phaser from "phaser";
 import { TrafficSystem, type TrafficClock } from "../../src/systems/TrafficSystem";
+import { VEHICLE_CLASSES } from "../../src/data/vehicles";
 import type { MapPlace } from "../../src/utils/mapPlaces";
 
 interface ImageMock {
@@ -16,26 +17,41 @@ interface ImageMock {
   visible: boolean;
   depth: number;
   destroyed: boolean;
+  texture: string;
+  frame: string;
+  tint: number | null;
   [method: string]: unknown;
 }
 
 function makeScene(view = { x: 0, y: 0, width: 5000, height: 1000 }) {
   const images: ImageMock[] = [];
   const add = {
-    image: () => {
-      const img = { x: 0, y: 0, rotation: 0, flipX: false, alpha: 1, visible: true, depth: 0, destroyed: false } as ImageMock;
+    image: (_x: number, _y: number, texture: string, frame: string) => {
+      const img = {
+        x: 0,
+        y: 0,
+        rotation: 0,
+        flipX: false,
+        alpha: 1,
+        visible: true,
+        depth: 0,
+        destroyed: false,
+        texture,
+        frame,
+        tint: null,
+      } as ImageMock;
       const chain = (fn: (...a: never[]) => void) => (...a: never[]) => (fn(...a), img);
       Object.assign(img, {
         setDepth: chain((d: number) => (img.depth = d)),
-        setTexture: chain(() => {}),
-        setDisplaySize: chain(() => {}),
-        setTint: chain(() => {}),
-        clearTint: chain(() => {}),
+        setFrame: chain((f: string) => (img.frame = f)),
+        setTint: chain((t: number) => (img.tint = t)),
         setVisible: chain((v: boolean) => (img.visible = v)),
         setPosition: chain((x: number, y: number) => ((img.x = x), (img.y = y))),
         setRotation: chain((r: number) => (img.rotation = r)),
         setFlipX: chain((f: boolean) => (img.flipX = f)),
         setAlpha: chain((a: number) => (img.alpha = a)),
+        setOrigin: chain(() => undefined),
+        setBlendMode: chain(() => undefined),
         destroy: () => (img.destroyed = true),
       });
       images.push(img);
@@ -62,7 +78,15 @@ function seeded(seed = 7): () => number {
   return () => ((s = (s * 16807) % 2147483647) - 1) / 2147483646;
 }
 
+/** Vehicle bodies (depth 4); their pooled shadows sit just below. */
+const cars = (images: ImageMock[]) => images.filter((i) => i.depth === 4);
+const beams = (images: ImageMock[]) => images.filter((i) => i.texture === "light_beam");
 const shown = (images: ImageMock[]) => images.filter((i) => i.visible && !i.destroyed);
+const shownCars = (images: ImageMock[]) => cars(shown(images));
+const LENGTH_BY_FRAME = new Map(
+  Object.values(VEHICLE_CLASSES).flatMap((c) => c.frames.map((f) => [f, c.length] as const)),
+);
+const lengthOf = (img: ImageMock) => LENGTH_BY_FRAME.get(img.frame) ?? Number.NaN;
 
 describe("TrafficSystem", () => {
   it("builds one lane per lane of every traffic place and fills them by time of day", () => {
@@ -79,27 +103,76 @@ describe("TrafficSystem", () => {
     expect(quiet.carCount).toBeLessThanOrEqual(4);
   });
 
-  it("drives cars in their lane's direction at depth 4, upright, in the right-hand lanes", () => {
+  it("switches headlights on after dusk (one beam per visible car, off by day)", () => {
+    const night = makeScene();
+    const traffic = new TrafficSystem(night.scene, places, { maxCars: 40, rng: seeded() });
+    const dusk: TrafficClock = { currentPhase: "evening", phaseProgress: 0.6 }; // ~19:30, evening rush
+    for (let i = 0; i < 600; i++) traffic.update(1000 / 60, dusk);
+    const lit = beams(night.images).filter((b) => b.visible && !b.destroyed);
+    expect(lit.length).toBeGreaterThan(0);
+    expect(lit.length).toBe(shownCars(night.images).length);
+    for (const b of lit) expect(b.depth).toBeGreaterThan(50); // above the night overlay
+    const day = makeScene();
+    const dayTraffic = new TrafficSystem(day.scene, places, { maxCars: 40, rng: seeded() });
+    for (let i = 0; i < 600; i++) dayTraffic.update(1000 / 60, { currentPhase: "day", phaseProgress: 0.5 });
+    expect(beams(day.images)).toHaveLength(0);
+  });
+
+  it("drives cars in their lane's direction at depth 4, nose first, in the right-hand lanes", () => {
     const { scene, images } = makeScene();
     const traffic = new TrafficSystem(scene, places, { maxCars: 40, rng: seeded() });
     traffic.update(16, RUSH);
     for (let i = 0; i < 60; i++) traffic.update(16, RUSH);
-    const before = shown(images).map((img) => ({ img, x: img.x }));
+    const before = shownCars(images).map((img) => ({ img, x: img.x }));
     traffic.update(100, RUSH);
     expect(before.length).toBeGreaterThan(0);
     for (const { img, x } of before) {
       expect(img.depth).toBe(4);
-      expect(Math.abs(img.rotation)).toBeLessThanOrEqual(Math.PI / 2);
+      expect(img.flipX).toBe(false);
       if (img.y < 400) {
-        // eastbound: kerb (right of travel) is south, lanes at y = 200 +/- 26.4; art mirrored to face east
+        // eastbound: kerb (right of travel) is south, lanes at y = 200 +/- 26.4; nose-east art unrotated
         expect(img.x).toBeGreaterThanOrEqual(x);
-        expect(img.flipX).toBe(true);
+        expect(img.rotation).toBeCloseTo(0);
         expect([173.6, 226.4].some((y) => Math.abs(img.y - y) < 0.01)).toBe(true);
       } else {
         expect(img.x).toBeLessThanOrEqual(x);
-        expect(img.flipX).toBe(false);
+        expect(Math.abs(img.rotation)).toBeCloseTo(Math.PI);
         expect([573.6, 626.4].some((y) => Math.abs(img.y - y) < 0.01)).toBe(true);
       }
+    }
+  });
+
+  it("draws top-down atlas frames, never mirrored, each with a world-fixed shadow just below it", () => {
+    const { scene, images } = makeScene();
+    const traffic = new TrafficSystem(scene, places, { maxCars: 40, rng: seeded() });
+    const frames = new Set<string>();
+    for (let i = 0; i < 900; i++) {
+      traffic.update(1000 / 30, RUSH);
+      for (const img of shownCars(images)) frames.add(img.frame);
+    }
+    expect(cars(images).length).toBeGreaterThan(0);
+    for (const img of images) {
+      expect(img.texture).toBe("vehicles");
+      expect(LENGTH_BY_FRAME.has(img.frame)).toBe(true);
+      expect(img.flipX).toBe(false);
+    }
+    // Mixed traffic: cars, jeepneys and motorbikes all turn up.
+    for (const prefix of ["sedan_", "jeepney_", "moto_"]) expect([...frames].some((f) => f.startsWith(prefix))).toBe(true);
+
+    const shadows = images.filter((i) => i.depth === 3.99);
+    expect(shadows).toHaveLength(cars(images).length); // one pooled shadow per pooled car
+    for (const shadow of shadows) {
+      expect(shadow.depth).toBeLessThan(4);
+      expect(shadow.depth).toBeGreaterThan(3.9);
+      expect(shadow.tint).toBe(0x000000);
+    }
+    // Each visible car has a shadow with its frame and heading, offset (+3, +4) in world space at 0.28 of its alpha.
+    for (const car of shownCars(images)) {
+      const shadow = shown(shadows).find((s) => Math.abs(s.x - car.x - 3) < 1e-9 && Math.abs(s.y - car.y - 4) < 1e-9);
+      expect(shadow).toBeDefined();
+      expect(shadow?.frame).toBe(car.frame);
+      expect(shadow?.rotation).toBeCloseTo(car.rotation);
+      expect(shadow?.alpha).toBeCloseTo(car.alpha * 0.28);
     }
   });
 
@@ -107,11 +180,12 @@ describe("TrafficSystem", () => {
     const { scene, images, view } = makeScene({ x: 0, y: 0, width: 300, height: 300 });
     const traffic = new TrafficSystem(scene, places, { maxCars: 40, rng: seeded() });
     for (let i = 0; i < 600; i++) traffic.update(16, RUSH);
-    for (const img of shown(images)) {
-      expect(img.x).toBeLessThan(view.width + 48);
-      expect(img.y).toBeLessThan(view.height + 48);
+    for (const img of shownCars(images)) {
+      // Culled by the body, not the centre: a bus can be drawn while its centre is just off-screen.
+      expect(img.x).toBeLessThan(view.width + 48 + lengthOf(img) / 2);
+      expect(img.y).toBeLessThan(view.height + 48 + lengthOf(img) / 2);
     }
-    expect(traffic.carCount).toBeGreaterThan(shown(images).length);
+    expect(traffic.carCount).toBeGreaterThan(shownCars(images).length);
   });
 
   it("reserve() clears the stretch at once, queues traffic before it, and release() lets it flow", () => {
@@ -210,17 +284,16 @@ describe("TrafficSystem", () => {
     let checked = 0;
     for (let i = 0; i < 1500; i++) {
       traffic.update(1000 / 60, RUSH);
-      for (const img of shown(images)) {
+      for (const img of shownCars(images)) {
         const prev = last.get(img);
         last.set(img, { x: img.x, y: img.y });
         const moved = prev ? Math.hypot(img.x - prev.x, img.y - prev.y) : 0;
         if (!prev || moved < 1 || moved > 20) continue; // skip first sighting and pool reuse
-        // The art faces west; flipX turns it east. Nose = rotated (+-1, 0).
-        const nose = img.flipX ? 1 : -1;
-        const nx = nose * Math.cos(img.rotation);
-        const ny = nose * Math.sin(img.rotation);
+        // The art faces east, so the nose is (cos r, sin r) and nothing is ever mirrored.
+        const nx = Math.cos(img.rotation);
+        const ny = Math.sin(img.rotation);
         expect((nx * (img.x - prev.x) + ny * (img.y - prev.y)) / moved).toBeGreaterThan(0.99);
-        expect(Math.abs(img.rotation)).toBeLessThanOrEqual(Math.PI / 2);
+        expect(img.flipX).toBe(false);
         checked++;
       }
     }
@@ -240,12 +313,18 @@ describe("TrafficSystem", () => {
       traffic.update(i % 97 === 0 ? 400 : 1000 / 60, RUSH); // with the odd frame hitch
       expect(traffic.carCount).toBeLessThanOrEqual(12);
       for (const y of [200, 400]) {
-        const xs = shown(images).filter((img) => img.y === y).map((img) => img.x).sort((p, q) => p - q);
-        // Shortest car is 68 px: centres at least 68 + MIN_GAP apart.
-        for (let k = 1; k < xs.length; k++) expect((xs[k] ?? 0) - (xs[k - 1] ?? 0)).toBeGreaterThanOrEqual(68 + 16 - 1e-6);
+        const lane = shownCars(images)
+          .filter((img) => img.y === y)
+          .sort((p, q) => p.x - q.x);
+        // Bumper to bumper at least MIN_GAP (16 px), whatever the two vehicles' real lengths.
+        lane.forEach((b, k) => {
+          const a = lane[k - 1];
+          if (a) expect(b.x - a.x - (lengthOf(a) + lengthOf(b)) / 2).toBeGreaterThanOrEqual(16 - 1e-6);
+        });
       }
     }
-    expect(images.length).toBeLessThanOrEqual(12);
+    expect(cars(images).length).toBeLessThanOrEqual(12);
+    expect(images.length).toBeLessThanOrEqual(24); // plus one shadow each
   });
 
   it("fades cars out over fadeOutMs when reserving with a fade", () => {

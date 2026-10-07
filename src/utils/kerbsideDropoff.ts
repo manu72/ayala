@@ -10,21 +10,21 @@ export interface DropoffPlan {
   stop: Pt;
   /** Where it drives off to (downstream). */
   exit: Pt;
-  /** Sprite rotation for a west-facing side-view car image, and whether to mirror it. */
+  /** Sprite rotation for nose-east top-down car art (the heading), never mirrored. */
   rotation: number;
-  flipX: boolean;
+  flipX: false;
   /** Unit vector from the stop point toward the target (the kerb side). */
   towardKerb: Pt;
 }
 
 /**
- * West-facing side-view car art pointed along `heading` (radians) without
- * ever drawing it upside down: eastward headings mirror the art instead.
+ * Top-down car art (nose pointing east, see scripts/generate-vehicles.mjs)
+ * pointed along `heading` (radians): the rotation is the heading wrapped to
+ * (-PI, PI]. Seen from above a car is never upside down, so never mirrored.
  */
-export function carPose(heading: number): { rotation: number; flipX: boolean } {
-  const wrap = (a: number): number => Math.atan2(Math.sin(a), Math.cos(a));
-  if (Math.cos(heading) > 0) return { rotation: wrap(heading), flipX: true };
-  return { rotation: wrap(heading - Math.PI), flipX: false };
+export function topDownPose(heading: number): { rotation: number; flipX: false } {
+  const r = Math.atan2(Math.sin(heading), Math.cos(heading));
+  return { rotation: r <= -Math.PI ? r + 2 * Math.PI : r, flipX: false };
 }
 
 /**
@@ -51,5 +51,5 @@ export function planKerbsideDropoff(
   const exitOnLine = pointAlong(lane, near.along + departPx);
   const heading = pointAlong(lane, near.along).angle;
   const shift = (p: Pt): Pt => ({ x: p.x + towardKerb.x * kerbLaneOffset, y: p.y + towardKerb.y * kerbLaneOffset });
-  return { start: shift(startOnLine), stop, exit: shift(exitOnLine), ...carPose(heading), towardKerb };
+  return { start: shift(startOnLine), stop, exit: shift(exitOnLine), ...topDownPose(heading), towardKerb };
 }

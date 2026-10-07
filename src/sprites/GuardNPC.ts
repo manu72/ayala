@@ -13,8 +13,19 @@ const DETECT_RANGE_CROUCHING_OPEN = 80;
 const CHASE_RANGE = 250;
 const PUSHBACK_FORCE = 300;
 const GUARD_FRAME_SIZE = 64;
+/** World-px feet box, the same as when the guard was drawn at scale 1. */
 const GUARD_BODY_WIDTH = 18;
 const GUARD_BODY_HEIGHT = 16;
+/** guard.png draws a ~51 px figure; this brings it to the other humans' ~37 px (Camille, Ben, Kish). */
+export const GUARD_SCALE = 0.72;
+/** Frame row of the top of the guard's head (feet are on the frame's bottom edge). */
+const GUARD_HEAD_ROW = 13;
+/**
+ * How much lower the top of the head sits than at scale 1 (the feet stay put),
+ * for markers placed at fixed offsets above the sprite's (x, y): the threat
+ * indicator and emotes.
+ */
+export const GUARD_HEAD_DROP_PX = Math.round((1 - GUARD_SCALE) * (GUARD_FRAME_SIZE - GUARD_HEAD_ROW));
 
 type GuardState = "patrol" | "chasing" | "returning";
 
@@ -67,12 +78,15 @@ export class GuardNPC extends BaseNPC {
     this.disposition = options.disposition ?? "hostile";
     this.emotes = options.emotes ?? null;
 
-    this.setupPhysicsBody(
-      GUARD_BODY_WIDTH,
-      GUARD_BODY_HEIGHT,
-      (GUARD_FRAME_SIZE - GUARD_BODY_WIDTH) / 2,
-      GUARD_FRAME_SIZE - GUARD_BODY_HEIGHT,
-    );
+    // Shrink about the feet: they stay GUARD_FRAME_SIZE / 2 below (x, y), as at
+    // scale 1, so posts, spawns and every distance check (all from x, y) are unchanged.
+    this.setScale(GUARD_SCALE);
+    this.setOrigin(0.5, 1 - 0.5 / GUARD_SCALE);
+    // Arcade sizes and offsets the body in frame px and then applies the scale;
+    // dividing by it keeps the exact 18 x 16 world-px feet box of the scale-1 guard.
+    const bodyW = GUARD_BODY_WIDTH / GUARD_SCALE;
+    const bodyH = GUARD_BODY_HEIGHT / GUARD_SCALE;
+    this.setupPhysicsBody(bodyW, bodyH, (GUARD_FRAME_SIZE - bodyW) / 2, GUARD_FRAME_SIZE - bodyH);
 
     createSpriteProfileAnimations(scene, GUARD_PROFILE);
     this.anims.play(`${SPRITE_KEY}-idle`, true);
@@ -154,7 +168,7 @@ export class GuardNPC extends BaseNPC {
         this.noticeMs = NOTICE_MS;
         this.setVelocity(0);
         this.faceToward(target.x, target.y);
-        this.emotes?.show(this.scene, this, Math.random() < 0.6 ? "heart" : "curious");
+        this.emotes?.show(this.scene, this, Math.random() < 0.6 ? "heart" : "curious", GUARD_HEAD_DROP_PX);
         return;
       }
       if (distToPlayer > NOTICE_REARM_RANGE) this.noticeArmed = true;

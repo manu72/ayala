@@ -38,6 +38,10 @@ vi.mock('phaser', () => {
     active = true
     visible = true
     frame = -1
+    scaleX = 1
+    scaleY = 1
+    originX = 0.5
+    originY = 0.5
     vx = 0
     vy = 0
     body = {
@@ -58,6 +62,16 @@ vi.mock('phaser', () => {
       this.y = y
     }
     setDepth(): this {
+      return this
+    }
+    setScale(x: number, y = x): this {
+      this.scaleX = x
+      this.scaleY = y
+      return this
+    }
+    setOrigin(x: number, y = x): this {
+      this.originX = x
+      this.originY = y
       return this
     }
     setCollideWorldBounds(): this {
@@ -87,7 +101,7 @@ vi.mock('phaser', () => {
   }
 })
 
-import { GuardNPC, type GuardDisposition } from '../../src/sprites/GuardNPC'
+import { GUARD_HEAD_DROP_PX, GUARD_SCALE, GuardNPC, type GuardDisposition } from '../../src/sprites/GuardNPC'
 import type { MammaCat } from '../../src/sprites/MammaCat'
 
 interface FakePlayer {
@@ -118,6 +132,50 @@ function makeGuard(disposition?: GuardDisposition, opts: { underCanopy?: boolean
 }
 
 const speed = (g: { vx: number; vy: number }) => Math.hypot(g.vx, g.vy)
+
+describe('GuardNPC scale', () => {
+  it('draws at human scale with the feet and the physics body exactly where the scale-1 guard had them', () => {
+    const scene = makeScene()
+    const guard = new GuardNPC(scene as never, 500, 300)
+    const s = guard as unknown as {
+      x: number
+      y: number
+      scaleX: number
+      scaleY: number
+      originX: number
+      originY: number
+      body: { setSize: ReturnType<typeof vi.fn>; setOffset: ReturnType<typeof vi.fn> }
+    }
+    expect(GUARD_SCALE).toBeCloseTo(0.72)
+    expect([s.scaleX, s.scaleY]).toEqual([GUARD_SCALE, GUARD_SCALE])
+    // Phaser draws frame pixel (u, v) at x + scale * (u - originX * 64), y + scale * (v - originY * 64).
+    const worldX = (u: number) => s.x + s.scaleX * (u - s.originX * 64)
+    const worldY = (v: number) => s.y + s.scaleY * (v - s.originY * 64)
+    expect(worldY(64)).toBeCloseTo(300 + 32) // feet on the frame's bottom edge: same spot as at scale 1
+    expect(worldX(32)).toBeCloseTo(500)
+    // guard.png's head top (frame row 13) drops by GUARD_HEAD_DROP_PX; markers above it compensate by that much.
+    expect(worldY(13) - (300 + 13 - 32)).toBeCloseTo(GUARD_HEAD_DROP_PX, 0)
+    expect(worldY(64) - worldY(13)).toBeCloseTo(51 * 0.72) // ~37 px tall, like Camille
+
+    // Arcade: the body is sized/offset in frame px, then scaled. World box unchanged: 18 x 16 at the feet.
+    const [w, h] = s.body.setSize.mock.lastCall as [number, number]
+    const [ox, oy] = s.body.setOffset.mock.lastCall as [number, number]
+    expect(w * s.scaleX).toBeCloseTo(18)
+    expect(h * s.scaleY).toBeCloseTo(16)
+    expect(worldX(ox)).toBeCloseTo(500 - 9)
+    expect(worldY(oy)).toBeCloseTo(300 + 16)
+    expect(worldY(oy + h)).toBeCloseTo(300 + 32)
+  })
+
+  it('lifts a friendly guard\'s emote by the head drop so it still sits just above the head', () => {
+    const emotes = { show: vi.fn() }
+    const { guard, player, g } = makeGuard('friendly', { emotes })
+    player.x = g.x + 50
+    guard.update(16)
+    expect(emotes.show).toHaveBeenCalledTimes(1)
+    expect(emotes.show.mock.calls[0]![3]).toBe(GUARD_HEAD_DROP_PX)
+  })
+})
 
 describe('GuardNPC hostile (default) — pinned original behaviour', () => {
   it('defaults to hostile', () => {

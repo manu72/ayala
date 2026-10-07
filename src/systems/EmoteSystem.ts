@@ -31,10 +31,12 @@ const COOLDOWN_MS = 3_000;
 export class EmoteSystem {
   private cooldowns = new WeakMap<Phaser.GameObjects.Sprite, number>();
 
+  /** `offsetY` lowers the glyph for sprites whose head sits lower than usual (scaled-down guards). */
   show(
     scene: Phaser.Scene,
     target: Phaser.GameObjects.Sprite,
     emote: EmoteType,
+    offsetY = 0,
   ): void {
     const now = scene.time.now;
     const lastShown = this.cooldowns.get(target) ?? 0;
@@ -45,7 +47,7 @@ export class EmoteSystem {
     const color = EMOTE_COLORS[emote];
 
     const text = scene.add
-      .text(target.x, target.y - 24, glyph, {
+      .text(target.x, target.y - 24 + offsetY, glyph, {
         fontSize: "14px",
         fontFamily: "monospace",
         color,
@@ -70,7 +72,7 @@ export class EmoteSystem {
 
     scene.tweens.add({
       targets: text,
-      y: target.y - 44,
+      y: target.y - 44 + offsetY,
       alpha: 0,
       duration: 1500,
       ease: "Power2",

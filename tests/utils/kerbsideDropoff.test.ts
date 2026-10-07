@@ -1,17 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { carPose, LANE_WIDTH_PX, planKerbsideDropoff } from "../../src/utils/kerbsideDropoff";
+import { LANE_WIDTH_PX, planKerbsideDropoff, topDownPose } from "../../src/utils/kerbsideDropoff";
 
-describe("carPose", () => {
-  it("points the nose of west-facing art along every heading and never turns it upside down", () => {
-    for (let deg = -180; deg <= 180; deg += 15) {
+describe("topDownPose", () => {
+  it("points the nose of east-facing top-down art along every heading, unmirrored, rotation in (-PI, PI]", () => {
+    for (let deg = -720; deg <= 720; deg += 15) {
       const heading = (deg * Math.PI) / 180;
-      const { rotation, flipX } = carPose(heading);
-      const nose = flipX ? rotation : rotation + Math.PI; // art's nose is at angle PI before rotation
-      expect(Math.cos(nose)).toBeCloseTo(Math.cos(heading));
-      expect(Math.sin(nose)).toBeCloseTo(Math.sin(heading));
-      expect(Math.abs(rotation)).toBeLessThanOrEqual(Math.PI / 2 + 1e-9);
+      const { rotation, flipX } = topDownPose(heading);
+      expect(flipX).toBe(false);
+      expect(Math.cos(rotation)).toBeCloseTo(Math.cos(heading));
+      expect(Math.sin(rotation)).toBeCloseTo(Math.sin(heading));
+      expect(rotation).toBeGreaterThan(-Math.PI);
+      expect(rotation).toBeLessThanOrEqual(Math.PI);
     }
-    expect(carPose(0)).toEqual({ rotation: 0, flipX: true });
+    expect(topDownPose(0)).toEqual({ rotation: 0, flipX: false });
+    expect(topDownPose(-Math.PI).rotation).toBeCloseTo(Math.PI);
+    expect(topDownPose(Math.PI / 2).rotation).toBeCloseTo(Math.PI / 2); // southbound (y down)
   });
 });
 
@@ -26,6 +29,9 @@ describe("planKerbsideDropoff", () => {
     expect(plan.start.y).toBeCloseTo(600);
     expect(plan.exit.y).toBeCloseTo(1600);
     expect(plan.towardKerb.x).toBeCloseTo(-1);
+    // Southbound (+y): top-down art turned a quarter clockwise, nose down the lane.
+    expect(plan.rotation).toBeCloseTo(Math.PI / 2);
+    expect(plan.flipX).toBe(false);
   });
 
   it("clamps to the lane ends and rejects degenerate lanes", () => {

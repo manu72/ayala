@@ -14,6 +14,8 @@ export type { HumanType } from "./SpriteProfiles";
 
 export interface HumanConfig {
   type: HumanType;
+  /** Art override (e.g. Kish's other outfit); behaviour still follows `type`. */
+  profile?: SpriteProfile;
   path: Array<{ x: number; y: number }>;
   speed: number;
   activePhases: TimeOfDay[];
@@ -206,7 +208,7 @@ export class HumanNPC extends BaseNPC {
   private stuckDetourFailures = 0;
 
   constructor(scene: Phaser.Scene, config: HumanConfig) {
-    const prof = profileForType(config.type);
+    const prof = config.profile ?? profileForType(config.type);
     const start = config.path[0]!;
     const textureKey = prof.directionalKeys?.walkDown ?? prof.key;
     super(scene, start.x, start.y, textureKey);

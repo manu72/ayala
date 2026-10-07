@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import type { GameScene } from "../scenes/GameScene";
 import type { HUDScene } from "../scenes/HUDScene";
 import { HumanNPC, type HumanConfig } from "../sprites/HumanNPC";
+import { kishProfileForDay } from "../sprites/SpriteProfiles";
 import { StoryKeys } from "../registry/storyKeys";
 import { GP, CAMILLE_BEAT5_DECISION_MS } from "../config/gameplayConstants";
 import { AI_PERSONAS } from "../ai/personas";
@@ -512,6 +513,7 @@ export class CamilleEncounterSystem {
     if (includeKish) {
       const kishConfig: HumanConfig = {
         type: "kish",
+        profile: kishProfileForDay(scene.dayNight?.dayCount ?? 1), // a different outfit on alternate days
         speed: 50,
         path: routes.kish.map((w) => ({ x: w.x, y: w.y })),
         waypointPauseMs: routes.kish.map((w) => w.pauseMs),

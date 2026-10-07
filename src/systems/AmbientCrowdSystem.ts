@@ -1,10 +1,11 @@
 import Phaser from "phaser";
 import type { MammaCat } from "../sprites/MammaCat";
 import { BaseNPC, type CardinalDirection } from "../sprites/BaseNPC";
-import { GuardNPC } from "../sprites/GuardNPC";
+import { GUARD_HEAD_DROP_PX, GuardNPC } from "../sprites/GuardNPC";
 import { createSpriteProfileAnimations, profileForType } from "../sprites/SpriteProfiles";
 import { ThreatIndicator } from "./ThreatIndicator";
 import type { EmoteSystem } from "./EmoteSystem";
+import type { StatsSystem } from "./StatsSystem";
 import { DAY_NIGHT_PHASES, type TimeOfDay } from "./DayNightCycle";
 import { placeNamed, placesOfType, type MapPlace } from "../utils/mapPlaces";
 import {
@@ -34,6 +35,8 @@ import {
   CROWD_LOOKS,
   CROWD_ROLES,
   CROWD_TUNING as T,
+  NOTICE_CHANCE,
+  TREAT_ROLES,
   type AnchorType,
   type CrowdLook,
   type CrowdRole,
@@ -45,7 +48,10 @@ import {
  * diners, picnickers, bench pairs, lunch eaters, smokers, plus extra security
  * guards. Fully separate from HumanPresenceSystem: crowd people are plain
  * sprites with NO physics body, never greetable, never scored, no AI, no
- * bubbles, no emotes on the player, no narration, no stats/trust/registry.
+ * bubbles, no narration, no trust/registry. They do notice Mamma Cat (a heart
+ * or curious look over their own heads, a tourist's camera flash), and people
+ * eating may toss her a small morsel she can eat with the interact key
+ * ({@link tryEatTreat}; capped per day, see CROWD_TUNING).
  *
  * Movement follows the map's real footways (walkway graph, cached shortest-path
  * trees) and is advanced only from update(), so pause/journal/cinematics freeze
@@ -129,6 +135,12 @@ interface Person {
   glanceLeft: number;
   glanceCooldown: number;
   glanceFacing: Facing;
+  /** ms until this person may react to Mamma Cat again. */
+  noticeCooldown: number;
+  /** ms Mamma Cat has lingered close while this person eats. */
+  lingerMs: number;
+  /** Already decided whether to share food (once per person). */
+  treatRolled: boolean;
   seed: number;
   animKey: string;
   staticTex: string;
@@ -170,6 +182,9 @@ const MAX_STEPS_PER_FRAME = 16;
 /** Picnic blankets: colours that read against the lawn (no greens). */
 const BLANKET_COLORS = [0xc0392b, 0x2e86c1, 0xf1c40f, 0xf3ead8, 0x8e44ad, 0xe67e22];
 
+/** Same reach as FoodSource INTERACT_RANGE. */
+const TREAT_REACH = 32;
+
 const FACING_OF: Record<CardinalDirection, Facing> = { down: "S", up: "N", left: "W", right: "E" };
 const rand = (range: readonly [number, number]): number => range[0] + Math.random() * (range[1] - range[0]);
 const pickOne = <V>(list: readonly V[]): V | undefined => list[Math.floor(Math.random() * list.length)];
@@ -198,6 +213,11 @@ export class AmbientCrowdSystem {
   private spawnTimer = 0;
   private shedTimer = 0;
   private timeMs = 0;
+  private readonly emotes: EmoteSystem;
+  /** Morsels on the ground, waiting for Mamma Cat. */
+  private readonly treats: Array<{ x: number; y: number; gfx: Phaser.GameObjects.Graphics; expiresAt: number; giver: Person }> = [];
+  private treatsToday = 0;
+  private lastPhase: TimeOfDay | null = null;
   // Camera rectangles, refreshed once per update.
   private vx0 = 0;
   private vy0 = 0;
@@ -215,6 +235,7 @@ export class AmbientCrowdSystem {
   constructor(scene: Phaser.Scene, deps: AmbientCrowdDeps) {
     this.scene = scene;
     this.player = deps.player;
+    this.emotes = deps.emotes;
     this.worldH = deps.groundLayer?.tilemap.heightInPixels ?? 8192;
     this.createAnimations();
 
@@ -316,10 +337,13 @@ export class AmbientCrowdSystem {
       if (p) this.step(p, dt);
     }
     this.drawBlankets();
+    this.tickTreats(phase);
     this.updateGuards(deltaMs, slot);
   }
 
   destroy(): void {
+    for (const t of this.treats) t.gfx.destroy();
+    this.treats.length = 0;
     for (const p of this.pool) p.sprite.destroy();
     this.pool.length = 0;
     this.free.length = 0;
@@ -495,6 +519,7 @@ export class AmbientCrowdSystem {
     }
     if (p.glanceCooldown > 0) p.glanceCooldown -= dt;
     if (p.glanceLeft > 0) p.glanceLeft -= dt;
+    if (p.noticeCooldown > 0) p.noticeCooldown -= dt;
 
     if (p.mode === "graph" || p.mode === "hop") {
       if (p.glanceLeft <= 0) this.advance(p, (p.speed * dt) / 1000);
@@ -528,8 +553,108 @@ export class AmbientCrowdSystem {
         if (p.look.sideView && Math.abs(dx) > 1) p.flip = dx < 0;
       }
     }
+    this.considerCat(p, role.id, dt);
     this.render(p, role);
     this.drawProp(p, role);
+  }
+
+  /** React to Mamma Cat nearby; people eating may share a morsel if she lingers. */
+  private considerCat(p: Person, roleId: string, dt: number): void {
+    // Nobody coos at, or feeds, a cat that is asleep or out of sight.
+    if (this.player.isResting || this.player.visible === false) {
+      p.lingerMs = 0;
+      return;
+    }
+    const dx = this.player.x - p.x;
+    const dy = this.player.y - p.y;
+    const d2 = dx * dx + dy * dy;
+    if (d2 > T.noticeRadius * T.noticeRadius) {
+      p.lingerMs = 0;
+      return;
+    }
+    if (p.noticeCooldown <= 0) {
+      p.noticeCooldown = T.noticeCooldownMs;
+      if (Math.random() < (NOTICE_CHANCE[roleId] ?? 0)) {
+        p.glanceLeft = T.glanceMs;
+        p.glanceFacing = FACING_OF[BaseNPC.directionFromComponents(dx, dy)];
+        if (p.look.sideView && Math.abs(dx) > 1) p.flip = dx < 0;
+        if (roleId === "tourist") this.cameraFlash(p);
+        this.emotes.show(this.scene, p.sprite, roleId === "smoker" || roleId === "office_worker" ? "curious" : "heart", this.emoteOffset(p));
+      }
+    }
+    if (!TREAT_ROLES.has(roleId) || p.mode !== "still" || p.treatRolled) return;
+    if (d2 > T.treatRadius * T.treatRadius) {
+      p.lingerMs = 0;
+      return;
+    }
+    p.lingerMs += dt;
+    if (p.lingerMs < T.treatLingerMs) return;
+    p.treatRolled = true;
+    if (this.treatsToday >= T.treatsPerDay || Math.random() >= T.treatChance) return;
+    this.treatsToday++;
+    this.dropTreat(p);
+  }
+
+  private cameraFlash(p: Person): void {
+    const flash = this.scene.add.circle(p.x, p.y - 20, 6, 0xffffff, 0.9).setDepth(PROP_DEPTH);
+    this.scene.tweens.add({ targets: flash, alpha: 0, scale: 3, duration: 260, onComplete: () => flash.destroy() });
+  }
+
+  /** A morsel lands between the person and Mamma Cat. */
+  private dropTreat(p: Person): void {
+    const tx = p.x + (this.player.x - p.x) * 0.6;
+    const ty = p.y + (this.player.y - p.y) * 0.6 + 4;
+    const g = this.scene.add.graphics().setDepth(BLANKET_DEPTH + 0.05);
+    g.fillStyle(0x000000, 0.25).fillEllipse(tx + 1, ty + 2, 10, 4);
+    g.fillStyle(0xd9a45b, 1).fillCircle(tx - 2, ty, 2.2).fillCircle(tx + 2, ty - 1, 1.8);
+    g.fillStyle(0xf3e3c0, 1).fillCircle(tx, ty + 1, 1.6);
+    this.treats.push({ x: tx, y: ty, gfx: g, expiresAt: this.timeMs + T.treatLifeMs, giver: p });
+    this.emotes.show(this.scene, p.sprite, "heart", this.emoteOffset(p));
+  }
+
+  /** EmoteSystem draws 24 px above the sprite's origin; crowd sprites are anchored at the feet, so lift it over the head. */
+  private emoteOffset(p: Person): number {
+    const headAbove = (p.look.originY - 0.12) * p.look.frameH * p.scale;
+    return 24 - headAbove - 8;
+  }
+
+  /**
+   * Eat a crowd morsel within reach (GameScene's interact key, after FoodSource).
+   * Returns the hunger restored, or 0 if none is in reach.
+   */
+  tryEatTreat(x: number, y: number, stats: StatsSystem): number {
+    const i = this.treats.findIndex((t) => (t.x - x) ** 2 + (t.y - y) ** 2 < TREAT_REACH * TREAT_REACH);
+    const treat = this.treats[i];
+    if (!treat) return 0;
+    this.treats.splice(i, 1);
+    treat.gfx.destroy();
+    const restored = stats.restore("hunger", T.treatHunger);
+    const label = this.scene.add
+      .text(treat.x, treat.y - 16, `+${Math.round(restored)}`, {
+        fontFamily: "Arial, Helvetica, sans-serif",
+        fontSize: "10px",
+        color: "#e8a33d",
+        stroke: "#000000",
+        strokeThickness: 2,
+        fontStyle: "bold",
+        resolution: 2,
+      })
+      .setOrigin(0.5)
+      .setDepth(100);
+    this.scene.tweens.add({ targets: label, y: treat.y - 46, alpha: 0, duration: 1200, ease: "Cubic.easeOut", onComplete: () => label.destroy() });
+    return restored;
+  }
+
+  private tickTreats(phase: TimeOfDay): void {
+    if (phase === "dawn" && this.lastPhase !== "dawn") this.treatsToday = 0; // a new day
+    this.lastPhase = phase;
+    for (let i = this.treats.length - 1; i >= 0; i--) {
+      const t = this.treats[i];
+      if (t && this.timeMs >= t.expiresAt) {
+        t.gfx.destroy();
+        this.treats.splice(i, 1);
+      }
+    }
   }
 
   private advance(p: Person, distance: number): void {
@@ -717,7 +842,12 @@ export class AmbientCrowdSystem {
     p.speed = rand(role.speed);
     p.glanceLeft = 0;
     p.glanceCooldown = 0;
-    p.flip = Math.random() < 0.5;
+    p.noticeCooldown = 0;
+    p.lingerMs = 0;
+    p.treatRolled = false;
+    // Only side-view art mirrors to face west; 4-direction art has real west frames, and a
+    // stray flip there makes people walk backwards.
+    p.flip = p.look.sideView && Math.random() < 0.5;
     p.seed = Math.random() * 10_000;
     const placed = role.motion === "anchored" ? this.placeAnchored(p, role) : this.placeStroller(p, role);
     if (!placed) {
@@ -946,6 +1076,7 @@ export class AmbientCrowdSystem {
 
   private render(p: Person, role: CrowdRole): void {
     const look = p.look;
+    if (!look.sideView) p.flip = false;
     const glancing = p.glanceLeft > 0;
     let sink = 0;
     let crop = false;
@@ -963,7 +1094,8 @@ export class AmbientCrowdSystem {
       switch (role.pose) {
         case "seated":
         case "groundSit": {
-          const real = role.pose === "seated" ? look.sitFrame : look.groundSitFrame;
+          const real =
+            role.pose === "seated" ? (look.sitFrames?.[facing] ?? look.sitFrame) : (look.groundSitFrames?.[facing] ?? look.groundSitFrame);
           if (real) {
             this.setStatic(p, real);
           } else {
@@ -975,10 +1107,12 @@ export class AmbientCrowdSystem {
         }
         case "selfie":
           if (look.selfieAnim && !glancing) this.playAnim(p, look.selfieAnim);
+          else if (look.selfieFrame && !glancing) this.setStatic(p, look.selfieFrame);
           else this.setStatic(p, look.face[glancing ? facing : "S"]);
           break;
         default:
-          if (look.idleAnim && !glancing) this.playAnim(p, look.idleAnim);
+          if (role.prop === "cigarette" && look.smokeFrame && !glancing) this.setStatic(p, look.smokeFrame);
+          else if (look.idleAnim && !glancing) this.playAnim(p, look.idleAnim);
           else this.setStatic(p, look.face[facing]);
       }
     } else {
@@ -1054,12 +1188,18 @@ export class AmbientCrowdSystem {
     switch (role.prop) {
       case "cigarette": {
         if (!still) return;
+        const t = ((this.timeMs + p.seed) % 1800) / 1800;
+        if (p.look.smokeFrame) {
+          // the pose already holds the cigarette at the lips: just the drifting smoke
+          const mouthY = p.y - (p.look.originY - 0.3) * p.look.frameH * p.scale;
+          g.fillStyle(0xdddddd, 0.35 * (1 - t)).fillCircle(p.x + 4 + t * 3, mouthY - 3 - t * 10, 1.5 + t * 2.5);
+          return;
+        }
         const hx = p.x + side * 5;
         const hy = p.y - 15;
         g.fillStyle(0xf5f5f5, 1).fillRect(hx, hy, 2, 1);
         const glow = 0.6 + 0.4 * Math.sin((this.timeMs + p.seed) / 180);
         g.fillStyle(0xff6a00, glow).fillRect(hx + side * 2, hy, 1, 1);
-        const t = ((this.timeMs + p.seed) % 1800) / 1800;
         g.fillStyle(0xdddddd, 0.35 * (1 - t)).fillCircle(hx + side * 2 + t * 3, hy - 3 - t * 10, 1.5 + t * 2.5);
         return;
       }
@@ -1084,7 +1224,7 @@ export class AmbientCrowdSystem {
       case "phone": {
         const selfie = still && role.pose === "selfie";
         if (!selfie && !(role.phoneWalk && !still)) return;
-        const girlArt = selfie ? !!p.look.selfieAnim : !!p.look.phoneWalkAnim;
+        const girlArt = selfie ? !!(p.look.selfieAnim || p.look.selfieFrame) : !!p.look.phoneWalkAnim; // art already shows the phone
         const px = p.x + side * (selfie ? 9 : 5);
         const py = p.y - (selfie ? 30 : 20);
         if (!girlArt) g.fillStyle(0x1b1b1b, 1).fillRect(px - 1, py - 2, 2, 3);
@@ -1127,7 +1267,9 @@ export class AmbientCrowdSystem {
       body.enable = true;
       g.npc.setActive(true).setVisible(true);
       g.npc.resetToPost();
-      if (g.npc.disposition === "hostile") g.indicator = new ThreatIndicator(this.scene, g.npc, "Guard", "dangerous", true);
+      if (g.npc.disposition === "hostile") {
+        g.indicator = new ThreatIndicator(this.scene, g.npc, "Guard", "dangerous", true, GUARD_HEAD_DROP_PX);
+      }
       return;
     }
     g.npc.setVelocity(0);
@@ -1175,6 +1317,9 @@ function newPerson(sprite: Phaser.GameObjects.Sprite, index: number): Person {
     glanceLeft: 0,
     glanceCooldown: 0,
     glanceFacing: "S",
+    noticeCooldown: 0,
+    lingerMs: 0,
+    treatRolled: false,
     seed: 0,
     animKey: "",
     staticTex: "",

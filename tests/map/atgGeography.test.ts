@@ -81,14 +81,34 @@ const reachable = (() => {
 const DECORATIVE = new Set(["poi_monument", "poi_gabriela_silang"]);
 
 describe("atg.json structure", () => {
-  it("ships the three tilesets GameScene requires, with collision metadata", () => {
+  it("ships the four tilesets GameScene requires, with collision metadata", () => {
     expect(atgMap.tilesets.map((t) => [t.name, t.firstgid])).toEqual([
       ["park-tiles", 1],
       ["trees-pale", 41],
       ["plants", 1065],
+      ["atg-ground", 1577],
     ]);
     for (const index of [T.ROAD, T.BUILDING, T.TOWER, T.WATER, T.STARBUCKS]) expect(colliding.has(gid(index))).toBe(true);
     for (const index of [T.SIDEWALK, T.STONE_PATH, T.STEPS, T.ESCALATOR, T.GRASS_LIGHT]) expect(colliding.has(gid(index))).toBe(false);
+  });
+
+  it("hides the gameplay ground under half-tile-offset art layers that cover the whole map", () => {
+    const layer = (name: string) => atgMap.layers.find((l) => l.name === name) as
+      | { visible?: boolean; width?: number; height?: number; offsetx?: number; offsety?: number; data?: number[] }
+      | undefined;
+    expect(layer("ground")?.visible).toBe(false);
+    const order = atgMap.layers.map((l) => l.name);
+    expect(order.indexOf("groundArt")).toBeGreaterThan(order.indexOf("ground"));
+    expect(order.indexOf("shade")).toBeLessThan(order.indexOf("objects"));
+    expect(order.indexOf("roofArt")).toBeGreaterThan(order.indexOf("overhead"));
+    for (const name of ["groundArt", "shade", "roofArt"]) {
+      const l = layer(name);
+      expect([l?.width, l?.height, l?.offsetx, l?.offsety]).toEqual([W + 1, H + 1, -16, -16]);
+    }
+    // every art cell is painted, and only with atg-ground tiles
+    const art = layer("groundArt")?.data ?? [];
+    expect(art.length).toBe((W + 1) * (H + 1));
+    expect(art.every((g) => g >= 1577)).toBe(true);
   });
 
   it("records the map revision and scale", () => {

@@ -60,6 +60,12 @@ vi.mock('phaser', () => {
     setDepth(): this {
       return this
     }
+    setScale(): this {
+      return this
+    }
+    setOrigin(): this {
+      return this
+    }
     setCollideWorldBounds(): this {
       return this
     }
@@ -107,7 +113,7 @@ vi.mock('phaser', () => {
 import map from '../../public/assets/tilemaps/atg.json'
 import { readPlaces, placeNamed, placesOfType, type TiledObjectLike } from '../../src/utils/mapPlaces'
 import { AmbientCrowdSystem } from '../../src/systems/AmbientCrowdSystem'
-import { CROWD_TUNING } from '../../src/data/ambient-roles'
+import { CROWD_ROLES, CROWD_TUNING } from '../../src/data/ambient-roles'
 import type { TimeOfDay } from '../../src/systems/DayNightCycle'
 
 // ── map collision ──
@@ -192,6 +198,7 @@ function makeScene(view: { x: number; y: number; w: number; h: number }) {
   }
   const scene = {
     registry: { set: vi.fn(), get: vi.fn() },
+    tweens: { add: vi.fn() },
     cameras: { main: { worldView } },
     anims: {
       exists: (k: string) => animKeys.has(k),
@@ -226,7 +233,8 @@ function makeScene(view: { x: number; y: number; w: number; h: number }) {
         sprites.push(s)
         return s
       },
-      graphics: () => chain({}, ['setDepth', 'clear', 'fillStyle', 'fillRect', 'fillCircle', 'destroy']),
+      graphics: () => chain({}, ['setDepth', 'clear', 'fillStyle', 'fillRect', 'fillCircle', 'fillEllipse', 'destroy']),
+      circle: () => chain({}, ['setDepth', 'destroy']),
       text: () => {
         const t = chain({ destroyed: false } as { destroyed: boolean }, ['setOrigin', 'setDepth', 'setPosition', 'setText', 'setColor'])
         ;(t as unknown as { destroy: () => void }).destroy = () => {
@@ -298,6 +306,8 @@ describe('AmbientCrowdSystem', () => {
         expect(p.sprite.depth).toBeGreaterThanOrEqual(2.5)
         expect(p.sprite.depth).toBeLessThan(3.99)
         expect(p.sprite.depth < 3, `person at y=${p.y}, cat at y=${player.y}`).toBe(p.y < player.y)
+        // 4-direction art is never mirrored (a mirrored east walk is someone walking backwards)
+        if (!(p as unknown as { look: { sideView: boolean } }).look.sideView) expect(p.sprite.flipX).toBe(false)
       }
     })
     expect(maxPop).toBeLessThanOrEqual(60)
@@ -471,6 +481,53 @@ describe('AmbientCrowdSystem', () => {
     })
     expect(surplus.reduce((a, b) => a + b, 0)).toBeGreaterThan(5)
     shedCount.forEach((n, i) => expect(n, `role ${i}`).toBeLessThanOrEqual(surplus[i]!))
+  })
+
+  it('people eating may toss a lingering Mamma Cat a capped number of morsels she can eat', () => {
+    let seed = 12345
+    const seeded = vi.spyOn(Math, 'random').mockImplementation(() => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x80000000))
+    const { crowd, player, emotes, run } = setup(restaurantRow)
+    run(40, 'day', 0.35) // lunch: diners settle at the tables
+    seeded.mockRestore()
+    const internals = crowd as unknown as {
+      active: Array<CrowdPerson & { mode: string; treatRolled: boolean }>
+      treats: Array<{ x: number; y: number }>
+      treatsToday: number
+    }
+    const diners = internals.active.filter((p) => p.mode === 'still' && p.visible && ['diner', 'lunch_eater', 'picnicker'].includes(CROWD_ROLES[p.role]?.id ?? ''))
+    expect(diners.length).toBeGreaterThan(0)
+    const rnd = vi.spyOn(Math, 'random').mockReturnValue(0) // every roll succeeds
+    const lingerByEach = () => {
+      for (const d of diners) {
+        player.x = d.x + 20
+        player.y = d.y + 10
+        run(T.treatLingerMs / 1000 + 0.5, 'day', 0.36)
+      }
+    }
+    let afterCap = -1
+    try {
+      lingerByEach()
+      // the daily cap holds even when the same people are asked again
+      internals.treatsToday = T.treatsPerDay
+      const dropped = internals.treats.length
+      for (const p of internals.active) p.treatRolled = false
+      lingerByEach()
+      afterCap = internals.treats.length - dropped
+    } finally {
+      rnd.mockRestore()
+    }
+    expect(afterCap).toBeLessThanOrEqual(0)
+    expect(internals.treatsToday).toBe(T.treatsPerDay)
+    expect(internals.treats.length).toBeGreaterThan(0)
+    expect(emotes.show).toHaveBeenCalled()
+    for (const call of emotes.show.mock.calls) expect(call[1]).not.toBe(player) // reactions go over the people, never the cat
+    const stats = { restore: vi.fn(() => T.treatHunger) }
+    const t = internals.treats[0]!
+    const before = internals.treats.length
+    expect(crowd.tryEatTreat(t.x + 200, t.y, stats as never)).toBe(0) // out of reach
+    expect(crowd.tryEatTreat(t.x + 5, t.y, stats as never)).toBe(T.treatHunger)
+    expect(stats.restore).toHaveBeenCalledWith('hunger', T.treatHunger)
+    expect(internals.treats.length).toBe(before - 1)
   })
 
   it('survives a map with no places at all', () => {

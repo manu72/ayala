@@ -1,6 +1,8 @@
 import type Phaser from "phaser";
 import { DAY_NIGHT_PHASES, type TimeOfDay } from "./DayNightCycle";
-import { carPose } from "../utils/kerbsideDropoff";
+import { nightLevel } from "../utils/nightLevel";
+import { pickVehicle, VEHICLE_ATLAS, type VehicleModel } from "../data/vehicles";
+import { topDownPose } from "../utils/kerbsideDropoff";
 import { placesOfType, pointAlong, polylineLength, type MapPlace, type Pt } from "../utils/mapPlaces";
 import {
   extendToBounds,
@@ -15,18 +17,26 @@ import {
   type LaneCar,
 } from "../utils/trafficLanes";
 
-/** Same side-view art and display size as GameScene.addDropoffVehicle; tints only read on the silver SUV. */
-const MODELS = [
-  { texture: "suv_small", width: 72, weight: 0.65, tints: [null, null, null, 0x2b2b2b, 0x2b2b2b, 0x8c8c8c, 0xffd43b, 0x5c7cfa, 0xe03131, 0x2f9e44] },
-  { texture: "corolla_small", width: 68, weight: 0.35, tints: [null, null, 0x8c8c8c] },
-] as const;
-const CAR_HEIGHT = 28;
-const MAX_CAR_LENGTH = MODELS[0].width;
+/** Phaser.BlendModes.ADD (the type-only Phaser import has no runtime value). */
+const BLEND_ADD = 1;
+/** Phaser.WEBGL */
+const RENDERER_WEBGL = 2;
 const CAR_DEPTH = 4;
+/** World-fixed drop shadow: the car's own frame in black, offset down-right in world space (sun fixed, cars turn). */
+const SHADOW_DEPTH = CAR_DEPTH - 0.01;
+const SHADOW_ALPHA = 0.28;
+const SHADOW_DX = 3;
+const SHADOW_DY = 4;
+/** Headlights: an additive cone from the nose, above the night overlay (depth 50). */
+const BEAM_DEPTH = 51;
+const BEAM_ALPHA = 0.32;
+const BEAM_TINT = 0xfff1d0;
+/** Ayala Avenue and Paseo de Roxas carry nearly all the buses. */
+const MAIN_ROAD = /ayala|paseo/i;
 const MIN_CRUISE = 150;
 const MAX_CRUISE = 200;
 const MEAN_SPEED = (MIN_CRUISE + MAX_CRUISE) / 2;
-/** Free road a spawn needs ahead of its nose, px. */
+/** Free road a spawn needs ahead of its nose, px (also the least bumper gap between prewarmed cars beyond MIN_GAP_PX). */
 const SPAWN_CLEAR_PX = 48;
 /** Alpha ramp at lane ends (normally off-map) and for new or re-revealed cars. */
 const EDGE_FADE_PX = 96;
@@ -35,8 +45,14 @@ const CULL_MARGIN_PX = 48;
 /** Largest simulated step; a long frame hitch just skips ahead. */
 const MAX_STEP_MS = 250;
 
-interface Car extends LaneCar {
+interface CarSprites {
   img: Phaser.GameObjects.Image;
+  shadow: Phaser.GameObjects.Image;
+  /** Created on first use after dusk. */
+  beam?: Phaser.GameObjects.Image;
+}
+
+interface Car extends LaneCar, CarSprites {
   /** 0..1 visibility ramp (fade-in on spawn, fade-out inside a reservation). */
   fade: number;
   shown: boolean;
@@ -53,6 +69,10 @@ interface Lane {
   cars: Car[];
   spawnIn: number;
   stretch: [number, number] | null;
+  /** Ayala Avenue / Paseo de Roxas (bus routes). */
+  mainRoad: boolean;
+  /** Model picked for the next spawn; kept until it fits, so big vehicles aren't skipped in queues. */
+  next: VehicleModel | null;
 }
 
 export interface TrafficOptions {
@@ -62,6 +82,8 @@ export interface TrafficOptions {
   isDrivable?: (x: number, y: number) => boolean;
   /** Cap on cars alive at once (rush hour reaches it). */
   maxCars?: number;
+  /** True where something overhead (tree canopy, roof) hides the road: headlights stay off there. */
+  isCovered?: (x: number, y: number) => boolean;
   rng?: () => number;
 }
 
@@ -72,22 +94,31 @@ export interface TrafficClock {
 }
 
 /**
- * Ambient traffic on the map's `traffic` places: pooled, physics-free images
- * driving each lane in its real direction with simple car-following, denser in
- * the rush hours. Purely visual; roads already block movement via tile
+ * Ambient traffic on the map's `traffic` places: pooled, physics-free top-down
+ * vehicles (the `vehicles` atlas, real scale) driving each lane in its real
+ * direction with simple car-following, denser in the rush hours, each with a
+ * world-fixed soft shadow. Purely visual; roads already block movement via tile
  * collision. Everything advances in {@link update}, so traffic freezes with the
  * game (pause, journal, cinematics) instead of running on tweens.
  */
 export class TrafficSystem {
   private readonly lanes: Lane[] = [];
   private readonly fitted = new Map<string, number>();
-  private readonly pool: Phaser.GameObjects.Image[] = [];
+  private readonly pool: CarSprites[] = [];
   private readonly maxCars: number;
   private readonly rng: () => number;
   private carTotal = 0;
   private visible = true;
   private started = false;
   private destroyed = false;
+  /** 0 daylight .. 1 night: headlight strength. */
+  private night = 0;
+  private readonly isCovered: (x: number, y: number) => boolean;
+  /**
+   * Tint-based shadows and additive headlights need WebGL; Phaser's Canvas fallback
+   * would draw the shadow as a second, full-colour car.
+   */
+  private readonly fx: boolean;
   private fadeOutMs = 0;
   private reservationId = 0;
 
@@ -98,6 +129,8 @@ export class TrafficSystem {
   ) {
     this.maxCars = options.maxCars ?? 70;
     this.rng = options.rng ?? Math.random;
+    this.isCovered = options.isCovered ?? (() => false);
+    this.fx = (scene.sys?.game?.renderer?.type ?? RENDERER_WEBGL) === RENDERER_WEBGL;
     for (const place of placesOfType(places, "traffic")) {
       if (!place.polyline || place.polyline.length < 2) continue;
       const centre = options.bounds ? extendToBounds(place.polyline, options.bounds) : place.polyline;
@@ -105,9 +138,10 @@ export class TrafficSystem {
       const maxLanes = Math.max(1, Math.floor(Number(place.props.lanes) || 2));
       const lanes = options.isDrivable ? fitLaneCount(centre, maxLanes, options.isDrivable) : maxLanes;
       this.fitted.set(place.name, lanes);
+      const mainRoad = MAIN_ROAD.test(`${place.name} ${String(place.props.road ?? "")}`);
       for (let k = 0; k < lanes; k++) {
         const pts = offsetPolyline(centre, laneOffset(lanes, k));
-        this.lanes.push({ pts, length: polylineLength(pts), share: 0, target: 0, cars: [], spawnIn: 0, stretch: null });
+        this.lanes.push({ pts, length: polylineLength(pts), share: 0, target: 0, cars: [], spawnIn: 0, stretch: null, mainRoad, next: null });
       }
     }
     const total = this.lanes.reduce((sum, lane) => sum + lane.length, 0);
@@ -136,6 +170,7 @@ export class TrafficSystem {
     if (this.destroyed) return;
     // A NaN step would poison every car's dist/speed for good.
     const dt = Number.isFinite(deltaMs) ? Math.min(Math.max(deltaMs, 0), MAX_STEP_MS) / 1000 : 0;
+    this.night = nightLevel(clock.currentPhase, clock.phaseProgress);
     const phase = DAY_NIGHT_PHASES[clock.currentPhase];
     const density = trafficDensity(hourOfDay(phase.startHour, DAY_NIGHT_PHASES[phase.next].startHour, clock.phaseProgress));
     for (const lane of this.lanes) lane.target = density * this.maxCars * lane.share;
@@ -209,10 +244,18 @@ export class TrafficSystem {
   destroy(): void {
     this.destroyed = true;
     for (const lane of this.lanes) {
-      for (const car of lane.cars) car.img.destroy();
+      for (const car of lane.cars) {
+        car.img.destroy();
+        car.shadow.destroy();
+        car.beam?.destroy();
+      }
       lane.cars = [];
     }
-    for (const img of this.pool) img.destroy();
+    for (const sprites of this.pool) {
+      sprites.img.destroy();
+      sprites.shadow.destroy();
+      sprites.beam?.destroy();
+    }
     this.pool.length = 0;
     this.carTotal = 0;
   }
@@ -230,19 +273,21 @@ export class TrafficSystem {
    */
   private prewarm(): void {
     const view = this.scene.cameras.main.worldView;
-    const pad = CULL_MARGIN_PX + MAX_CAR_LENGTH;
     for (const lane of this.lanes) {
       const n = Math.floor(lane.target) + (this.rng() < lane.target % 1 ? 1 : 0);
       for (let i = n - 1; i >= 0; i--) {
         const dist = ((i + 0.2 + 0.6 * this.rng()) * lane.length) / n;
+        const model = pickVehicle(this.rng, lane.mainRoad);
+        const half = model.length / 2;
         const ahead = lane.cars[lane.cars.length - 1];
-        if (ahead && ahead.dist - dist < 2 * MAX_CAR_LENGTH + MIN_GAP_PX) continue;
-        if (lane.stretch && dist + MAX_CAR_LENGTH > lane.stretch[0] && dist - MAX_CAR_LENGTH < lane.stretch[1]) continue;
+        if (ahead && ahead.dist - ahead.length / 2 - (dist + half) < MIN_GAP_PX + SPAWN_CLEAR_PX) continue;
+        if (lane.stretch && dist + model.length > lane.stretch[0] && dist - model.length < lane.stretch[1]) continue;
+        const pad = CULL_MARGIN_PX + model.length;
         const p = pointAlong(lane.pts, dist);
         const inView =
           p.x > view.x - pad && p.x < view.x + view.width + pad && p.y > view.y - pad && p.y < view.y + view.height + pad;
         if (inView) continue;
-        this.spawn(lane, dist);
+        this.spawn(lane, dist, model);
       }
       lane.spawnIn = this.headway(lane) * this.rng();
     }
@@ -252,30 +297,35 @@ export class TrafficSystem {
     const headway = this.headway(lane);
     lane.spawnIn = Math.min(lane.spawnIn - dt, headway * 1.6);
     if (lane.spawnIn > 0 || lane.cars.length >= Math.ceil(lane.target) || this.carTotal >= this.maxCars) return;
+    const model = (lane.next ??= pickVehicle(this.rng, lane.mainRoad));
     const tail = lane.cars[lane.cars.length - 1];
     const room = tail ? tail.dist - tail.length / 2 - MIN_GAP_PX : Infinity;
-    const blocked = lane.stretch !== null && lane.stretch[0] < MAX_CAR_LENGTH + SPAWN_CLEAR_PX;
-    if (room < MAX_CAR_LENGTH + SPAWN_CLEAR_PX || blocked) return; // retry next frame
-    this.spawn(lane, 0);
+    const blocked = lane.stretch !== null && lane.stretch[0] < model.length + SPAWN_CLEAR_PX;
+    if (room < model.length + SPAWN_CLEAR_PX || blocked) return; // retry next frame
+    this.spawn(lane, 0, model);
+    lane.next = null;
     lane.spawnIn = headway * (0.4 + 1.2 * this.rng());
   }
 
-  private spawn(lane: Lane, dist: number): void {
+  private spawn(lane: Lane, dist: number, model: VehicleModel): void {
     if (this.carTotal >= this.maxCars) return;
-    const model = this.rng() < MODELS[0].weight ? MODELS[0] : MODELS[1];
-    const tint = model.tints[Math.floor(this.rng() * model.tints.length)] ?? null;
-    const img = this.pool.pop() ?? this.scene.add.image(0, 0, model.texture).setDepth(CAR_DEPTH);
-    img.setTexture(model.texture).setDisplaySize(model.width, CAR_HEIGHT).setVisible(false);
-    if (tint === null) img.clearTint();
-    else img.setTint(tint);
+    const sprites = this.pool.pop() ?? {
+      img: this.scene.add.image(0, 0, VEHICLE_ATLAS, model.frame).setDepth(CAR_DEPTH),
+      shadow: this.scene.add.image(0, 0, VEHICLE_ATLAS, model.frame).setDepth(SHADOW_DEPTH).setTint(0x000000),
+    };
+    sprites.img.setFrame(model.frame).setVisible(false);
+    sprites.shadow.setFrame(model.frame).setVisible(false);
+    sprites.beam?.setVisible(false);
     const cruise = MIN_CRUISE + (MAX_CRUISE - MIN_CRUISE) * this.rng();
-    lane.cars.push({ img, dist, speed: cruise, cruise, length: model.width, fade: 0, shown: false });
+    lane.cars.push({ ...sprites, dist, speed: cruise, cruise, length: model.length, fade: 0, shown: false });
     this.carTotal++;
   }
 
   private recycle(car: Car): void {
     car.img.setVisible(false);
-    this.pool.push(car.img);
+    car.shadow.setVisible(false);
+    car.beam?.setVisible(false);
+    this.pool.push({ img: car.img, shadow: car.shadow, beam: car.beam });
     this.carTotal--;
   }
 
@@ -288,6 +338,8 @@ export class TrafficSystem {
     if (car.shown === shown) return;
     car.shown = shown;
     car.img.setVisible(shown);
+    car.shadow.setVisible(shown && this.fx);
+    if (!shown) car.beam?.setVisible(false);
   }
 
   private draw(dt: number): void {
@@ -306,16 +358,25 @@ export class TrafficSystem {
           continue;
         }
         const p = pointAlong(lane.pts, car.dist);
-        if (p.x < left || p.x > right || p.y < top || p.y > bottom) {
+        const half = car.length / 2; // a bus's centre can be off-screen while its nose is not
+        if (p.x < left - half || p.x > right + half || p.y < top - half || p.y > bottom + half) {
           this.show(car, false);
           continue;
         }
         // Heading from the chord under the car body, so it turns smoothly through bends.
-        const back = pointAlong(lane.pts, car.dist - car.length / 2);
-        const front = pointAlong(lane.pts, car.dist + car.length / 2);
-        const pose = carPose(Math.atan2(front.y - back.y, front.x - back.x));
-        car.img.setPosition(p.x, p.y).setRotation(pose.rotation).setFlipX(pose.flipX).setAlpha(alpha);
+        const back = pointAlong(lane.pts, car.dist - half);
+        const front = pointAlong(lane.pts, car.dist + half);
+        const { rotation } = topDownPose(Math.atan2(front.y - back.y, front.x - back.x));
+        car.img.setPosition(p.x, p.y).setRotation(rotation).setAlpha(alpha);
+        car.shadow
+          .setPosition(p.x + SHADOW_DX, p.y + SHADOW_DY)
+          .setRotation(rotation)
+          .setAlpha(alpha * SHADOW_ALPHA);
         this.show(car, true);
+        if (this.fx && this.night > 0.02 && !this.isCovered(front.x, front.y)) {
+          car.beam ??= this.scene.add.image(0, 0, "light_beam").setOrigin(0, 0.5).setDepth(BEAM_DEPTH).setBlendMode(BLEND_ADD).setTint(BEAM_TINT);
+          car.beam.setPosition(front.x, front.y).setRotation(rotation).setAlpha(alpha * this.night * BEAM_ALPHA).setVisible(true);
+        } else car.beam?.setVisible(false);
       }
     }
   }

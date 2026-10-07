@@ -18,6 +18,9 @@ import { readFileSync, writeFileSync, mkdirSync } from 'fs'
 import { createHash } from 'crypto'
 import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
+import { PNG } from 'pngjs'
+import { A, curtainDecal, monumentDecal, needsPhase, paintRoofTile, paintTile, paintShadeTile, tunnelMouthDecal } from './terrain-art.mjs'
+import { encodeIndexedPng } from './png-indexed.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const T = JSON.parse(readFileSync(join(__dirname, 'tile-indices.json'), 'utf8'))
@@ -299,6 +302,11 @@ for (let i = 0; i < N; i++) {
   }
 }
 
+// The Starbucks waterfall basin: its back half (inside the mall's glass line) is deep
+// water, so the basin has a real pool to draw and the facade has no gap; cats drink
+// from the walkable plaza-side rim.
+paintPoly(PLACES.starbucksWaterfall, (i, p) => { if (kind[i] === K.WATER && p[1] > PLACES.mallFacade[0][0][1]) ground[i] = t(T.WATER) })
+
 // ─────────────────────────────────────────
 // TREES — Poisson-ish scatter of the extracted stamps over the lawns
 // ─────────────────────────────────────────
@@ -315,6 +323,7 @@ for (const ring of [PLACES.playground, PLACES.sunkenPlaza, PLACES.mcmickingPool,
 paintDisc(PLACES.openbookRoof, 6, (i) => { noCanopy[i] = 1 })
 for (let i = 0; i < N; i++) if (kind[i] === K.STEPS || kind[i] === K.ESCALATOR || kind[i] === K.WATER) noCanopy[i] = 1
 
+const treeSpots = [] // canopy centre + radius (cells) of every placed tree, for ground shadows
 function placeStamp(stamp, bx, by, { force = false } = {}) {
   const ox = bx - stamp.base[0], oy = by - stamp.base[1]
   if (!force) {
@@ -332,6 +341,9 @@ function placeStamp(stamp, bx, by, { force = false } = {}) {
       if (stamp.overhead[r][c]) { overhead[i] = stamp.overhead[r][c]; canopy[i] = 1 }
       if (stamp.objects[r][c] && !objects[i]) objects[i] = stamp.objects[r][c]
     }
+  let r0 = Infinity, r1 = -1, c0 = Infinity, c1 = -1
+  for (let r = 0; r < stamp.h; r++) for (let c = 0; c < stamp.w; c++) if (stamp.overhead[r][c]) { r0 = Math.min(r0, r); r1 = Math.max(r1, r); c0 = Math.min(c0, c); c1 = Math.max(c1, c) }
+  if (r1 >= 0) treeSpots.push({ x: ox + (c0 + c1 + 1) / 2, y: oy + (r0 + r1 + 1) / 2, r: Math.max(c1 - c0 + 1, r1 - r0 + 1) / 2 })
   return true
 }
 const pick = (list) => list[Math.floor(rand() * list.length)]
@@ -424,6 +436,29 @@ for (const [name, p] of Object.entries(PLACES.monuments)) {
 // covered shelters: Openbook and the cat shelter (overhead roofs give cover)
 { const [cx, cy] = cellOf(PLACES.openbookRoof); for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) overhead[idx(cx + dx, cy + dy)] = t(T.ROOF) }
 paintPoly(PLACES.catShelter, (i) => { overhead[i] = t(T.ROOF) })
+// lamp posts every ~16 m along the park's walks, alternating sides, on free lawn
+// (placed last and without rand(), so nothing else moves)
+for (const f of features) {
+  const tg = f.tags
+  if (!f.line || !inside(f) || underground(tg) || !['footway', 'path', 'pedestrian'].includes(tg.highway) || tg.footway === 'crossing') continue
+  const half = Math.max(1.5, (Number(tg.width) || (tg.lit === 'yes' || tg.surface === 'paved' ? 4.5 : 3)) / 2)
+  let along = 8, side = 1
+  for (let k = 1; k < f.line.length; k++) {
+    const [ax, ay] = f.line[k - 1], [bx, by] = f.line[k]
+    const len = Math.hypot(bx - ax, by - ay)
+    for (; along < len; along += 16, side = -side) {
+      const ux = (bx - ax) / len, uy = (by - ay) / len
+      const p = [ax + ux * along - uy * side * (half + 1.2), ay + uy * along + ux * side * (half + 1.2)]
+      const [cx, cy] = cellOf(p)
+      if (!inMap(cx, cy)) continue
+      const i = idx(cx, cy)
+      if (kind[i] !== K.LAWN || objects[i] || overhead[i] || lamps.some((j) => Math.abs((j % MAP_W) - cx) + Math.abs(Math.floor(j / MAP_W) - cy) < 4)) continue
+      objects[i] = t(T.LAMPPOST)
+      lamps.push(i)
+    }
+    along -= len
+  }
+}
 
 // ─────────────────────────────────────────
 // WALKABILITY + VALIDATION
@@ -593,6 +628,7 @@ for (const [name, p] of Object.entries(EXITS)) point(name, 'exit', clearCell(p))
 }
 // crowd anchors
 for (const i of benches) point(`bench_${i}`, 'bench', [i % MAP_W, Math.floor(i / MAP_W)])
+for (const i of lamps) point(`lamp_${i}`, 'lamp', [i % MAP_W, Math.floor(i / MAP_W)])
 for (const i of dining) point(`dining_${i}`, 'dining', [i % MAP_W, Math.floor(i / MAP_W)])
 for (const [name, p] of Object.entries(PLACES.smoking)) point(name, 'smoking', openCell(p))
 const SELFIE = {
@@ -654,6 +690,337 @@ for (const [name, pts] of Object.entries(ROUTES)) polyline(name, 'route', pts.ma
 const COLONY = { colony_central: [[240, 10], 40], colony_west: [[110, 10], 28], colony_south: [[290, -110], 28], colony_north: [[300, 55], 22], colony_northeast: [[440, 40], 22] }
 for (const [name, [p, r]] of Object.entries(COLONY)) point(name, 'colony_zone', clearCell(p), { radius: (r / M) * TILE_SIZE })
 
+// zebra crossings (drawn by the game's RoadMarkings over the asphalt)
+for (const f of features) {
+  if (!f.line || f.tags.footway !== 'crossing' || underground(f.tags)) continue
+  const pts = f.line.map(mToPx)
+  if (pts.some(([x, y]) => x < 0 || y < 0 || x > MAP_W * TILE_SIZE || y > MAP_H * TILE_SIZE)) continue
+  polyline(`crossing_${f.id.replace('way/', '')}`, 'crossing', pts)
+}
+
+// ─────────────────────────────────────────
+// GROUND ART — dual-grid autotiles baked into atg-ground.png (visual only)
+// ─────────────────────────────────────────
+// The `ground` layer above stays the gameplay layer (collision, tile queries)
+// and is hidden; `groundArt` and `shade` are (W+1)x(H+1) layers offset by
+// half a tile so each art tile's corners sit on four cell centres.
+
+const ART_FIRSTGID = 1065 + 512
+const RAISED_K = new Set([K.BUILDING, K.TOWER, K.GLASS, K.STARBUCKS])
+const artOf = (i) => {
+  switch (kind[i]) {
+    case K.ROAD: return A.ROAD
+    case K.MEDIAN: return A.MEDIAN
+    case K.OUTSIDE: return roadDist[i] <= 3 ? A.SIDEWALK : A.CITY
+    case K.SIDEWALK: return A.SIDEWALK
+    case K.PATH: return A.PATH
+    case K.PLAZA: return A.PLAZA
+    case K.BUILDING: return A.BUILDING
+    case K.TOWER: return A.TOWER
+    case K.GLASS: return A.GLASS
+    case K.WATER: return A.WATER
+    case K.STEPS: return A.STEPS
+    case K.ESCALATOR: return A.ESCALATOR
+    case K.PLAYGROUND: return A.PLAYGROUND
+    case K.STARBUCKS: return A.STARBUCKS
+    default: return ground[i] === t(T.GRASS_DARK) || ground[i] === t(T.GRASS_MED) ? A.GRASS_MED : A.GRASS
+  }
+}
+// art labels, with lone specks (one lawn cell in a pavement, etc.) merged into their surroundings
+const artLabel = new Int16Array(N)
+for (let i = 0; i < N; i++) artLabel[i] = artOf(i)
+{
+  const soft = new Set([A.GRASS, A.GRASS_MED, A.PATH, A.PLAZA, A.SIDEWALK, A.CITY, A.MEDIAN])
+  const src = artLabel.slice()
+  for (let i = 0; i < N; i++) {
+    if (!soft.has(src[i])) continue
+    const nb = neighbours4(i).map((j) => src[j])
+    const other = nb.find((l) => l !== src[i])
+    if (other !== undefined && soft.has(other) && nb.filter((l) => l === other).length >= 3) artLabel[i] = other
+  }
+}
+// nearest-label fill: what each road/building cell would be without it, and the nearest roof type
+function nearestLabel(isSource, label) {
+  const out = new Int16Array(N).fill(-1)
+  const q = []
+  for (let i = 0; i < N; i++) if (isSource(i)) { out[i] = label(i); q.push(i) }
+  for (let h = 0; h < q.length; h++) for (const j of neighbours4(q[h])) if (out[j] < 0) { out[j] = out[q[h]]; q.push(j) }
+  return out
+}
+const bgLabel = nearestLabel((i) => kind[i] !== K.ROAD && kind[i] !== K.WATER && kind[i] !== K.STEPS && kind[i] !== K.ESCALATOR && !RAISED_K.has(kind[i]), (i) => artLabel[i])
+const roofLabel = nearestLabel((i) => RAISED_K.has(kind[i]), (i) => artLabel[i])
+
+// signed distances (cells, clamped to ±1, 1/8 steps) to the real road and building edges;
+// every cell centre keeps the class it collides as
+const SD_STEPS = Number(process.env.SD_STEPS ?? 8)
+const quant = (sd) => Math.max(-1, Math.min(1, Math.round(sd * SD_STEPS) / SD_STEPS))
+// exact edges only where the player looks: the six carriageways around the park and the
+// park's own buildings; the city beyond keeps cell-accurate (marching-squares) edges
+const sdRoad = new Float32Array(N).fill(NaN)
+const parkRoadIds = new Set(Object.values({ ...CARRIAGEWAYS, ...FAR_CARRIAGEWAYS }).flat().map((n) => `way/${n}`))
+for (const r of roads.filter((r) => parkRoadIds.has(r.id))) {
+  const half = ((Number(r.tags.lanes) || 2) * LANE_M) / 2 + 0.5
+  eachCellNear(r.line, half + 2 * M, (cx, cy, p) => {
+    const i = idx(cx, cy)
+    const sd = (distLine(p, r.line) - half) / M
+    if (!(sdRoad[i] <= sd)) sdRoad[i] = sd
+  })
+}
+const sdBld = new Float32Array(N).fill(NaN)
+const ringDist = (p, ring) => distLine(p, [...ring, ring[0]])
+const polySd = (ring) => eachCellNear(ring, 2 * M, (cx, cy, p) => {
+  const i = idx(cx, cy)
+  const sd = ((inPoly(p, ring) ? -1 : 1) * ringDist(p, ring)) / M
+  if (!(sdBld[i] <= sd)) sdBld[i] = sd
+})
+for (const b of buildingRings.filter(inside)) b.rings.forEach(polySd)
+polySd(PLACES.starbucks)
+for (const seg of PLACES.mallFacade) eachCellNear(seg, 2 * M, (cx, cy, p) => { const i = idx(cx, cy), sd = (distLine(p, seg) - 1) / M; if (!(sdBld[i] <= sd)) sdBld[i] = sd })
+// pools: OSM fountains/water plus the hand-placed ones
+const sdWater = new Float32Array(N).fill(NaN)
+{
+  const rings = []
+  for (const f of features) if (f.rings && inside(f) && (f.tags.amenity === 'fountain' || f.tags.natural === 'water')) rings.push(...f.rings)
+  rings.push(PLACES.mcmickingPool, PLACES.starbucksWaterfall)
+  for (const ring of rings) eachCellNear(ring, 2 * M, (cx, cy, p) => {
+    const i = idx(cx, cy), sd = ((inPoly(p, ring) ? -1 : 1) * ringDist(p, ring)) / M
+    if (!(sdWater[i] <= sd)) sdWater[i] = sd
+  })
+}
+// Cell centres keep at least EDGE_MARGIN cells between them and a drawn edge, so ground the
+// cat can walk on never reads as asphalt/roof/water (collision is per 2 m cell); the drawn
+// edge bends towards the cell staircase only where the real line runs close to a centre.
+// No geometry nearby (city blocks, side streets): hard ±1 corners, i.e. plain marching squares.
+const EDGE_MARGIN = 0.3
+const settle = (sd, inside) => (Number.isNaN(sd) ? (inside ? -1 : 1) : quant(inside ? Math.min(sd, -EDGE_MARGIN) : Math.max(sd, EDGE_MARGIN)))
+for (let i = 0; i < N; i++) {
+  sdRoad[i] = settle(sdRoad[i], kind[i] === K.ROAD)
+  sdBld[i] = settle(sdBld[i], RAISED_K.has(kind[i]))
+  sdWater[i] = settle(sdWater[i], ground[i] === t(T.WATER)) // rim cells are walkable: drawn as coping, not water
+}
+
+// stair and escalator flights (screen px): treads across `down`, depth 0 at the top
+const flightOf = new Array(N).fill(null)
+const flights = []
+{
+  // half: the painted half-width (m), so the drawn outline matches the stair cells
+  // each stair/escalator cell takes the nearest flight of its own kind
+  const flightSd = new Float32Array(N).fill(Infinity)
+  const add = (top, bottom, half, flat = false, cellKind = K.STEPS) => {
+    const a = mToPx(top), b = mToPx(bottom)
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1
+    const fl = { id: flights.length, top: a, down: [(b[0] - a[0]) / len, (b[1] - a[1]) / len], len, flat, line: [top, bottom], half }
+    flights.push(fl)
+    paintLine([top, bottom], half + 1.5, (i, p) => {
+      if (kind[i] !== cellKind) return
+      const d = distLine(p, [top, bottom])
+      if (d < flightSd[i]) { flightSd[i] = d; flightOf[i] = fl }
+    })
+  }
+  add(PLACES.mallStairs.from, PLACES.mallStairs.to, PLACES.mallStairs.half)
+  add(PLACES.neSteps.to, PLACES.neSteps.from, PLACES.neSteps.half) // rises north to the Tower Two podium
+  add(esc.from, esc.to, esc.half, false, K.ESCALATOR) // Sedeño: down into the underpass
+  for (const f of features) {
+    if (!f.line || f.tags.highway !== 'steps' || underground(f.tags)) continue
+    // one flight per segment, so bent stairs follow their way
+    for (let k = 1; k < f.line.length; k++) {
+      const a = f.line[k - 1], b = f.line[k]
+      if (f.id === 'way/92001682') add(b, a, 1.6) // Sedeño stair: bottom at its west end
+      else if (f.tags.incline === 'up') add(b, a, 1.6)
+      else if (f.tags.incline === 'down') add(a, b, 1.6)
+      else add(a, b, 1.6, true)
+    }
+  }
+}
+// exact stair outlines: signed distance to each flight's painted band
+const sdFlight = new Float32Array(N).fill(NaN)
+for (const fl of flights)
+  eachCellNear(fl.line, fl.half + 2 * M, (cx, cy, p) => {
+    // box, not capsule: stairs end square
+    const [[ax, ay], [bx, by]] = fl.line, L = Math.hypot(bx - ax, by - ay) || 1
+    const ux = (bx - ax) / L, uy = (by - ay) / L, t = (p[0] - ax) * ux + (p[1] - ay) * uy
+    const across = Math.abs(-(p[0] - ax) * uy + (p[1] - ay) * ux)
+    const i = idx(cx, cy), sd = Math.max(across - fl.half, -t, t - L) / M
+    if (!(sdFlight[i] <= sd)) sdFlight[i] = sd
+  })
+for (let i = 0; i < N; i++) sdFlight[i] = settle(sdFlight[i], kind[i] === K.STEPS || kind[i] === K.ESCALATOR)
+
+// shade coverage (0, 0.5, 1), light from the NW: soft discs under every tree canopy
+// pushed one cell SE, roofs and monuments one cell, buildings by height
+const shadeCover = new Float32Array(N)
+for (const tr of treeSpots) {
+  const sx = tr.x + 0.8, sy = tr.y + 0.8, rad = tr.r * 0.95
+  for (let cy = Math.floor(sy - rad - 1); cy <= sy + rad + 1; cy++)
+    for (let cx = Math.floor(sx - rad - 1); cx <= sx + rad + 1; cx++) {
+      if (!inMap(cx, cy)) continue
+      const d = Math.hypot(cx + 0.5 - sx, cy + 0.5 - sy) / rad
+      const cov = d < 0.75 ? 1 : d < 1.15 ? 0.4 : 0
+      const i = idx(cx, cy)
+      if (!RAISED_K.has(kind[i])) shadeCover[i] = Math.max(shadeCover[i], cov)
+    }
+}
+{
+  const castLen = (k) => (k === K.TOWER ? 3 : k === K.BUILDING || k === K.STARBUCKS ? 2 : k === K.GLASS ? 1 : 0)
+  for (let cy = 0; cy < MAP_H; cy++)
+    for (let cx = 0; cx < MAP_W; cx++) {
+      const i = idx(cx, cy)
+      const len = castLen(kind[i]) || (overhead[i] === t(T.ROOF) ? 1 : 0) // monuments paint their own shadow (decal)
+      for (let k = 1; k <= len; k++)
+        for (const [dx, dy] of [[k, k], [k - 1, k], [k, k - 1]]) {
+          if (!inMap(cx + dx, cy + dy)) continue
+          const j = idx(cx + dx, cy + dy)
+          if (castLen(kind[j]) && !(kind[i] === K.TOWER && kind[j] !== K.TOWER)) continue // only towers shade lower roofs
+          shadeCover[j] = 1
+        }
+    }
+}
+
+// shelter roofs (Openbook, the cat shelter): exact outlines drawn by the roofArt layer;
+// the overhead ROOF tiles stay (invisible) for cover/shade
+const ROOFS = []
+{
+  const [ox, oy] = cellOf(PLACES.openbookRoof)
+  ROOFS.push({ ring: [[ox, oy], [ox + 2, oy], [ox + 2, oy + 2], [ox, oy + 2]].map(([x, y]) => [x * TILE_SIZE, y * TILE_SIZE]), base: [150, 96, 62] })
+  ROOFS.push({ ring: PLACES.catShelter.map(mToPx), base: [176, 108, 70] })
+}
+const sdRoof = new Float32Array(N).fill(1)
+const roofOf = new Array(N).fill(null)
+for (const roof of ROOFS)
+  for (let cy = 0; cy < MAP_H; cy++)
+    for (let cx = 0; cx < MAP_W; cx++) {
+      const c = [(cx + 0.5) * TILE_SIZE, (cy + 0.5) * TILE_SIZE]
+      const dist = distLine(c, [...roof.ring, roof.ring[0]]) / TILE_SIZE
+      if (dist > 2) continue
+      const sd = (inPoly(c, roof.ring) ? -dist : dist)
+      const i = idx(cx, cy)
+      if (sd < sdRoof[i]) { sdRoof[i] = sd; roofOf[i] = roof }
+    }
+for (let i = 0; i < N; i++) {
+  const covered = overhead[i] === t(T.ROOF)
+  sdRoof[i] = quant(covered ? Math.min(sdRoof[i], -EDGE_MARGIN) : Math.max(sdRoof[i], EDGE_MARGIN))
+}
+
+// one-off landmarks painted over the baked ground
+const DECALS = []
+for (const [name, p] of Object.entries(PLACES.monuments)) {
+  const [cx, cy] = cellOf(p)
+  DECALS.push(monumentDecal([cx * TILE_SIZE, cy * TILE_SIZE, (cx + 2) * TILE_SIZE, (cy + 2) * TILE_SIZE], name === 'gabriela_silang' ? 'rider' : 'figure'))
+}
+// water curtains along the back (north) edge of each pool's deep water, so the wall and
+// the falling sheet sit on cells that block
+for (const ring of [PLACES.mcmickingPool, PLACES.starbucksWaterfall]) {
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity
+  paintPoly(ring, (i) => {
+    if (ground[i] !== t(T.WATER)) return
+    const cx = i % MAP_W, cy = (i - cx) / MAP_W
+    x0 = Math.min(x0, cx); x1 = Math.max(x1, cx); y0 = Math.min(y0, cy)
+  })
+  if (x0 <= x1) DECALS.push(curtainDecal([x0 * TILE_SIZE, y0 * TILE_SIZE, (x1 + 1) * TILE_SIZE, y0 * TILE_SIZE + 14]))
+}
+// the Sedeño underpass: the stair and the escalator run side by side into one dark mouth
+{
+  const a = mToPx(esc.to), b = mToPx(esc.from)
+  const len = Math.hypot(a[0] - b[0], a[1] - b[1])
+  const axis = [(a[0] - b[0]) / len, (a[1] - b[1]) / len] // down the flight, into the tunnel
+  const stairBottom = mToPx(way(92001682).line[0])
+  const mid = [(a[0] + stairBottom[0]) / 2 - axis[0] * 4, (a[1] + stairBottom[1]) / 2 - axis[1] * 4]
+  const across = Math.abs((a[0] - stairBottom[0]) * -axis[1] + (a[1] - stairBottom[1]) * axis[0])
+  DECALS.push(tunnelMouthDecal(mid, axis, across / 2 + 22, 18))
+}
+const withDecals = (id, origin) => {
+  const hits = DECALS.filter((d) => d.bbox[0] < origin[0] + TILE_SIZE && d.bbox[2] > origin[0] && d.bbox[1] < origin[1] + TILE_SIZE && d.bbox[3] > origin[1])
+  if (!hits.length) return id
+  const buf = Buffer.from(artTiles[id])
+  for (let v = 0; v < TILE_SIZE; v++)
+    for (let u = 0; u < TILE_SIZE; u++) {
+      const o = (v * TILE_SIZE + u) * 4
+      for (const d of hits) {
+        const c = d.paint(origin[0] + u + 0.5, origin[1] + v + 0.5, [buf[o], buf[o + 1], buf[o + 2]])
+        if (c) for (let k = 0; k < 3; k++) buf[o + k] = Math.max(0, Math.min(255, Math.round(c[k])))
+      }
+    }
+  return addArt(buf)
+}
+
+// Gameplay shade is the overhead layer (canopy, roofs). Where the cat can walk but
+// nothing is overhead, keep only a faint shadow, so the art never promises shade the
+// rules don't give.
+for (let i = 0; i < N; i++) if (!blocked(i) && !overhead[i]) shadeCover[i] = Math.min(shadeCover[i], 0.4)
+
+const artCell = (x, y) => idx(Math.max(0, Math.min(MAP_W - 1, x)), Math.max(0, Math.min(MAP_H - 1, y)))
+const ART_W = MAP_W + 1, ART_H = MAP_H + 1
+const artTiles = [] // RGBA buffers in atlas order
+const artIndex = new Map() // content hash -> local tile id
+const artByKey = new Map() // corner key -> local tile id
+const addArt = (buf) => {
+  const h = createHash('sha1').update(buf).digest('hex')
+  if (!artIndex.has(h)) { artIndex.set(h, artTiles.length); artTiles.push(buf) }
+  return artIndex.get(h)
+}
+function hashArt(i, j) {
+  let n = Math.imul(i, 73856093) ^ Math.imul(j, 19349663)
+  n = Math.imul(n ^ (n >>> 13), 1274126177)
+  return ((n ^ (n >>> 16)) >>> 0) / 4294967296
+}
+const groundArt = new Array(ART_W * ART_H).fill(0)
+const shadeArt = new Array(ART_W * ART_H).fill(0)
+const roofArt = new Array(ART_W * ART_H).fill(0)
+for (let j = 0; j < ART_H; j++)
+  for (let i = 0; i < ART_W; i++) {
+    const cells = [artCell(i - 1, j - 1), artCell(i, j - 1), artCell(i - 1, j), artCell(i, j)]
+    const anyBld = cells.some((c) => sdBld[c] < 1)
+    const corners = cells.map((c) => ({ t: bgLabel[c], r: anyBld ? roofLabel[c] : null, sdR: sdRoad[c], sdB: sdBld[c], sdW: sdWater[c], sdF: sdFlight[c], fl: flightOf[c], flKind: kind[c] === K.ESCALATOR ? A.ESCALATOR : A.STEPS }))
+    const hasFlight = corners.some((c) => c.fl)
+    const roadAll = corners.every((c) => c.sdR <= -1)
+    const visibleGround = roadAll || (corners.every((c) => c.sdR >= 1) && corners.every((c) => c.sdB <= -1)) ? [] : [...corners.map((c) => c.t), ...(corners.some((c) => c.sdW < 1) ? [A.WATER] : [])]
+    const phase = visibleGround.some(needsPhase) ? [i % 2, j % 2] : [0, 0]
+    const r = hashArt(i, j)
+    const variant = r < 0.55 ? 0 : r < 0.64 ? 1 : r < 0.72 ? 2 : r < 0.8 ? 3 : r < 0.9 ? 4 : 5
+    const origin = [i * TILE_SIZE - TILE_SIZE / 2, j * TILE_SIZE - TILE_SIZE / 2]
+    const key = JSON.stringify([
+      roadAll ? 'road' : corners.map((c) => [c.t, c.r, c.sdR, c.sdB, c.sdW, c.sdF, c.fl?.id ?? null]),
+      variant, phase, hasFlight ? origin : null,
+    ])
+    if (!artByKey.has(key)) artByKey.set(key, addArt(paintTile(corners, { variant, phase, origin })))
+    groundArt[j * ART_W + i] = ART_FIRSTGID + withDecals(artByKey.get(key), origin)
+    const sdr = cells.map((c) => sdRoof[c])
+    if (sdr.some((d) => d < 1)) {
+      const roof = cells.map((c) => roofOf[c]).find(Boolean)
+      const buf = paintRoofTile(sdr, roof, origin)
+      if (buf.some((b, n) => n % 4 === 3 && b)) roofArt[j * ART_W + i] = ART_FIRSTGID + addArt(buf)
+    }
+    const cover = cells.map((c) => shadeCover[c])
+    if (cover.some(Boolean)) {
+      const sk = JSON.stringify(['shade', cover, [i % 2, j % 2]])
+      if (!artByKey.has(sk)) artByKey.set(sk, addArt(paintShadeTile(cover, [i % 2, j % 2])))
+      shadeArt[j * ART_W + i] = ART_FIRSTGID + artByKey.get(sk)
+    }
+  }
+// Atlas cells are extruded by 1 px (each tile's edge pixels repeated around it; Tiled
+// margin 1 / spacing 2) so sub-pixel camera positions never sample a neighbouring tile.
+const ART_COLS = 30
+const ART_ROWS = Math.ceil(artTiles.length / ART_COLS)
+const ART_CELL = TILE_SIZE + 2
+const ART_IMG_W = ART_COLS * ART_CELL, ART_IMG_H = ART_ROWS * ART_CELL
+// many mobile GPUs cap textures at 4096 px; past that, split the atlas or coarsen SD_STEPS
+if (ART_IMG_H > 4096) throw new Error(`atg-ground.png would be ${ART_IMG_W}x${ART_IMG_H} (> 4096 px tall): ${artTiles.length} unique art tiles`)
+{
+  const png = new PNG({ width: ART_IMG_W, height: ART_IMG_H })
+  png.data.fill(0)
+  artTiles.forEach((buf, n) => {
+    const ox = (n % ART_COLS) * ART_CELL + 1, oy = Math.floor(n / ART_COLS) * ART_CELL + 1
+    for (let v = -1; v <= TILE_SIZE; v++)
+      for (let u = -1; u <= TILE_SIZE; u++) {
+        const su = Math.max(0, Math.min(TILE_SIZE - 1, u)), sv = Math.max(0, Math.min(TILE_SIZE - 1, v))
+        const si = (sv * TILE_SIZE + su) * 4, di = ((oy + v) * png.width + ox + u) * 4
+        png.data[di] = buf[si]; png.data[di + 1] = buf[si + 1]; png.data[di + 2] = buf[si + 2]; png.data[di + 3] = buf[si + 3]
+      }
+  })
+  const tsDir = join(__dirname, '..', 'public', 'assets', 'tilesets')
+  mkdirSync(tsDir, { recursive: true })
+  writeFileSync(join(tsDir, 'atg-ground.png'), encodeIndexedPng(png.width, png.height, png.data))
+}
+
 // ─────────────────────────────────────────
 // TILED JSON OUTPUT
 // ─────────────────────────────────────────
@@ -682,7 +1049,7 @@ const placeObjects = places.map((pl) => {
 const tilemap = {
   compressionlevel: -1, height: MAP_H, width: MAP_W, infinite: false,
   orientation: 'orthogonal', renderorder: 'right-down', tilewidth: TILE_SIZE, tileheight: TILE_SIZE,
-  tiledversion: '1.10.2', type: 'map', version: '1.10', nextlayerid: 6, nextobjectid: nextId,
+  tiledversion: '1.10.2', type: 'map', version: '1.10', nextlayerid: 9, nextobjectid: nextId,
   properties: [
     { name: 'source', type: 'string', value: 'OpenStreetMap extract scripts/atg-osm.geojson — © OpenStreetMap contributors (ODbL)' },
     { name: 'metresPerTile', type: 'float', value: M },
@@ -692,11 +1059,16 @@ const tilemap = {
     { columns: 8, firstgid: 1, image: '../tilesets/park-tiles.png', imageheight: 160, imagewidth: 256, margin: 0, name: 'park-tiles', spacing: 0, tilecount: 40, tilewidth: TILE_SIZE, tileheight: TILE_SIZE, tiles: tileProperties },
     { columns: 32, firstgid: 41, image: '../tilesets/trees-pale.png', imageheight: 1024, imagewidth: 1024, margin: 0, name: 'trees-pale', spacing: 0, tilecount: 1024, tilewidth: TILE_SIZE, tileheight: TILE_SIZE },
     { columns: 16, firstgid: 1065, image: '../tilesets/plants.png', imageheight: 1024, imagewidth: 512, margin: 0, name: 'plants', spacing: 0, tilecount: 512, tilewidth: TILE_SIZE, tileheight: TILE_SIZE },
+    { columns: ART_COLS, firstgid: ART_FIRSTGID, image: '../tilesets/atg-ground.png', imageheight: ART_IMG_H, imagewidth: ART_IMG_W, margin: 1, name: 'atg-ground', spacing: 2, tilecount: artTiles.length, tilewidth: TILE_SIZE, tileheight: TILE_SIZE },
   ],
   layers: [
-    { id: 1, name: 'ground', type: 'tilelayer', width: MAP_W, height: MAP_H, x: 0, y: 0, opacity: 1, visible: true, data: '__ground__' },
+    // gameplay ground: collision + tile queries; drawn by groundArt instead
+    { id: 1, name: 'ground', type: 'tilelayer', width: MAP_W, height: MAP_H, x: 0, y: 0, opacity: 1, visible: false, data: '__ground__' },
+    { id: 6, name: 'groundArt', type: 'tilelayer', width: ART_W, height: ART_H, x: 0, y: 0, offsetx: -TILE_SIZE / 2, offsety: -TILE_SIZE / 2, opacity: 1, visible: true, data: '__groundArt__' },
+    { id: 7, name: 'shade', type: 'tilelayer', width: ART_W, height: ART_H, x: 0, y: 0, offsetx: -TILE_SIZE / 2, offsety: -TILE_SIZE / 2, opacity: 1, visible: true, data: '__shade__' },
     { id: 2, name: 'objects', type: 'tilelayer', width: MAP_W, height: MAP_H, x: 0, y: 0, opacity: 1, visible: true, data: '__objects__' },
     { id: 3, name: 'overhead', type: 'tilelayer', width: MAP_W, height: MAP_H, x: 0, y: 0, opacity: 1, visible: true, data: '__overhead__' },
+    { id: 8, name: 'roofArt', type: 'tilelayer', width: ART_W, height: ART_H, x: 0, y: 0, offsetx: -TILE_SIZE / 2, offsety: -TILE_SIZE / 2, opacity: 1, visible: true, data: '__roofArt__' },
     { id: 4, name: 'spawns', type: 'objectgroup', draworder: 'topdown', x: 0, y: 0, opacity: 1, visible: true, objects: spawnObjects },
     { id: 5, name: 'places', type: 'objectgroup', draworder: 'topdown', x: 0, y: 0, opacity: 1, visible: true, objects: placeObjects },
   ],
@@ -704,14 +1076,19 @@ const tilemap = {
 
 // Saves keep positions only on the same map revision, so derive it from the content:
 // any regeneration that moves ground or spawns invalidates saved coordinates.
-const mapRevision = 'osm-2m-' + createHash('sha1').update(JSON.stringify([MAP_W, MAP_H, ground, objects, spawnObjects])).digest('hex').slice(0, 10)
+// Only what makes a saved position valid: the map size, which cells block, and the spawns
+// (art-only regenerations — new lamps, repainted tiles — keep saves).
+const mapRevision = 'osm-2m-' + createHash('sha1').update(JSON.stringify([MAP_W, MAP_H, Array.from({ length: N }, (_, i) => (blocked(i) ? 1 : 0)).join(''), spawnObjects])).digest('hex').slice(0, 10)
 
 // one map row per line keeps the file small and diffs readable
-const rows = (data) => '[\n' + Array.from({ length: MAP_H }, (_, y) => data.slice(y * MAP_W, (y + 1) * MAP_W).join(',')).join(',\n') + '\n]'
+const rows = (data, w = MAP_W, h = MAP_H) => '[\n' + Array.from({ length: h }, (_, y) => data.slice(y * w, (y + 1) * w).join(',')).join(',\n') + '\n]'
 const json = JSON.stringify(tilemap, null, 1)
   .replace('"__ground__"', rows(ground))
   .replace('"__objects__"', rows(objects))
   .replace('"__overhead__"', rows(overhead))
+  .replace('"__groundArt__"', rows(groundArt, ART_W, ART_H))
+  .replace('"__shade__"', rows(shadeArt, ART_W, ART_H))
+  .replace('"__roofArt__"', rows(roofArt, ART_W, ART_H))
   .replace('"__mapRevision__"', JSON.stringify(mapRevision))
 
 // CI's verify:dist greps dist/ for secret-looking strings; generated names must never trip it
@@ -725,5 +1102,6 @@ const reachable = reach.reduce((a, b) => a + b, 0)
 const shaded = reach.reduce((a, r, i) => a + (r && overhead[i] ? 1 : 0), 0)
 console.log(`Created public/assets/tilemaps/atg.json — ${MAP_W}x${MAP_H} tiles (${MAP_W * TILE_SIZE}x${MAP_H * TILE_SIZE} px), ${M} m/tile`)
 console.log(`Reachable cells: ${reachable}; under canopy/roof: ${Math.round((100 * shaded) / reachable)}%`)
-console.log(`Objects: ${spawnObjects.length} spawns/POIs, ${placeObjects.length} places (${benches.length} benches, ${dining.length} tables)`)
+console.log(`Ground art: ${artTiles.length} unique tiles in atg-ground.png (${ART_IMG_W}x${ART_IMG_H})`)
+console.log(`Objects: ${spawnObjects.length} spawns/POIs, ${placeObjects.length} places (${benches.length} benches, ${dining.length} tables, ${lamps.length} lamps)`)
 for (const s of snapped) console.log(`  note: ${s}`)

@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { PETS } from "../data/pets";
 import { HumanNPC } from "../sprites/HumanNPC";
 import type { HumanConfig } from "../sprites/HumanNPC";
 import { DogNPC } from "../sprites/DogNPC";
@@ -214,7 +215,8 @@ export class HumanPresenceSystem {
     ];
     const configs = allConfigs.filter((config) => config.path.length > 1);
 
-    const walkerDogKeys = Phaser.Utils.Array.Shuffle(["SmallDog", "BrownDog", "WhiteDog"]);
+    // Ella the long-haired dachshund always comes out with the first dog walker
+    const walkerDogKeys = [PETS.ella.texture, ...Phaser.Utils.Array.Shuffle(["SmallDog", "BrownDog", "WhiteDog"])];
     let walkerDogIdx = 0;
     const navigationGrid = scene.createHumanNavigationGrid();
 
