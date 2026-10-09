@@ -48,6 +48,8 @@ export const StoryKeys = {
   // Cat has learned by greeting them, and those lost to snatchers (never respawned).
   COLONY_NAMED: "COLONY_NAMED",
   COLONY_LOST: "COLONY_LOST",
+  // Dumped pets Mamma Cat saw arrive, by background index: how settled each is, and where it lives.
+  COLONY_NEWCOMERS: "COLONY_NEWCOMERS",
 } as const;
 
 export type StoryKey = (typeof StoryKeys)[keyof typeof StoryKeys];

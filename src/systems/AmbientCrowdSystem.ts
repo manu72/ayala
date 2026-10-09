@@ -315,6 +315,12 @@ export class AmbientCrowdSystem {
     return this.guards.map((g) => g.npc);
   }
 
+  /** Someone of the crowd, or an extra guard, within `r` of (x, y). */
+  someoneNear(x: number, y: number, r: number): { x: number; y: number } | null {
+    const near = (o: { x: number; y: number; visible: boolean }) => o.visible && Math.hypot(o.x - x, o.y - y) <= r;
+    return this.active.find((p) => near(p.sprite))?.sprite ?? this.guards.find((g) => near(g.npc))?.npc ?? null;
+  }
+
   /**
    * Advance the crowd and the extra guards. Call only from GameScene.update()
    * (which already skips pauses and cinematics).
