@@ -9,7 +9,8 @@ const HOME = { x: 1400, y: 1000 };
 const OTHER_HOME = { x: 1400, y: 2600 };
 type Moved = { x: number; y: number; mode: string };
 
-function world() {
+/** `wall`: a strip of x (a building) the test map blocks. */
+function world({ wall }: { wall?: [number, number] } = {}) {
   const sprite = (x: number, y: number) => {
     const s = { x, y, anims: { play: vi.fn(), stop: vi.fn(), isPlaying: false }, destroy: vi.fn() };
     for (const m of ["setOrigin", "setScale", "setTint", "setDepth", "setFrame", "setRotation", "setPosition"])
@@ -17,18 +18,28 @@ function world() {
     return s;
   };
   type Tween = Record<string, unknown> & { targets: Record<string, unknown>; onUpdate?: () => void; onComplete?: () => void };
-  /** Tweens play out after the frame that starts them (here: all at once, at the end of the next tick). */
+  /** Tweens play out after the frame that starts them (here: in four linear samples, at the end of the next tick). */
   const pending: Tween[] = [];
   const tweens = { add: (cfg: Tween) => pending.push(cfg) };
   const flush = () => {
     for (const cfg of pending.splice(0)) {
-      for (const [k, v] of Object.entries(cfg))
-        if (!["targets", "duration", "ease", "onUpdate", "onComplete"].includes(k)) cfg.targets[k] = v;
-      cfg.onUpdate?.();
+      const props = Object.entries(cfg).filter(([k]) => !["targets", "duration", "ease", "onUpdate", "onComplete"].includes(k));
+      const from = props.map(([k]) => Number(cfg.targets[k]));
+      for (let step = 1; step <= 4; step++) {
+        props.forEach(([k, to], i) => (cfg.targets[k] = from[i]! + (Number(to) - from[i]!) * (step / 4)));
+        cfg.onUpdate?.();
+      }
       cfg.onComplete?.();
     }
   };
-  const tile = (x: number) => (x < 0 || x > 3000 ? null : x >= 920 && x <= 1080 ? { collides: true, properties: { road: true } } : { collides: false, properties: {} });
+  const tile = (x: number) =>
+    x < 0 || x > 3000
+      ? null
+      : x >= 920 && x <= 1080
+        ? { collides: true, properties: { road: true } }
+        : wall && x >= wall[0] && x <= wall[1]
+          ? { collides: true, properties: {} }
+          : { collides: false, properties: {} };
   const car = { near: null as null | { x: number; y: number; angle: number; speed: number; gap: number } };
   const player = { x: 0, y: 1000, isResting: false, isRunning: false, isCrouching: false, visible: true, body: null, startle: vi.fn() };
   const scene = {
@@ -167,5 +178,16 @@ describe("ZombieSystem", () => {
     for (let i = 0; i < 900 && z.mode !== "idle"; i++) w.tick();
     expect(z.mode).toBe("idle");
     expect(Math.hypot(z.x - start.x, z.y - start.y)).toBeLessThan(12);
+  });
+
+  it("is thrown no further than a wall in its way, even with clear ground beyond it", () => {
+    const w = world({ wall: [1115, 1125] });
+    const z = w.z() as Moved & { trail: Array<{ x: number; y: number }> };
+    Object.assign(z, { x: 1100, y: 1000, mode: "home", trail: [{ x: 1100, y: 1000 }] });
+    w.car.near = { x: 1080, y: 1005, angle: 0, speed: 160, gap: 0 }; // flings it 40 px east, 12 px up: over the wall
+    w.tick();
+    expect(z.mode).toBe("down");
+    expect(z.x).toBeLessThan(1115);
+    expect(z.x).toBeGreaterThan(1100); // it did fly, up to the wall
   });
 });

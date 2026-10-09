@@ -340,7 +340,25 @@ export class ZombieSystem {
     const along = { x: z.x + Math.cos(car.angle) * 40, y: z.y + Math.sin(car.angle) * 40 };
     const aside = { x: along.x - Math.sin(car.angle) * side * 12, y: along.y + Math.cos(car.angle) * side * 12 };
     const to = ok(aside) ? aside : ok(along) ? along : null;
-    if (to) s.tweens.add({ targets: z, ...to, duration: 260, ease: "Quad.easeOut" });
+    if (!to) return;
+    // the landing is clear but the way there may clip a wall corner: like her leap, check every
+    // sample, and stop where the first one would put it in a wall
+    const pos = { x: z.x, y: z.y };
+    let blocked = false;
+    s.tweens.add({
+      targets: pos,
+      ...to,
+      duration: 260,
+      ease: "Quad.easeOut",
+      onUpdate: () => {
+        if (blocked) return;
+        if (!ok(pos)) blocked = true;
+        else {
+          z.x = pos.x;
+          z.y = pos.y;
+        }
+      },
+    });
   }
 
   private draw(z: Zombie, now: number): void {
