@@ -2267,13 +2267,15 @@ export class GameScene extends Phaser.Scene {
 
     // Crossfade background music to the danger theme while a snatcher is
     // out and within earshot — since 0.5.0 the park is too big for
-    // "anywhere". setDanger() is idempotent, so calling it every frame is cheap.
+    // "anywhere" — or zombies are after her. setDanger() is idempotent, so
+    // calling it every frame is cheap.
     this.audio.setDanger(
-      this.snatcher.activeSnatchers.some(
-        (s) =>
-          s.visible &&
-          Phaser.Math.Distance.Between(s.x, s.y, this.player.x, this.player.y) <= GP.SNATCHER_DANGER_MUSIC_DIST,
-      ),
+      this.zombies.chasing ||
+        this.snatcher.activeSnatchers.some(
+          (s) =>
+            s.visible &&
+            Phaser.Math.Distance.Between(s.x, s.y, this.player.x, this.player.y) <= GP.SNATCHER_DANGER_MUSIC_DIST,
+        ),
     );
 
     // NPC cats flee from snatchers.

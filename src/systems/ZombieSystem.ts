@@ -21,6 +21,7 @@ export const ZOMBIE_GRAB_PX = 20;
 const GRAB_PAUSE_MS = 2500;
 /** She leaps this far from a lunge. */
 const LEAP_PX = 72;
+const LEAP_MS = 320;
 /** A car body this close scares them back; touching (and moving) it knocks them flat. */
 export const ZOMBIE_CAR_FRIGHT_PX = 40;
 const BODY_PX = 8;
@@ -33,10 +34,15 @@ const DOWN_MS = 6000;
 export const ZOMBIE_WEST_LIMIT_PX = -80;
 /** After turning back they ignore her this long. */
 const CALM_MS = 8000;
-/** Idle shuffles stay this near home. */
-const HOME_RADIUS = 120;
+/** Idle shuffles stay this near home (each zombie's own spot in its swarm). */
+const HOME_RADIUS = 48;
+/** A swarm of 5 or 6 stands around its zombie_home within this radius, at least SPACING_PX apart. */
+const SWARM_RADIUS = 64;
+const SPACING_PX = 20;
 /** Breadcrumb spacing on a chase; they retrace it home. */
 const CRUMB_PX = 24;
+/** Near enough a crumb to move on: mates on the same trail shoulder each other up to half SPACING_PX off it. */
+const CRUMB_REACH_PX = 12;
 
 // light clothes take the green tint best
 const LOOKS: readonly PixelLookId[] = ["officeMan", "officeWoman", "barongMan"];
@@ -50,6 +56,7 @@ type Mode = "idle" | "wander" | "chase" | "home" | "down";
 interface Zombie extends Pt {
   sprite: Phaser.GameObjects.Sprite;
   look: PixelLookId;
+  swarm: Zombie[];
   home: Pt;
   mode: Mode;
   /** Wander goal. */
@@ -64,9 +71,9 @@ interface Zombie extends Pt {
 }
 
 /**
- * Easter egg: a few zombies loiter on the city side of Makati Ave against the
- * map's east edge. Mostly still until they spot Mamma Cat, then they shamble
- * after her and lunge, scaring her off. They never get past the avenue's
+ * Easter egg: swarms of 5 or 6 zombies loiter on the city side of Makati Ave
+ * against the map's east edge. Mostly still until one spots Mamma Cat, which
+ * wakes its whole swarm; they shamble after her and lunge, scaring her off. They never get past the avenue's
  * median: a car close by (or the median itself) turns them back, and they
  * retrace their steps home. Drivers don't stop for them, so a slow one gets
  * knocked flat; it gets up again.
@@ -75,25 +82,38 @@ export class ZombieSystem {
   private readonly zombies: Zombie[] = [];
   private readonly makati: ReadonlyArray<Pt> = [];
   private narrated = false;
+  /** One leap at a time, however many of a swarm lunge at once. */
+  private leapUntil = 0;
 
   constructor(private readonly scene: GameScene) {
     const lane = placeNamed(scene.places, "traffic_makati_northbound")?.polyline;
     if (!lane) return;
     this.makati = lane;
-    placesOfType(scene.places, "zombie_home").forEach((h, i) => {
-      const look = LOOKS[i % LOOKS.length]!;
-      const sprite = scene.add
-        .sprite(h.x, h.y, pixelCrowdTexture(look), STAND.down)
-        .setOrigin(0.5, 59 / 68)
-        .setScale(0.7)
-        .setTint(TINTS[i % TINTS.length]!)
-        .setDepth(3);
-      this.zombies.push({
-        sprite, look, x: h.x, y: h.y, home: { x: h.x, y: h.y }, mode: "idle", goal: null,
-        until: scene.time.now + 2000 + Math.random() * 10000, calmUntil: 0, trail: [],
-        facing: "down", moving: false, sway: Math.random() * Math.PI * 2,
-      });
+    placesOfType(scene.places, "zombie_home").forEach((h, n) => {
+      const swarm: Zombie[] = [];
+      for (const spot of this.swarmSpots(h, 5 + (n % 2))) {
+        const i = this.zombies.length;
+        const look = LOOKS[i % LOOKS.length]!;
+        const sprite = scene.add
+          .sprite(spot.x, spot.y, pixelCrowdTexture(look), STAND.down)
+          .setOrigin(0.5, 59 / 68)
+          .setScale(0.7)
+          .setTint(TINTS[i % TINTS.length]!)
+          .setDepth(3);
+        const z: Zombie = {
+          sprite, look, swarm, ...spot, home: spot, mode: "idle", goal: null,
+          until: scene.time.now + 2000 + Math.random() * 10000, calmUntil: 0, trail: [],
+          facing: "down", moving: false, sway: Math.random() * Math.PI * 2,
+        };
+        swarm.push(z);
+        this.zombies.push(z);
+      }
     });
+  }
+
+  /** True while any zombie is after her (the danger music plays). */
+  get chasing(): boolean {
+    return this.zombies.some((z) => z.mode === "chase");
   }
 
   /** Every zombie's position and mode, for tests and live checks. */
@@ -115,6 +135,32 @@ export class ZombieSystem {
     this.zombies.length = 0;
   }
 
+  /** `count` open spots round a swarm's home, apart from each other; crowded ones fall back to the home itself. */
+  private swarmSpots(home: Pt, count: number): Pt[] {
+    const spots: Pt[] = [];
+    for (let tries = 0; spots.length < count && tries < 200; tries++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = Math.sqrt(Math.random()) * SWARM_RADIUS;
+      const p = { x: home.x + Math.cos(a) * r, y: home.y + Math.sin(a) * r };
+      if (this.walkable(p.x, p.y) && !this.isOnRoad(p) && spots.every((q) => Math.hypot(q.x - p.x, q.y - p.y) >= SPACING_PX))
+        spots.push(p);
+    }
+    while (spots.length < count) spots.push({ x: home.x, y: home.y });
+    return spots;
+  }
+
+  /** One of them has seen her: the whole swarm comes. */
+  private wake(z: Zombie, now: number): void {
+    for (const m of z.swarm) {
+      if (m.mode === "chase" || m.mode === "down" || now < m.calmUntil) continue;
+      m.mode = "chase";
+      m.until = now;
+      m.goal = null;
+      if (m.trail.length === 0) m.trail.push({ x: m.x, y: m.y });
+      this.scene.emotes.show(this.scene, m.sprite, "hostile");
+    }
+  }
+
   private think(z: Zombie, now: number, dt: number): void {
     z.moving = false;
     if (z.mode === "down") {
@@ -125,7 +171,8 @@ export class ZombieSystem {
       return;
     }
 
-    const car = this.scene.traffic.carNear(z, ZOMBIE_CAR_FRIGHT_PX);
+    // only those on the move can reach a road
+    const car = z.mode === "chase" || z.mode === "home" ? this.scene.traffic.carNear(z, ZOMBIE_CAR_FRIGHT_PX) : null;
     if (car && car.gap <= BODY_PX && car.speed >= KNOCKDOWN_MIN_SPEED) return this.knockDown(z, car, now);
     if (car && z.mode === "chase") {
       this.scene.emotes.show(this.scene, z.sprite, "alert");
@@ -135,10 +182,7 @@ export class ZombieSystem {
     const p = this.scene.player;
     const dist = Math.hypot(p.x - z.x, p.y - z.y);
     if (z.mode !== "chase" && now >= z.calmUntil && this.notices(z, dist)) {
-      z.mode = "chase";
-      z.until = now;
-      if (z.trail.length === 0) z.trail.push({ x: z.x, y: z.y });
-      this.scene.emotes.show(this.scene, z.sprite, "hostile");
+      this.wake(z, now);
       this.groan(z, GROANS[Math.floor(Math.random() * GROANS.length)]!);
       if (!this.narrated) {
         this.narrated = true;
@@ -167,11 +211,16 @@ export class ZombieSystem {
         return;
       }
       case "home": {
+        // crumbs out on the asphalt only lead back into traffic: make straight for the pavement instead
+        while (z.trail.length > 0 && this.isOnRoad(z.trail[z.trail.length - 1]!)) z.trail.pop();
         const crumb = z.trail[z.trail.length - 1];
         if (!crumb) {
           z.mode = "idle";
           z.until = now + 4000 + Math.random() * 8000;
-        } else if (this.step(z, crumb, HOME_SPEED, dt) === "arrived") z.trail.pop();
+        } else if (Math.hypot(crumb.x - z.x, crumb.y - z.y) < CRUMB_REACH_PX || this.step(z, crumb, HOME_SPEED, dt) === "arrived") {
+          z.trail.pop();
+          z.moving = true; // still on its way: no stop-start at every crumb
+        }
         return;
       }
       case "wander": {
@@ -214,9 +263,22 @@ export class ZombieSystem {
     const s = Math.min(d, speed * dt);
     const nx = z.x + (dx / d) * s;
     const ny = z.y + (dy / d) * s;
-    if (offsetFromPolyline(this.makati, { x: nx, y: ny }) < ZOMBIE_WEST_LIMIT_PX) return "balked";
+    const off = offsetFromPolyline(this.makati, { x: nx, y: ny });
+    // past the limit only ever eastward, so nothing knocked over it is stranded there
+    if (off < ZOMBIE_WEST_LIMIT_PX && off < offsetFromPolyline(this.makati, z)) return "balked";
     if (this.walkable(nx, z.y)) z.x = nx;
     if (this.walkable(z.x, ny)) z.y = ny;
+    // shoulder clear of swarm-mates rather than stacking on one spot
+    for (const m of z.swarm) {
+      const gap = Math.hypot(z.x - m.x, z.y - m.y);
+      if (m === z || m.mode === "down" || gap >= SPACING_PX || gap === 0) continue;
+      const px = z.x + ((z.x - m.x) / gap) * (SPACING_PX - gap) * 0.5;
+      const py = z.y + ((z.y - m.y) / gap) * (SPACING_PX - gap) * 0.5;
+      if (this.walkable(px, py) && offsetFromPolyline(this.makati, { x: px, y: py }) >= ZOMBIE_WEST_LIMIT_PX) {
+        z.x = px;
+        z.y = py;
+      }
+    }
     z.facing = Math.abs(dx) > Math.abs(dy) ? (dx < 0 ? "left" : "right") : dy < 0 ? "up" : "down";
     z.moving = true;
     return "moving";
@@ -237,6 +299,8 @@ export class ZombieSystem {
     s.emotes.show(s, p, "danger");
     s.audio?.playCatGrowl();
     p.startle();
+    if (now < this.leapUntil) return;
+    this.leapUntil = now + LEAP_MS;
     const d = Math.hypot(p.x - z.x, p.y - z.y) || 1;
     const ux = (p.x - z.x) / d;
     const uy = (p.y - z.y) / d;
@@ -245,7 +309,7 @@ export class ZombieSystem {
     s.tweens.add({
       targets: leap,
       t: LEAP_PX,
-      duration: 320,
+      duration: LEAP_MS,
       ease: "Quad.easeOut",
       // per-frame deltas, like MammaCat.startle, so her own movement carries on
       onUpdate: () => {
@@ -271,13 +335,12 @@ export class ZombieSystem {
     const side = (z.x - car.x) * -Math.sin(car.angle) + (z.y - car.y) * Math.cos(car.angle) >= 0 ? 1 : -1;
     z.sprite.anims.stop();
     z.sprite.setFrame(STAND[z.facing]).setRotation(side * Math.PI * 0.5);
-    s.tweens.add({
-      targets: z,
-      x: z.x + Math.cos(car.angle) * 40 - Math.sin(car.angle) * side * 12,
-      y: z.y + Math.sin(car.angle) * 40 + Math.cos(car.angle) * side * 12,
-      duration: 260,
-      ease: "Quad.easeOut",
-    });
+    // thrown along the car's way and a little aside; never over the median, into a wall or off the map
+    const ok = (p: Pt) => this.walkable(p.x, p.y) && offsetFromPolyline(this.makati, p) >= ZOMBIE_WEST_LIMIT_PX;
+    const along = { x: z.x + Math.cos(car.angle) * 40, y: z.y + Math.sin(car.angle) * 40 };
+    const aside = { x: along.x - Math.sin(car.angle) * side * 12, y: along.y + Math.cos(car.angle) * side * 12 };
+    const to = ok(aside) ? aside : ok(along) ? along : null;
+    if (to) s.tweens.add({ targets: z, ...to, duration: 260, ease: "Quad.easeOut" });
   }
 
   private draw(z: Zombie, now: number): void {

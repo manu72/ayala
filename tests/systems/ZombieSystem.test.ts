@@ -6,6 +6,8 @@ import type { GameScene } from "../../src/scenes/GameScene";
 const KERB_EAST = 1080;
 const MEDIAN = 1000 + ZOMBIE_WEST_LIMIT_PX;
 const HOME = { x: 1400, y: 1000 };
+const OTHER_HOME = { x: 1400, y: 2600 };
+type Moved = { x: number; y: number; mode: string };
 
 function world() {
   const sprite = (x: number, y: number) => {
@@ -14,13 +16,17 @@ function world() {
       Object.assign(s, { [m]: () => s });
     return s;
   };
-  const tweens = {
-    add: (cfg: Record<string, unknown> & { targets: Record<string, unknown>; onUpdate?: () => void; onComplete?: () => void }) => {
+  type Tween = Record<string, unknown> & { targets: Record<string, unknown>; onUpdate?: () => void; onComplete?: () => void };
+  /** Tweens play out after the frame that starts them (here: all at once, at the end of the next tick). */
+  const pending: Tween[] = [];
+  const tweens = { add: (cfg: Tween) => pending.push(cfg) };
+  const flush = () => {
+    for (const cfg of pending.splice(0)) {
       for (const [k, v] of Object.entries(cfg))
         if (!["targets", "duration", "ease", "onUpdate", "onComplete"].includes(k)) cfg.targets[k] = v;
       cfg.onUpdate?.();
       cfg.onComplete?.();
-    },
+    }
   };
   const tile = (x: number) => (x < 0 || x > 3000 ? null : x >= 920 && x <= 1080 ? { collides: true, properties: { road: true } } : { collides: false, properties: {} });
   const car = { near: null as null | { x: number; y: number; angle: number; speed: number; gap: number } };
@@ -29,6 +35,7 @@ function world() {
     places: [
       { name: "traffic_makati_northbound", type: "traffic", x: 1000, y: 2000, props: {}, polyline: [{ x: 1000, y: 2000 }, { x: 1000, y: 0 }] },
       { name: "zombie_1", type: "zombie_home", ...HOME, props: {} },
+      { name: "zombie_2", type: "zombie_home", ...OTHER_HOME, props: {} },
     ],
     add: { sprite, text: (x: number, y: number) => sprite(x, y) },
     anims: { exists: () => true },
@@ -47,33 +54,64 @@ function world() {
   const tick = (ms = 100) => {
     scene.time.now += ms;
     zombies.update(ms);
+    flush();
   };
-  return { scene, player, car, z: () => zombies.all[0]!, tick };
+  const all = zombies.all as Moved[];
+  const swarm = all.slice(0, 5);
+  /** Only the first zombie of the swarm can see her; its mates stand well off, facing away. */
+  const loneLookout = () => swarm.slice(1).forEach((m, k) => Object.assign(m, { x: all[0]!.x + 200, y: all[0]!.y - 60 + k * 30 }));
+  return { scene, player, car, zombies, all, swarm, loneLookout, z: () => all[0]!, tick };
 }
 
 describe("ZombieSystem", () => {
+  it("stands swarms of 5 and 6 round their homes; one seeing her wakes its whole swarm (and the danger music), not the others", () => {
+    const w = world();
+    expect(w.all).toHaveLength(11);
+    for (const [members, home] of [[w.all.slice(0, 5), HOME], [w.all.slice(5), OTHER_HOME]] as const) {
+      for (const m of members) {
+        expect(Math.hypot(m.x - home.x, m.y - home.y)).toBeLessThanOrEqual(64);
+        for (const o of members) if (o !== m) expect(Math.hypot(m.x - o.x, m.y - o.y)).toBeGreaterThanOrEqual(20);
+      }
+    }
+    w.loneLookout();
+    w.player.x = w.z().x - 100;
+    w.player.y = w.z().y;
+    w.tick();
+    expect(w.swarm.map((m) => m.mode)).toEqual(Array(5).fill("chase"));
+    expect(w.all.slice(5).every((m) => m.mode !== "chase")).toBe(true);
+    expect(w.zombies.chasing).toBe(true);
+  });
+
   it("follows her out over the northbound lanes but never past the median, then shuffles home the way it came", () => {
     const w = world();
-    w.player.x = HOME.x - 100; // she wanders into view
+    const start = w.swarm.map((m) => ({ x: m.x, y: m.y }));
+    w.player.x = w.z().x - 100; // she wanders into view
+    w.player.y = w.z().y;
+    w.tick();
+    expect(w.zombies.chasing).toBe(true);
     let westmost = Infinity;
-    for (let i = 0; i < 400 && w.z().mode !== "home"; i++) {
-      w.player.x = Math.max(MEDIAN - 60, w.z().x - 100); // staying just ahead, back toward the park
+    for (let i = 0; i < 600 && w.swarm.some((m) => m.mode === "chase"); i++) {
+      w.player.x = Math.max(MEDIAN - 60, Math.min(...w.swarm.map((m) => m.x)) - 100); // staying just ahead, back toward the park
       w.tick();
-      westmost = Math.min(westmost, w.z().x);
+      westmost = Math.min(westmost, ...w.swarm.map((m) => m.x));
     }
-    expect(w.z().mode).toBe("home");
-    expect(westmost).toBeLessThan(KERB_EAST); // it did step onto the road...
+    expect(w.swarm.every((m) => m.mode === "home")).toBe(true);
+    expect(w.zombies.chasing).toBe(false);
+    expect(westmost).toBeLessThan(KERB_EAST); // they did step onto the road...
     expect(westmost).toBeGreaterThanOrEqual(MEDIAN); // ...but no further than the median
 
     w.player.x = 200; // safely back in the park
-    for (let i = 0; i < 600 && w.z().mode === "home"; i++) w.tick();
-    expect(w.z().mode).not.toBe("home");
-    expect(Math.hypot(w.z().x - HOME.x, w.z().y - HOME.y)).toBeLessThan(120);
+    for (let i = 0; i < 900 && w.swarm.some((m) => m.mode === "home"); i++) w.tick();
+    w.swarm.forEach((m, k) => {
+      expect(m.mode).not.toBe("home");
+      expect(Math.hypot(m.x - start[k]!.x, m.y - start[k]!.y)).toBeLessThan(48);
+    });
   });
 
   it("turns back when a car comes close, and a moving car that touches it knocks it flat; it gets up and goes home", () => {
     const w = world();
-    w.player.x = HOME.x - 60;
+    w.player.x = w.z().x - 60;
+    w.player.y = w.z().y;
     w.tick();
     expect(w.z().mode).toBe("chase");
     w.car.near = { x: 1040, y: 1000, angle: -Math.PI / 2, speed: 160, gap: 30 };
@@ -94,18 +132,40 @@ describe("ZombieSystem", () => {
 
   it("lunges once in reach: she hisses and leaps clear; a sleeping cat it ignores", () => {
     const asleep = world();
-    asleep.player.x = HOME.x - 15;
+    asleep.player.x = asleep.z().x - 15;
+    asleep.player.y = asleep.z().y;
     asleep.player.isResting = true;
     asleep.tick();
     expect(asleep.z().mode).not.toBe("chase");
     expect(asleep.player.startle).not.toHaveBeenCalled();
 
     const w = world();
-    w.player.x = HOME.x - 15;
+    w.loneLookout();
+    w.player.x = w.z().x - 15;
+    w.player.y = w.z().y;
+    Object.assign(w.swarm[1]!, { x: w.player.x, y: w.player.y + 15 }); // a mate in reach too: both lunge at once
+    const from = w.player.x;
     w.tick();
     expect(w.scene.emotes.show).toHaveBeenCalledWith(w.scene, w.player, "danger");
     expect(w.scene.audio.playCatGrowl).toHaveBeenCalled();
     expect(w.player.startle).toHaveBeenCalled();
-    expect(w.player.x).toBeCloseTo(HOME.x - 15 - 72); // leapt away from it, west
+    expect(w.player.x).toBeCloseTo(from - 72); // leapt away from the first, west; one leap, not one per mate
+    expect(w.player.y).toBeCloseTo(w.z().y);
+  });
+
+  it("is never knocked over the median (where it would be stranded), and walks off the road and home after", () => {
+    const w = world();
+    const z = w.z() as Moved & { trail: Array<{ x: number; y: number }> };
+    const start = { x: z.x, y: z.y };
+    // turned back right at the median, crumbs leading back over the lanes to where it set off
+    Object.assign(z, { x: MEDIAN + 1, mode: "home", trail: [{ ...start }, { x: KERB_EAST + 40, y: start.y }, { x: 1000, y: start.y }] });
+    w.car.near = { x: MEDIAN + 20, y: z.y, angle: -Math.PI / 2, speed: 160, gap: 0 }; // a northbound car in the median lane, east of it
+    w.tick();
+    expect(z.mode).toBe("down");
+    expect(z.x).toBeGreaterThanOrEqual(MEDIAN);
+    w.car.near = null;
+    for (let i = 0; i < 900 && z.mode !== "idle"; i++) w.tick();
+    expect(z.mode).toBe("idle");
+    expect(Math.hypot(z.x - start.x, z.y - start.y)).toBeLessThan(12);
   });
 });

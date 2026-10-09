@@ -199,7 +199,7 @@ If Mamma Cat can find a way up to the tower podium (maybe via a specific sequenc
 
 ### ✅ The City Across Makati Ave
 
-Six zombies (green-tinted office workers) loiter on the city side of Makati Ave against the map's east edge. They stand still until they spot Mamma Cat, then shamble after her and lunge, sending her leaping away. They follow her onto the road but never past the median: a close car scares them back, and one too slow gets knocked flat, then gets up and shuffles home.
+Six swarms of 5 or 6 zombies (green-tinted office workers) loiter on the city side of Makati Ave against the map's east edge. They stand still until one spots Mamma Cat; that wakes its whole swarm, the danger music starts, and they shamble after her and lunge, sending her leaping away. They follow her onto the road but never past the median: a close car scares them back, and one too slow gets knocked flat, then gets up and shuffles home.
 
 **Trigger:** Cross Makati Ave and explore the far east side.
 

@@ -625,6 +625,11 @@ describe("Mamma Cat on the road", () => {
     expect(hit).not.toBeNull();
     expect(Math.hypot(hit!.x - car.x, hit!.y - car.y)).toBeLessThan(1);
     expect(hit!.speed).toBeGreaterThanOrEqual(0);
+    // body, not centre: 5 px off its flank, or its bumper (eastbound lane, so lateral is y)
+    const half = { l: lengthOf(car) / 2, w: (WIDTH_BY_FRAME.get(car.frame) ?? Number.NaN) / 2 };
+    const besideFlank = traffic.carNear({ x: car.x, y: car.y + (car.y < 400 ? 1 : -1) * (half.w + 5) }, 10);
+    expect(besideFlank?.gap).toBeCloseTo(5, 0);
+    expect(traffic.carNear({ x: car.x + half.l + 5, y: car.y }, 4)).toBeNull();
     expect(traffic.carNear({ x: 2000, y: 400 }, 60)).toBeNull(); // 175 px from the nearest lane
     traffic.setVisible(false);
     expect(traffic.carNear({ x: car.x, y: car.y }, 0)).toBeNull();
