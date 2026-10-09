@@ -56,7 +56,7 @@ import { AudioSystem } from "../systems/AudioSystem";
 import { CamilleEncounterSystem } from "../systems/CamilleEncounterSystem";
 import { hasLineOfSightTiles } from "../utils/lineOfSight";
 import { exposeFacesTowardRoads, isRoadTile } from "../utils/roadTiles";
-import { createNavigationGrid, routeHumanPath, type NavigationGrid } from "../utils/humanRoutePath";
+import { createNavigationGrid, routeHumanPath, sameRegion, walkableRegions, type NavigationGrid } from "../utils/humanRoutePath";
 import {
   closestOnPolyline,
   placeNamed,
@@ -163,7 +163,10 @@ export class GameScene extends Phaser.Scene {
   mapRevision = "";
   /** Clearance nav grid, built once per map load (tile collision never changes at runtime). */
   private humanNavGrid: NavigationGrid | null = null;
-  private overheadLayer!: Phaser.Tilemaps.TilemapLayer | null;
+  /** The nav grid's connected regions (built with it, on first need). */
+  private humanNavRegions: Int32Array | null = null;
+  /** Tree canopies and roofs, drawn over everyone (cover for a frightened cat, shade for Mamma Cat). */
+  overheadLayer!: Phaser.Tilemaps.TilemapLayer | null;
   /** Shared with {@link CamilleEncounterSystem} for spawn-point lookup. */
   map!: Phaser.Tilemaps.Tilemap;
   /** Shared with {@link CamilleEncounterSystem} for AI dialogue context. */
@@ -437,6 +440,7 @@ export class GameScene extends Phaser.Scene {
     this.parkExits = placesOfType(this.places, "exit").map(({ x, y }) => ({ x, y }));
     this.mapRevision = String(tiledProps(this.map.properties).mapRevision ?? "");
     this.humanNavGrid = null;
+    this.humanNavRegions = null;
     const isDrivable = (x: number, y: number) => this.groundLayer?.getTileAtWorldXY(x, y)?.collides ?? true;
     this.traffic = new TrafficSystem(this, this.places, {
       bounds: { width: this.map.widthInPixels, height: this.map.heightInPixels },
@@ -545,6 +549,7 @@ export class GameScene extends Phaser.Scene {
       StoryKeys.COLONY_COUNT,
       StoryKeys.COLONY_NAMED,
       StoryKeys.COLONY_LOST,
+      StoryKeys.COLONY_NEWCOMERS,
     ]) {
       this.registry.remove(key);
     }
@@ -2005,21 +2010,33 @@ export class GameScene extends Phaser.Scene {
   private startWaterTrips(): void {
     const spots = drinkSpots(this.map.width, this.map.height, TILE_SIZE, this.isWaterCell, (cx, cy) => !this.isExplorationCellBlocked(cx, cy));
     this.waterTrips = new CatWaterTrips<NPCCat>({
-      // the street colony across Ayala Ave has its own water bowl (and no road-free way to the park's)
-      cats: () => this.npcs.map(({ cat }) => cat).filter((cat) => !this.colony.isStreetCat(cat)),
+      cats: () => this.npcs.map(({ cat }) => cat).filter((cat) => this.colony.goesForWater(cat)),
       spots,
-      route: (from, to) => {
-        const { path } = routeHumanPath([from, to], this.createHumanNavigationGrid());
-        const end = path[path.length - 1];
-        // The nav grid keeps a tile clear of obstacles, so the last few steps to the water's edge are walked straight.
-        const blockedAt = (x: number, y: number) => this.isExplorationCellBlocked(Math.floor(x / TILE_SIZE), Math.floor(y / TILE_SIZE));
-        const hop = end && Math.hypot(end.x - to.x, end.y - to.y) <= LAST_HOP_TILES * TILE_SIZE && hasLineOfSightTiles(end.x, end.y, to.x, to.y, TILE_SIZE, blockedAt);
-        return hop ? [...path, to] : null;
-      },
+      route: (from, to) => this.catRoute(from, to),
       player: () => this.player,
       storyMoment: () => this.cinematicActive || this.playerInputFrozen || this.dialogue.isActive,
       onDrink: (cat) => this.emotes.show(this, cat, "drink"),
     });
+  }
+
+  /** A cat's way from `from` to `to` over the nav grid (to the water's edge, into a bush), or null if it can't get there. */
+  catRoute(from: { x: number; y: number }, to: { x: number; y: number }): Array<{ x: number; y: number }> | null {
+    const grid = this.createHumanNavigationGrid();
+    // across a road, say: no way there, and a search for one would scour the whole region
+    this.humanNavRegions ??= walkableRegions(grid);
+    if (!sameRegion(grid, this.humanNavRegions, from, to)) return null;
+    const { path } = routeHumanPath([from, to], grid);
+    const end = path[path.length - 1];
+    // The nav grid keeps a tile clear of obstacles, so the last few steps (to the water's edge) are walked straight.
+    const blockedAt = (x: number, y: number) => this.isExplorationCellBlocked(Math.floor(x / TILE_SIZE), Math.floor(y / TILE_SIZE));
+    const hop = end && Math.hypot(end.x - to.x, end.y - to.y) <= LAST_HOP_TILES * TILE_SIZE && hasLineOfSightTiles(end.x, end.y, to.x, to.y, TILE_SIZE, blockedAt);
+    return hop ? [...path, to] : null;
+  }
+
+  /** Someone (named humans, the crowd, guards) within `r` of (x, y). */
+  personNear(x: number, y: number, r: number): { x: number; y: number } | null {
+    const near = (o: { x: number; y: number; active: boolean; visible: boolean }) => o.active && o.visible && Math.hypot(o.x - x, o.y - y) <= r;
+    return this.humans.humans.find(near) ?? this.crowd?.someoneNear(x, y, r) ?? (this.guard && near(this.guard) ? this.guard : null);
   }
 
   private foodSourceKey(source: { type: SourceType; x: number; y: number }): string {
@@ -2146,6 +2163,7 @@ export class GameScene extends Phaser.Scene {
         this.narrationShown.delete(cat.npcName);
       }
     }
+    this.colony.newcomers.update(delta);
   }
 
   private showBodyLanguage(cat: NPCCat, _dist: number, hud: HUDScene | undefined): void {
@@ -2181,6 +2199,7 @@ export class GameScene extends Phaser.Scene {
     if (cat.state === "sleeping") {
       return "This cat is curled up tight, breathing softly.";
     }
+    if (this.colony.newcomers.has(cat)) return "This one isn't from here. Its eyes are huge, and it flinches at every sound.";
     switch (effectiveDisposition) {
       case "friendly":
         return "This cat's tail is up. A good sign.";

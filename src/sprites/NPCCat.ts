@@ -86,7 +86,8 @@ export class NPCCat extends BaseNPC {
 
   /** Animation key prefix (may differ from spriteKey for shared assets). */
   private readonly animPrefix: string;
-  private readonly walkSpeed: number;
+  private walkSpeed: number;
+  private habits: NPCCatConfig["behaviour"];
   private readonly hyperactive: boolean;
 
   /** When true, AI is frozen and the cat faces a dialogue partner. */
@@ -98,6 +99,8 @@ export class NPCCat extends BaseNPC {
   /** A route being walked (world px waypoints), e.g. to water and back; null when roaming freely. */
   private route: Array<{ x: number; y: number }> | null = null;
   private routeIndex = 0;
+  /** Running the route (bolting for cover), not walking it. */
+  private routeRun = false;
   private routeDone: (() => void) | null = null;
   private routeBest = Infinity;
   private routeStallMs = 0;
@@ -113,6 +116,7 @@ export class NPCCat extends BaseNPC {
     this.homeRadius = config.homeZone?.radius ?? 150;
     this.animPrefix = config.animPrefix ?? config.spriteKey;
     this.walkSpeed = config.walkSpeed ?? WALK_SPEED;
+    this.habits = config.behaviour;
     this.hyperactive = config.hyperactive ?? false;
 
     if (config.scale && config.scale !== 1) {
@@ -151,13 +155,14 @@ export class NPCCat extends BaseNPC {
   }
 
   /**
-   * Walk `route` (world px waypoints, e.g. from the nav grid), then call `done`.
+   * Walk `route` (world px waypoints, e.g. from the nav grid), or run it, then call `done`.
    * Fleeing, an alert or dialogue cancels it without calling `done`.
    */
-  followRoute(route: ReadonlyArray<{ x: number; y: number }>, done: () => void): void {
+  followRoute(route: ReadonlyArray<{ x: number; y: number }>, done: () => void, run = false): void {
     this.cancelErrand();
     this.route = route.map(({ x, y }) => ({ x, y }));
     this.routeIndex = 0;
+    this.routeRun = run;
     this.routeDone = done;
     this.routeBest = Infinity;
     this.routeStallMs = 0;
@@ -177,8 +182,22 @@ export class NPCCat extends BaseNPC {
     this.anims.play(`${this.animPrefix}-sit-${this.lastDirection}`, true);
   }
 
+  /** Where this cat stays around (a frightened newcomer's bush, then wherever it settles). */
+  setHome(x: number, y: number, radius: number): void {
+    this.homeX = x;
+    this.homeY = y;
+    this.homeRadius = radius;
+  }
+
+  /** Its gait and what it does when idle (a frightened newcomer creeps and never naps); no arguments restores its own. */
+  setManner(walkSpeed = this.config.walkSpeed ?? WALK_SPEED, behaviour = this.config.behaviour): void {
+    this.walkSpeed = walkSpeed;
+    this.habits = behaviour;
+  }
+
   private cancelErrand(): void {
     this.route = null;
+    this.routeRun = false;
     this.routeDone = null;
     this.drinkDone = null;
   }
@@ -208,7 +227,8 @@ export class NPCCat extends BaseNPC {
       return;
     }
     this.walkDir.set(dx / d, dy / d);
-    (this.body as Phaser.Physics.Arcade.Body).setVelocity(this.walkDir.x * this.walkSpeed, this.walkDir.y * this.walkSpeed);
+    const speed = this.routeRun ? FLEE_SPEED : this.walkSpeed;
+    (this.body as Phaser.Physics.Arcade.Body).setVelocity(this.walkDir.x * speed, this.walkDir.y * speed);
     this.playWalkAnim();
   }
 
@@ -253,15 +273,17 @@ export class NPCCat extends BaseNPC {
     this.enterState("idle");
   }
 
-  /** Trigger alert state (e.g. player got too close to a territorial cat). */
+  /** Trigger alert state (e.g. player got too close to a territorial cat). A cat already running (fleeing, or bolting for cover) doesn't stop to look. */
   triggerAlert(): void {
-    if (this.state === "fleeing") return;
+    if (this.state === "fleeing" || (this.route !== null && this.routeRun)) return;
     this.enterState("alert");
   }
 
   /** Trigger flee towards nearest shelter direction (away from threat). */
   triggerFlee(threatX: number, threatY: number): void {
     this.walkDir.set(this.x - threatX, this.y - threatY).normalize();
+    // right on top of it: any way out will do
+    if (this.walkDir.lengthSq() === 0) this.walkDir.setToPolar(Math.random() * Math.PI * 2);
     this.enterState("fleeing");
   }
 
@@ -371,7 +393,7 @@ export class NPCCat extends BaseNPC {
   }
 
   private transitionFromIdle(): void {
-    const weights = this.config.behaviour?.[this.currentPhase] ?? BEHAVIOUR_WEIGHTS[this.currentPhase];
+    const weights = this.habits?.[this.currentPhase] ?? BEHAVIOUR_WEIGHTS[this.currentPhase];
     const next = this.weightedPick(weights);
     this.enterState(next as CatState);
   }
@@ -405,7 +427,10 @@ export class NPCCat extends BaseNPC {
   private playWalkAnim(): void {
     this.lastDirection = this.directionFromVector(this.walkDir);
 
-    const animKey = this.state === "fleeing" ? `${this.animPrefix}-run` : `${this.animPrefix}-walk`;
+    const running = this.state === "fleeing" || (this.route !== null && this.routeRun);
+    const animKey = running ? `${this.animPrefix}-run` : `${this.animPrefix}-walk`;
+    // a slow creep steps slowly
+    this.anims.timeScale = running ? 1 : Math.min(1, this.walkSpeed / WALK_SPEED);
     // 4-direction sheets (PixelLab pets) face the way they walk
     const directional = `${animKey}-${this.lastDirection}`;
     this.anims.play(this.scene.anims.exists(directional) ? directional : animKey, true);

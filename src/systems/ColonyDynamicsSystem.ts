@@ -3,6 +3,7 @@ import type { GameScene } from "../scenes/GameScene";
 import type { HUDScene } from "../scenes/HUDScene";
 import { NPCCat, type NPCCatConfig } from "../sprites/NPCCat";
 import { ThreatIndicator } from "./ThreatIndicator";
+import { NewcomerCats } from "./NewcomerCats";
 import { StoryKeys } from "../registry/storyKeys";
 import {
   INITIAL_COLONY_TOTAL,
@@ -21,6 +22,7 @@ import {
   STREET_COLONY_BASE,
 } from "../utils/colonySpawn";
 import { placeNamed, placesOfType } from "../utils/mapPlaces";
+import { SETTLED } from "../utils/newcomerCat";
 import { inCarPath } from "../utils/kerbsideDropoff";
 
 const DUMPED_COMFORT_WINDOW_MS = 5_000;
@@ -60,9 +62,12 @@ export class ColonyDynamicsSystem {
   /** Simba and his rock: after a stroll he climbs back up. */
   private perch: { cat: NPCCat; at: { x: number; y: number } } | null = null;
   private streetColonyNarrated = false;
+  /** Dumped pets still finding their feet. */
+  readonly newcomers: NewcomerCats;
 
   constructor(scene: GameScene) {
     this.scene = scene;
+    this.newcomers = new NewcomerCats(scene);
   }
 
   get colonyCount(): number {
@@ -113,6 +118,7 @@ export class ColonyDynamicsSystem {
   onCatRemoved(cat?: NPCCat): void {
     this.colonyCountValue = decrementColonyTotal(this.colonyCountValue, NAMED_AND_MAMMA_COUNT);
     this.scene.registry.set(StoryKeys.COLONY_COUNT, this.colonyCountValue);
+    if (cat) this.newcomers.forget(cat);
     const index = cat ? this.backgroundIndex.get(cat) : undefined;
     if (index !== undefined) {
       this.lostIndices.add(index);
@@ -170,10 +176,14 @@ export class ColonyDynamicsSystem {
     const petsZone = zones.find((z) => z.name === "colony_west") ?? zones[0]!;
     let petsHome: { x: number; y: number } | null = null;
 
-    const count = computeBackgroundSpawnCount(this.colonyCountValue, NAMED_AND_MAMMA_COUNT, VISIBLE_BACKGROUND_CAP);
-    const indices = backgroundIndices(count, this.lostIndices);
+    // dumped pets Mamma Cat saw arrive come back where they live, always (over the cap); they are part of
+    // the colony's total, so the rest of the roster is drawn from what's left of it
+    const newcomers = this.newcomers.load();
+    const living = [...newcomers.keys()].filter((i) => !this.lostIndices.has(i)).length;
+    const count = computeBackgroundSpawnCount(this.colonyCountValue - living, NAMED_AND_MAMMA_COUNT, VISIBLE_BACKGROUND_CAP);
+    const indices = backgroundIndices(count, new Set([...this.lostIndices, ...newcomers.keys()]));
     // newcomers number on from the park roster, never into the street colony's block
-    this.nextIndex = Math.max(-1, ...indices, ...[...this.lostIndices].filter((i) => i < STREET_COLONY_BASE)) + 1;
+    this.nextIndex = Math.max(-1, ...indices, ...newcomers.keys(), ...[...this.lostIndices].filter((i) => i < STREET_COLONY_BASE)) + 1;
     indices.forEach((index, i) => {
       if (index <= 1) {
         const near = petsHome ? { cx: petsHome.x, cy: petsHome.y, radius: 60 } : { cx: petsZone.cx, cy: petsZone.cy, radius: 120 };
@@ -188,6 +198,15 @@ export class ColonyDynamicsSystem {
       const homeRadius = 80 + Math.random() * 80;
       this.addColonyCat(index, x, y, { cx: x, cy: y, radius: homeRadius }, disp);
     });
+    const tile = this.scene.map.tileWidth;
+    for (const [index, rec] of newcomers) {
+      if (this.lostIndices.has(index)) continue;
+      // right where it lives (a hider's cover is a precise spot); somewhere near if the map has changed under it
+      const there = this.scene.territory.visitCell(Math.floor(rec.x / tile), Math.floor(rec.y / tile), this.scene.map.width) !== null;
+      const { x, y } = there ? rec : this.pickReachablePointInZone({ cx: rec.x, cy: rec.y, radius: 48 });
+      const cat = this.addColonyCat(index, x, y, { cx: x, cy: y, radius: 100 }, "wary");
+      if (rec.comfort < SETTLED) this.newcomers.track(cat, index, rec, true);
+    }
   }
 
   /**
@@ -230,6 +249,14 @@ export class ColonyDynamicsSystem {
       const house = houses[(k - 1) % houses.length]!;
       this.addColonyCat(index, house.x, house.y + 8, home, "friendly").setTint(look.tint);
     });
+  }
+
+  /**
+   * Off to the park's water now and then: not the street colony across Ayala Ave (its own water bowl, and
+   * no road-free way to the park's), nor a frightened newcomer (it stays put, low or hidden).
+   */
+  goesForWater(cat: NPCCat): boolean {
+    return !this.isStreetCat(cat) && !this.newcomers.has(cat);
   }
 
   /** One of the street colony across Ayala Ave (they have their own bowls: no trips to the park's water). */
@@ -324,14 +351,17 @@ export class ColonyDynamicsSystem {
 
   /**
    * Best-effort comfort credit: if the player engages dialogue with a cat
-   * that was dumped this session while the comfort window is still open,
-   * award the scoring bonus once and close the window.
+   * that was dumped this session while the comfort window is still open (or,
+   * once she has seen it arrive, while it is still a frightened newcomer: it
+   * runs and hides, so she may have to find it first), award the scoring bonus
+   * once and close the window.
    */
   tryCreditDumpedPetComfort(cat: NPCCat): void {
     const eventId = this.dumpedCatEventIds.get(cat);
     if (!eventId) return;
-    const deadline = this.dumpedComfortWindowUntil[eventId] ?? 0;
-    if (this.scene.time.now > deadline) return;
+    const deadline = this.dumpedComfortWindowUntil[eventId];
+    if (deadline === undefined) return;
+    if (this.scene.time.now > deadline && !this.newcomers.has(cat)) return;
     this.scene.scoring.recordDumpedPetComforted(eventId);
     delete this.dumpedComfortWindowUntil[eventId];
   }
@@ -381,6 +411,9 @@ export class ColonyDynamicsSystem {
           if (dumpedCat) {
             dumpedCat.setAlpha(0.9);
             this.dumpedCatEventIds.set(dumpedCat, eventNum);
+            const index = this.backgroundIndex.get(dumpedCat);
+            const rec = { comfort: 0, since: this.scene.dayNight.dayCount, x: dropAt.x, y: dropAt.y };
+            if (index !== undefined) this.newcomers.track(dumpedCat, index, rec, false);
           }
 
           this.scene.time.delayedCall(500, () => {
@@ -460,6 +493,7 @@ export class ColonyDynamicsSystem {
       this.scene.hasLineOfSight(this.scene.player.x, this.scene.player.y, source.x, source.y);
     if (!witnessed) return;
 
+    this.newcomers.keep(source);
     this.scene.registry.set(StoryKeys.DUMPING_EVENTS_SEEN, eventNum);
     const hud = this.scene.scene.get("HUDScene") as HUDScene | undefined;
     this.colonyCountValue++;

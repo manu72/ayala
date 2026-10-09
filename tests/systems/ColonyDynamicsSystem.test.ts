@@ -29,6 +29,11 @@ vi.mock("../../src/sprites/NPCCat", () => ({
     followRoute(route: unknown) {
       this.routes.push(route);
     }
+    setManner() {}
+    setHome() {}
+    setAlpha() {
+      return this;
+    }
   },
 }));
 vi.mock("../../src/systems/ThreatIndicator", () => ({
@@ -45,6 +50,7 @@ import type { GameScene } from "../../src/scenes/GameScene";
 import type { NPCCat } from "../../src/sprites/NPCCat";
 import { StoryKeys } from "../../src/registry/storyKeys";
 import { colonyCatName } from "../../src/utils/colonySpawn";
+import { NAMED_AND_MAMMA_COUNT } from "../../src/config/gameplayConstants";
 
 type Check = () => void;
 
@@ -110,7 +116,7 @@ function rosterScene(registry: Map<string, unknown>) {
     player: { x: 0, y: 0 },
     narrateIfPerceivable: () => undefined,
     territory: { visitCell: () => 0 },
-    map: { tileWidth: 32, width: 290 },
+    map: { tileWidth: 32, width: 290, getTileset: () => null },
     physics: { add: { collider: () => undefined } },
     groundLayer: null,
     objectsLayer: null,
@@ -178,6 +184,7 @@ describe("ColonyDynamicsSystem — the street colony across Ayala Ave", () => {
     expect(simba!.behaviour).toMatchObject({ day: { walking: 0 } }); // he doesn't leave his rock in the sun
     expect(street.every((e) => (e.cat as unknown as { disposition: string }).disposition === "friendly")).toBe(true);
     expect(street.every((e) => colony.isStreetCat(e.cat))).toBe(true);
+    expect(street.some((e) => colony.goesForWater(e.cat))).toBe(false); // their own bowl, and roads between
     expect(colony.isStreetCat(first.npcs[2]!.cat)).toBe(false);
     expect(colony.learnName(simba!)).toEqual({ name: "Simba", isNew: true });
 
@@ -197,5 +204,93 @@ describe("ColonyDynamicsSystem — the street colony across Ayala Ave", () => {
     expect(second.npcs.find((e) => e.cat.npcName === "Colony Cat 1001")!.indicator).toEqual({ name: "Simba", known: true });
     const dumped = (again as unknown as { addBackgroundCat: (x: number, y: number) => NPCCat }).addBackgroundCat(1, 1);
     expect(dumped.npcName).toBe("Colony Cat 25");
+  });
+});
+
+describe("ColonyDynamicsSystem — dumped pets Mamma Cat saw arrive", () => {
+  it("come back next session where they live, over the usual roster, still frightened until settled; newcomers number on past them", () => {
+    const registry = new Map<string, unknown>([
+      [StoryKeys.COLONY_NEWCOMERS, { 24: { comfort: 40, since: 2, x: 3000, y: 3100 }, 25: { comfort: 100, since: 1, x: 2000, y: 2100 } }],
+    ]);
+    const { scene, npcs } = rosterScene(registry);
+    const colony = new ColonyDynamicsSystem(scene);
+    colony.spawnInitialBackgroundCats();
+    expect(npcs.slice(0, 24).map((e) => e.cat.npcName)).toEqual(Array.from({ length: 24 }, (_, i) => `Colony Cat ${i + 1}`));
+    const [scared, settled] = npcs.slice(24).map((e) => e.cat);
+    expect(scared!.npcName).toBe("Colony Cat 25");
+    expect({ x: scared!.x, y: scared!.y }).toEqual({ x: 3000, y: 3100 }); // right where it lives
+    expect(colony.newcomers.has(scared!)).toBe(true);
+    expect(settled!.npcName).toBe("Colony Cat 26");
+    expect(colony.newcomers.has(settled!)).toBe(false);
+    // the frightened one stays put; settled, it goes for water like the rest
+    expect([colony.goesForWater(scared!), colony.goesForWater(settled!), colony.goesForWater(npcs[5]!.cat)]).toEqual([false, true, true]);
+    const dumped = (colony as unknown as { addBackgroundCat: (x: number, y: number) => NPCCat }).addBackgroundCat(1, 1);
+    expect(dumped.npcName).toBe("Colony Cat 27");
+
+    colony.onCatRemoved(scared); // snatched: gone for good
+    expect(colony.newcomers.has(scared!)).toBe(false);
+    expect(Object.keys(registry.get(StoryKeys.COLONY_NEWCOMERS) as object)).toEqual(["25"]);
+  });
+});
+
+describe("ColonyDynamicsSystem — comforting a dumped pet", () => {
+  it("counts a greeting right after it arrives, or later while it is still frightened (it ran and hid), once; never for one she didn't see arrive", () => {
+    const { scene } = rosterScene(new Map());
+    const record = vi.fn();
+    Object.assign(scene, { scoring: { recordDumpedPetComforted: record }, time: { now: 10_000 } });
+    const colony = new ColonyDynamicsSystem(scene);
+    const internals = colony as unknown as { dumpedCatEventIds: WeakMap<object, number>; dumpedComfortWindowUntil: Record<number, number> };
+    const [scared, calm, unseen] = [{}, {}, {}] as NPCCat[];
+    [scared, calm, unseen].forEach((c, i) => internals.dumpedCatEventIds.set(c!, i + 1));
+    internals.dumpedComfortWindowUntil = { 1: 5_000, 2: 5_000 }; // both windows closed; event 3 was never witnessed
+    vi.spyOn(colony.newcomers, "has").mockImplementation((c) => c === scared || c === unseen);
+    for (const c of [scared, calm, unseen, scared]) colony.tryCreditDumpedPetComfort(c!);
+    expect(record.mock.calls).toEqual([[1]]);
+  });
+});
+
+describe("ColonyDynamicsSystem — dumped pets in the colony's numbers", () => {
+  const newcomers = { 24: { comfort: 40, since: 2, x: 3000, y: 3100 }, 25: { comfort: 100, since: 1, x: 2000, y: 2100 } };
+
+  it("never spawns a newcomer twice when a lost cat lets the roster reach its number, and counts it in the colony when snatchers have thinned it", () => {
+    const registry = new Map<string, unknown>([
+      [StoryKeys.COLONY_LOST, [3]],
+      [StoryKeys.COLONY_NEWCOMERS, newcomers],
+    ]);
+    // a full colony (its 42, and the two she saw arrive), one cat snatched: the roster of 24 and the two newcomers over it
+    const full = rosterScene(registry);
+    const colony = new ColonyDynamicsSystem(full.scene);
+    colony.reconcileFromSave({ [StoryKeys.COLONY_COUNT]: 44 });
+    colony.spawnInitialBackgroundCats();
+    const names = full.npcs.map((e) => e.cat.npcName);
+    expect(names).toHaveLength(26);
+    expect(new Set(names).size).toBe(26);
+    expect(names).not.toContain("Colony Cat 4");
+
+    // thinned: 20 cats beyond the named ones, two of them the newcomers
+    const thin = rosterScene(registry);
+    const again = new ColonyDynamicsSystem(thin.scene);
+    again.reconcileFromSave({ [StoryKeys.COLONY_COUNT]: NAMED_AND_MAMMA_COUNT + 20 });
+    again.spawnInitialBackgroundCats();
+    expect(thin.npcs).toHaveLength(20);
+    expect(thin.npcs.filter((e) => again.newcomers.has(e.cat))).toHaveLength(1); // one still frightened, one settled
+  });
+
+  it("saves a dumped pet only if Mamma Cat saw it arrive", () => {
+    for (const seen of [false, true]) {
+      const registry = new Map<string, unknown>();
+      const { scene } = rosterScene(registry);
+      Object.assign(scene, { isNearMakatiAve: () => seen, hasLineOfSight: () => true, dialogue: { show: vi.fn() }, scene: { get: () => undefined } });
+      const colony = new ColonyDynamicsSystem(scene);
+      colony.spawnInitialBackgroundCats();
+      const internals = colony as unknown as {
+        addBackgroundCat: (x: number, y: number) => NPCCat;
+        showDumpingNarration: (eventNum: number, source: NPCCat) => void;
+      };
+      const dumped = internals.addBackgroundCat(500, 600);
+      colony.newcomers.track(dumped, 24, { comfort: 0, since: 2, x: 500, y: 600 }, false);
+      internals.showDumpingNarration(1, dumped);
+      expect(registry.get(StoryKeys.COLONY_NEWCOMERS)).toEqual(seen ? { 24: { comfort: 0, since: 2, x: 500, y: 600 } } : undefined);
+    }
   });
 });

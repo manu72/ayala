@@ -350,6 +350,13 @@ export function getRandomColonyLine(name?: string): string {
   return name ? line.replace("This cat", name) : line;
 }
 
+/** Greeting a dumped pet still finding its feet (see NewcomerCats): what it can bear, by how settled it is (0-100). */
+export function newcomerLine(comfort: number): string {
+  if (comfort < 25) return "*It flattens itself to the ground, eyes black and huge. It doesn't know you. It doesn't know anything here.*";
+  if (comfort < 50) return "*It shrinks back, but it doesn't run. A tiny, cracked mew.*";
+  return "*It lets you close. It smells of soap, and of a home that isn't there any more.*";
+}
+
 /** The first greeting of a colony cat: Mamma Cat learns its name. */
 export function colonyIntroLine(name: string): string {
   return `*You and the cat size each other up. This one is ${name}.*`;
