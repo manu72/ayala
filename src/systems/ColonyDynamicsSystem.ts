@@ -176,9 +176,11 @@ export class ColonyDynamicsSystem {
     const petsZone = zones.find((z) => z.name === "colony_west") ?? zones[0]!;
     let petsHome: { x: number; y: number } | null = null;
 
-    const count = computeBackgroundSpawnCount(this.colonyCountValue, NAMED_AND_MAMMA_COUNT, VISIBLE_BACKGROUND_CAP);
-    // dumped pets Mamma Cat saw arrive come back where they live, over the roster
+    // dumped pets Mamma Cat saw arrive come back where they live, always (over the cap); they are part of
+    // the colony's total, so the rest of the roster is drawn from what's left of it
     const newcomers = this.newcomers.load();
+    const living = [...newcomers.keys()].filter((i) => !this.lostIndices.has(i)).length;
+    const count = computeBackgroundSpawnCount(this.colonyCountValue - living, NAMED_AND_MAMMA_COUNT, VISIBLE_BACKGROUND_CAP);
     const indices = backgroundIndices(count, new Set([...this.lostIndices, ...newcomers.keys()]));
     // newcomers number on from the park roster, never into the street colony's block
     this.nextIndex = Math.max(-1, ...indices, ...newcomers.keys(), ...[...this.lostIndices].filter((i) => i < STREET_COLONY_BASE)) + 1;
@@ -247,6 +249,14 @@ export class ColonyDynamicsSystem {
       const house = houses[(k - 1) % houses.length]!;
       this.addColonyCat(index, house.x, house.y + 8, home, "friendly").setTint(look.tint);
     });
+  }
+
+  /**
+   * Off to the park's water now and then: not the street colony across Ayala Ave (its own water bowl, and
+   * no road-free way to the park's), nor a frightened newcomer (it stays put, low or hidden).
+   */
+  goesForWater(cat: NPCCat): boolean {
+    return !this.isStreetCat(cat) && !this.newcomers.has(cat);
   }
 
   /** One of the street colony across Ayala Ave (they have their own bowls: no trips to the park's water). */

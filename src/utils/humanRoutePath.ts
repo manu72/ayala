@@ -233,6 +233,46 @@ function supercoverLineCells(x0: number, y0: number, x1: number, y1: number): Ar
   return cells;
 }
 
+/**
+ * Each walkable cell's connected region, row by row (-1 where blocked). The router steps
+ * diagonally only between two open sides, so 4-way connectivity is exactly what it can reach.
+ */
+export function walkableRegions(grid: NavigationGrid): Int32Array {
+  const { width, height } = grid;
+  const regions = new Int32Array(width * height).fill(-1);
+  const stack: number[] = [];
+  const visit = (x: number, y: number, region: number) => {
+    if (!isWalkable(grid, x, y) || regions[y * width + x] !== -1) return;
+    regions[y * width + x] = region;
+    stack.push(y * width + x);
+  };
+  let next = 0;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      if (!isWalkable(grid, x, y) || regions[y * width + x] !== -1) continue;
+      visit(x, y, next);
+      for (let i = stack.pop(); i !== undefined; i = stack.pop()) {
+        const cx = i % width;
+        const cy = (i - cx) / width;
+        visit(cx + 1, cy, next);
+        visit(cx - 1, cy, next);
+        visit(cx, cy + 1, next);
+        visit(cx, cy - 1, next);
+      }
+      next += 1;
+    }
+  }
+  return regions;
+}
+
+/** Could {@link routeHumanPath} ever get from `a` to `b` (snapped to walkable cells as it snaps them)? Cheap; a failed search floods its whole region. */
+export function sameRegion(grid: NavigationGrid, regions: Int32Array, a: RoutePoint, b: RoutePoint): boolean {
+  const ca = nearestWalkableCell(grid, worldToCell(a, grid));
+  const cb = nearestWalkableCell(grid, worldToCell(b, grid));
+  const ra = regions[ca.y * grid.width + ca.x] ?? -1;
+  return ra >= 0 && ra === regions[cb.y * grid.width + cb.x];
+}
+
 function nearestWalkableCell(grid: NavigationGrid, cell: { x: number; y: number }): { x: number; y: number } {
   const clamped = clampCell(grid, cell);
   if (isWalkable(grid, clamped.x, clamped.y)) return clamped;

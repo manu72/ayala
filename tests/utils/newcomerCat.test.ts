@@ -24,7 +24,13 @@ describe("newcomerCat", () => {
   it("reads saved newcomers defensively", () => {
     expect(readNewcomers(undefined).size).toBe(0);
     expect(readNewcomers("x").size).toBe(0);
-    const read = readNewcomers({ 24: { comfort: 140, since: 1, x: 5, y: 6 }, 25: { comfort: "a", since: 1, x: 5, y: 6 }, "-1": { comfort: 1, since: 1, x: 1, y: 1 }, b: null });
+    const read = readNewcomers({
+      24: { comfort: 140, since: 1, x: 5, y: 6 },
+      25: { comfort: "a", since: 1, x: 5, y: 6 },
+      "-1": { comfort: 1, since: 1, x: 1, y: 1 },
+      1000: { comfort: 1, since: 1, x: 1, y: 1 }, // Simba's number: the street colony's, never a newcomer's
+      b: null,
+    });
     expect([...read]).toEqual([[24, { comfort: SETTLED, since: 1, x: 5, y: 6 }]]);
   });
 });

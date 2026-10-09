@@ -56,7 +56,7 @@ import { AudioSystem } from "../systems/AudioSystem";
 import { CamilleEncounterSystem } from "../systems/CamilleEncounterSystem";
 import { hasLineOfSightTiles } from "../utils/lineOfSight";
 import { exposeFacesTowardRoads, isRoadTile } from "../utils/roadTiles";
-import { createNavigationGrid, routeHumanPath, type NavigationGrid } from "../utils/humanRoutePath";
+import { createNavigationGrid, routeHumanPath, sameRegion, walkableRegions, type NavigationGrid } from "../utils/humanRoutePath";
 import {
   closestOnPolyline,
   placeNamed,
@@ -163,6 +163,8 @@ export class GameScene extends Phaser.Scene {
   mapRevision = "";
   /** Clearance nav grid, built once per map load (tile collision never changes at runtime). */
   private humanNavGrid: NavigationGrid | null = null;
+  /** The nav grid's connected regions (built with it, on first need). */
+  private humanNavRegions: Int32Array | null = null;
   /** Tree canopies and roofs, drawn over everyone (cover for a frightened cat, shade for Mamma Cat). */
   overheadLayer!: Phaser.Tilemaps.TilemapLayer | null;
   /** Shared with {@link CamilleEncounterSystem} for spawn-point lookup. */
@@ -438,6 +440,7 @@ export class GameScene extends Phaser.Scene {
     this.parkExits = placesOfType(this.places, "exit").map(({ x, y }) => ({ x, y }));
     this.mapRevision = String(tiledProps(this.map.properties).mapRevision ?? "");
     this.humanNavGrid = null;
+    this.humanNavRegions = null;
     const isDrivable = (x: number, y: number) => this.groundLayer?.getTileAtWorldXY(x, y)?.collides ?? true;
     this.traffic = new TrafficSystem(this, this.places, {
       bounds: { width: this.map.widthInPixels, height: this.map.heightInPixels },
@@ -2007,8 +2010,7 @@ export class GameScene extends Phaser.Scene {
   private startWaterTrips(): void {
     const spots = drinkSpots(this.map.width, this.map.height, TILE_SIZE, this.isWaterCell, (cx, cy) => !this.isExplorationCellBlocked(cx, cy));
     this.waterTrips = new CatWaterTrips<NPCCat>({
-      // the street colony across Ayala Ave has its own water bowl (and no road-free way to the park's); a frightened newcomer stays put
-      cats: () => this.npcs.map(({ cat }) => cat).filter((cat) => !this.colony.isStreetCat(cat) && !this.colony.newcomers.has(cat)),
+      cats: () => this.npcs.map(({ cat }) => cat).filter((cat) => this.colony.goesForWater(cat)),
       spots,
       route: (from, to) => this.catRoute(from, to),
       player: () => this.player,
@@ -2019,7 +2021,11 @@ export class GameScene extends Phaser.Scene {
 
   /** A cat's way from `from` to `to` over the nav grid (to the water's edge, into a bush), or null if it can't get there. */
   catRoute(from: { x: number; y: number }, to: { x: number; y: number }): Array<{ x: number; y: number }> | null {
-    const { path } = routeHumanPath([from, to], this.createHumanNavigationGrid());
+    const grid = this.createHumanNavigationGrid();
+    // across a road, say: no way there, and a search for one would scour the whole region
+    this.humanNavRegions ??= walkableRegions(grid);
+    if (!sameRegion(grid, this.humanNavRegions, from, to)) return null;
+    const { path } = routeHumanPath([from, to], grid);
     const end = path[path.length - 1];
     // The nav grid keeps a tile clear of obstacles, so the last few steps (to the water's edge) are walked straight.
     const blockedAt = (x: number, y: number) => this.isExplorationCellBlocked(Math.floor(x / TILE_SIZE), Math.floor(y / TILE_SIZE));

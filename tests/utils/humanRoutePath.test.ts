@@ -6,6 +6,8 @@ import {
   createNavigationGrid,
   isCellLineWalkableOnGrid,
   routeHumanPath,
+  sameRegion,
+  walkableRegions,
   type NavigationGrid,
   type RoutePoint,
 } from "../../src/utils/humanRoutePath";
@@ -314,3 +316,27 @@ function toCell(point: RoutePoint, grid: NavigationGrid): { x: number; y: number
     y: Math.floor(point.y / grid.tileSize),
   };
 }
+
+describe("walkableRegions / sameRegion", () => {
+  /** `#` blocked, `.` open; points are cell centres at 32 px. */
+  const gridOf = (rows: string[]) =>
+    createNavigationGrid({ width: rows[0]!.length, height: rows.length, tileSize: 32, isBlocked: (x, y) => rows[y]?.[x] === "#" });
+  const at = (x: number, y: number) => ({ x: x * 32 + 16, y: y * 32 + 16 });
+
+  it("tells apart places the router can never get between: across a wall, or a diagonal squeeze between two blocks", () => {
+    const grid = gridOf([
+      ".#...#..",
+      "#....#..",
+      ".....#..",
+    ]);
+    const regions = walkableRegions(grid);
+    expect(sameRegion(grid, regions, at(1, 1), at(4, 2))).toBe(true);
+    expect(sameRegion(grid, regions, at(1, 1), at(0, 0))).toBe(false); // only a corner-cutting step away
+    const { path } = routeHumanPath([at(1, 1), at(0, 0)], grid);
+    expect(path[path.length - 1]).not.toEqual(at(0, 0)); // and the router agrees
+    expect(sameRegion(grid, regions, at(4, 0), at(7, 2))).toBe(false); // the far side of the wall
+    expect(sameRegion(grid, regions, at(6, 0), at(7, 2))).toBe(true);
+    // a point on a blocked cell counts where the router would snap it: the nearest open cell
+    expect(sameRegion(grid, regions, at(5, 1), at(4, 1))).toBe(true);
+  });
+});

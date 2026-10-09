@@ -1,3 +1,5 @@
+import { STREET_COLONY_BASE } from "./colonySpawn";
+
 /**
  * Newly dumped pets (ColonyDynamicsSystem's dumping events) are frightened house
  * cats, not street cats: they settle into the gardens over days. Pure helpers for
@@ -49,13 +51,13 @@ export function mammaAlarmRadius(m: { isMoving: boolean; isCrouching: boolean; i
   return r * (1 - Math.min(Math.max(comfort, 0), SETTLED) / (2 * SETTLED));
 }
 
-/** The saved newcomers (registry values may be missing or corrupt). */
+/** The saved newcomers (registry values may be missing or corrupt; newcomers are numbered on from the park roster, below the street colony's block). */
 export function readNewcomers(value: unknown): Map<number, NewcomerRecord> {
   const out = new Map<number, NewcomerRecord>();
   if (typeof value !== "object" || value === null) return out;
   for (const [key, rec] of Object.entries(value)) {
     const index = Number(key);
-    if (!Number.isInteger(index) || index < 0 || typeof rec !== "object" || rec === null) continue;
+    if (!Number.isInteger(index) || index < 0 || index >= STREET_COLONY_BASE || typeof rec !== "object" || rec === null) continue;
     const { comfort, since, x, y } = rec as Record<string, unknown>;
     if ([comfort, since, x, y].every((v) => typeof v === "number" && Number.isFinite(v)))
       out.set(index, { comfort: Math.min(Math.max(comfort as number, 0), SETTLED), since: since as number, x: x as number, y: y as number });

@@ -108,9 +108,10 @@ export class NewcomerCats {
     this.list.push(n);
     cat.setManner(n.hides ? SKULK_SPEED : CREEP_SPEED, NEWCOMER_HABITS);
     cat.setHome(cat.x, cat.y, HOME_PX);
-    // a hider is back in its cover when Mamma Cat comes again (if it ever got there)
-    const cover = saved && n.hides ? this.cover().find((b) => Math.hypot(b.x - cat.x, b.y - cat.y) <= OUT_OF_COVER_PX) : undefined;
-    if (cover) this.hide(n, cover);
+    // a hider is back in its cover when Mamma Cat comes again (if it ever got there); the map's cover is
+    // found now, as it arrives, rather than in the frame it first bolts
+    const cover = n.hides ? this.cover().find((b) => Math.hypot(b.x - cat.x, b.y - cat.y) <= OUT_OF_COVER_PX) : undefined;
+    if (saved && cover) this.hide(n, cover);
     if (saved) this.records.set(index, rec);
   }
 
