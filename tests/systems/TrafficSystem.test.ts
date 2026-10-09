@@ -615,4 +615,18 @@ describe("Mamma Cat on the road", () => {
     expect(onScreech).not.toHaveBeenCalled();
     expect(onHorn).not.toHaveBeenCalled();
   });
+
+  it("carNear() finds the car touching a point, and nothing between the carriageways or while hidden", () => {
+    const { scene, images } = makeScene();
+    const traffic = new TrafficSystem(scene, places, { maxCars: 40, rng: seeded() });
+    for (let i = 0; i < 10 * 60; i++) traffic.update(1000 / 60, RUSH);
+    const car = shownCars(images)[0]!;
+    const hit = traffic.carNear({ x: car.x, y: car.y }, 0);
+    expect(hit).not.toBeNull();
+    expect(Math.hypot(hit!.x - car.x, hit!.y - car.y)).toBeLessThan(1);
+    expect(hit!.speed).toBeGreaterThanOrEqual(0);
+    expect(traffic.carNear({ x: 2000, y: 400 }, 60)).toBeNull(); // 175 px from the nearest lane
+    traffic.setVisible(false);
+    expect(traffic.carNear({ x: car.x, y: car.y }, 0)).toBeNull();
+  });
 });

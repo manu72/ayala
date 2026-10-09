@@ -257,6 +257,34 @@ export class TrafficSystem {
     return this.fitted.get(placeName) ?? 0;
   }
 
+  /**
+   * The car whose body comes nearest `p`, if within `radius` px of it: world
+   * centre, heading, speed and the gap (0: touching). Drivers stop only for
+   * Mamma Cat; this lets other actors (the zombies across Makati Ave) dodge or be hit.
+   */
+  carNear(p: Pt, radius: number): { x: number; y: number; angle: number; speed: number; gap: number } | null {
+    if (this.destroyed || !this.visible) return null;
+    let best: { x: number; y: number; angle: number; speed: number; gap: number } | null = null;
+    let bestGap = Infinity;
+    for (const lane of this.lanes) {
+      const near = closestOnPolyline(lane.pts, p);
+      if (near.distance > radius + 2 * LANE_WIDTH_PX + WIDEST_VEHICLE_PX) continue;
+      const { angle } = pointAlong(lane.pts, near.along);
+      const side = (p.x - near.x) * -Math.sin(angle) + (p.y - near.y) * Math.cos(angle) >= 0 ? 1 : -1;
+      for (const car of lane.cars) {
+        if (car.fade <= 0.01) continue;
+        const gap = Math.hypot(
+          Math.max(0, Math.abs(near.along - car.dist) - car.length / 2),
+          Math.max(0, Math.abs(side * near.distance - car.lat) - car.width / 2),
+        );
+        if (gap > radius || gap >= bestGap) continue;
+        bestGap = gap;
+        best = { ...this.laneToWorld(lane, car.dist, car.lat), angle: pointAlong(lane.pts, car.dist).angle, speed: car.speed, gap };
+      }
+    }
+    return best;
+  }
+
   /** Advance and draw traffic. Call from GameScene.update() after its pause/cinematic early-returns. */
   update(deltaMs: number, clock: TrafficClock): void {
     if (this.destroyed) return;

@@ -197,6 +197,16 @@ If Mamma Cat can find a way up to the tower podium (maybe via a specific sequenc
 
 ---
 
+### ✅ The City Across Makati Ave
+
+Six zombies (green-tinted office workers) loiter on the city side of Makati Ave against the map's east edge. They stand still until they spot Mamma Cat, then shamble after her and lunge, sending her leaping away. They follow her onto the road but never past the median: a close car scares them back, and one too slow gets knocked flat, then gets up and shuffles home.
+
+**Trigger:** Cross Makati Ave and explore the far east side.
+
+**Payoff:** A daft scare in an otherwise gentle game; traffic for once on her side.
+
+---
+
 ## META EASTER EGGS
 
 ### 💭 Title Screen Accumulation
