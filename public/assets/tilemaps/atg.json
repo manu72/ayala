@@ -11,7 +11,7 @@
  "type": "map",
  "version": "1.10",
  "nextlayerid": 9,
- "nextobjectid": 310,
+ "nextobjectid": 316,
  "properties": [
   {
    "name": "source",
@@ -7168,6 +7168,78 @@
        "y": 106.4
       }
      ]
+    },
+    {
+     "id": 310,
+     "name": "zombie_1",
+     "type": "zombie_home",
+     "rotation": 0,
+     "visible": true,
+     "point": true,
+     "x": 9168,
+     "y": 1360,
+     "width": 0,
+     "height": 0
+    },
+    {
+     "id": 311,
+     "name": "zombie_2",
+     "type": "zombie_home",
+     "rotation": 0,
+     "visible": true,
+     "point": true,
+     "x": 8976,
+     "y": 3376,
+     "width": 0,
+     "height": 0
+    },
+    {
+     "id": 312,
+     "name": "zombie_3",
+     "type": "zombie_home",
+     "rotation": 0,
+     "visible": true,
+     "point": true,
+     "x": 8720,
+     "y": 3984,
+     "width": 0,
+     "height": 0
+    },
+    {
+     "id": 313,
+     "name": "zombie_4",
+     "type": "zombie_home",
+     "rotation": 0,
+     "visible": true,
+     "point": true,
+     "x": 9168,
+     "y": 4784,
+     "width": 0,
+     "height": 0
+    },
+    {
+     "id": 314,
+     "name": "zombie_5",
+     "type": "zombie_home",
+     "rotation": 0,
+     "visible": true,
+     "point": true,
+     "x": 8624,
+     "y": 5808,
+     "width": 0,
+     "height": 0
+    },
+    {
+     "id": 315,
+     "name": "zombie_6",
+     "type": "zombie_home",
+     "rotation": 0,
+     "visible": true,
+     "point": true,
+     "x": 8720,
+     "y": 7216,
+     "width": 0,
+     "height": 0
     }
    ]
   }

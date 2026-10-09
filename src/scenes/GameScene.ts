@@ -16,6 +16,7 @@ import { EmoteSystem } from "../systems/EmoteSystem";
 import { ChapterSystem } from "../systems/ChapterSystem";
 import { TerritorySystem } from "../systems/TerritorySystem";
 import { ColonyDynamicsSystem } from "../systems/ColonyDynamicsSystem";
+import { ZombieSystem } from "../systems/ZombieSystem";
 import { PetFriends } from "../systems/PetFriends";
 import { SnatcherSystem } from "../systems/SnatcherSystem";
 import { HumanPresenceSystem } from "../systems/HumanPresenceSystem";
@@ -199,6 +200,7 @@ export class GameScene extends Phaser.Scene {
   humans!: HumanPresenceSystem;
   /** Ella, Cat cat and Mittens greeting each other (and Mamma Cat). */
   private petFriends!: PetFriends;
+  private zombies!: ZombieSystem;
   /** Dog NPCs tethered to dog-walker humans; pushed to by {@link HumanPresenceSystem.spawnAmbientHumans}. */
   dogs: DogNPC[] = [];
   /** Tracks which cats have already shown narration this approach, to avoid repeating. */
@@ -328,6 +330,7 @@ export class GameScene extends Phaser.Scene {
     this.roadMarkings?.destroy();
     this.nightLights?.destroy();
     this.crowd?.destroy();
+    this.zombies?.destroy();
     this.snatcher?.shutdown();
     this.colony?.shutdown();
     this.camille?.shutdown();
@@ -657,6 +660,8 @@ export class GameScene extends Phaser.Scene {
       objectsLayer: this.objectsLayer,
       emotes: this.emotes,
     });
+    // after the crowd, whose walk animations the zombies borrow
+    this.zombies = new ZombieSystem(this);
 
     this.humans.spawnAmbientHumans();
 
@@ -2254,6 +2259,7 @@ export class GameScene extends Phaser.Scene {
       dog.update(now, this.player, this.npcs, this.emotes, this);
     }
     this.petFriends.update();
+    this.zombies.update(delta);
 
     if (this.dayNight.currentPhase === "night") {
       this.snatcher.checkDetection();
@@ -2261,13 +2267,15 @@ export class GameScene extends Phaser.Scene {
 
     // Crossfade background music to the danger theme while a snatcher is
     // out and within earshot — since 0.5.0 the park is too big for
-    // "anywhere". setDanger() is idempotent, so calling it every frame is cheap.
+    // "anywhere" — or zombies are after her. setDanger() is idempotent, so
+    // calling it every frame is cheap.
     this.audio.setDanger(
-      this.snatcher.activeSnatchers.some(
-        (s) =>
-          s.visible &&
-          Phaser.Math.Distance.Between(s.x, s.y, this.player.x, this.player.y) <= GP.SNATCHER_DANGER_MUSIC_DIST,
-      ),
+      this.zombies.chasing ||
+        this.snatcher.activeSnatchers.some(
+          (s) =>
+            s.visible &&
+            Phaser.Math.Distance.Between(s.x, s.y, this.player.x, this.player.y) <= GP.SNATCHER_DANGER_MUSIC_DIST,
+        ),
     );
 
     // NPC cats flee from snatchers.

@@ -5,7 +5,7 @@ import T from "../../scripts/tile-indices.json";
 import { buildCamilleEraCareRoutes } from "../../src/utils/camilleCareRoute";
 import { createNavigationGrid, routeHumanPath } from "../../src/utils/humanRoutePath";
 import { GP, TERRITORY_NEGOTIATION_NEAR_STEPS_PX } from "../../src/config/gameplayConstants";
-import { readPlaces, type TiledObjectLike } from "../../src/utils/mapPlaces";
+import { offsetFromPolyline, readPlaces, type TiledObjectLike } from "../../src/utils/mapPlaces";
 import { drinkSpots } from "../../src/utils/waterEdge";
 import { hasLineOfSightTiles } from "../../src/utils/lineOfSight";
 
@@ -357,5 +357,18 @@ describe("places layer", () => {
   it("keeps the Camille care-route fallbacks identical to the shipped spawns", () => {
     const find = (name: string) => spawns.find((s) => s.name === name) as Phaser.Types.Tilemaps.TiledObject | undefined;
     expect(buildCamilleEraCareRoutes(() => undefined)).toEqual(buildCamilleEraCareRoutes(find));
+  });
+
+  it("homes six zombies on clear city ground east of Makati Ave, against the map's east edge, where she can reach them", () => {
+    const makati = places.find((p) => p.name === "traffic_makati_northbound")?.polyline ?? [];
+    const homes = places.filter((p) => p.type === "zombie_home");
+    expect(homes).toHaveLength(6);
+    for (const h of homes) {
+      const [x, y] = cellOf(h);
+      expect(clear(x, y), h.name).toBe(true);
+      expect(catReachable[cellIndex(x, y)], h.name).toBe(1);
+      expect(offsetFromPolyline(makati, h), h.name).toBeGreaterThan(400);
+      expect(h.x, h.name).toBeGreaterThan(W * TILE - 800);
+    }
   });
 });

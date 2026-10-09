@@ -121,3 +121,10 @@ export function closestOnPolyline(pts: ReadonlyArray<Pt>, p: Pt): Pt & { distanc
   }
   return best;
 }
+
+/** Signed distance from `p` to the polyline: positive to the right of its direction of travel (x east, y south). */
+export function offsetFromPolyline(pts: ReadonlyArray<Pt>, p: Pt): number {
+  const near = closestOnPolyline(pts, p);
+  const { angle } = pointAlong(pts, near.along);
+  return (p.x - near.x) * -Math.sin(angle) + (p.y - near.y) * Math.cos(angle) >= 0 ? near.distance : -near.distance;
+}

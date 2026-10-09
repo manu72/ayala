@@ -701,6 +701,9 @@ for (const f of features) {
   if (pts.some(([x, y]) => x < 0 || y < 0 || x > MAP_W * TILE_SIZE || y > MAP_H * TILE_SIZE)) continue
   polyline(`crossing_${f.id.replace('way/', '')}`, 'crossing', pts)
 }
+// easter egg: zombies loiter on the city side of Makati Ave, against the map's east edge
+const ZOMBIES = [[533, 115], [521, -11], [505, -49], [533, -99], [499, -163], [505, -251]]
+ZOMBIES.forEach((p, n) => point(`zombie_${n + 1}`, 'zombie_home', nearestCell(p, clear)))
 
 // ─────────────────────────────────────────
 // GROUND ART — dual-grid autotiles baked into atg-ground.png (visual only)
