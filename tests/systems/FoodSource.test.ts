@@ -408,3 +408,17 @@ describe('FoodSourceManager.tryInteract — open water (pond, fountain pools, wa
     expect(manager.tryInteract(510, 100, stats, 'day', 1)?.type).toBe('open_water')
   })
 })
+
+describe('FoodSourceManager.ensureSource', () => {
+  it('adds a source a save predates exactly once, and leaves one already there alone', () => {
+    const { manager } = buildManager([])
+    manager.restoreFromStates([{ type: 'fountain', x: 100, y: 100, lastUsedAt: 0 }]) // an old save
+    manager.ensureSource('water_bowl', 4752, 6800)
+    manager.ensureSource('water_bowl', 4752, 6800)
+    manager.ensureSource('fountain', 100.2, 99.8)
+    expect(manager.getSourceStates().map(({ type, x, y }) => [type, x, y])).toEqual([
+      ['fountain', 100, 100],
+      ['water_bowl', 4752, 6800],
+    ])
+  })
+})

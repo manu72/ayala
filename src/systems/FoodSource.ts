@@ -134,6 +134,16 @@ export class FoodSourceManager {
     });
   }
 
+  /**
+   * Add a source unless one of the same type is already there (to the px): for
+   * sources newer than a save, which `restoreFromStates` rebuilds without.
+   */
+  ensureSource(type: SourceType, worldX: number, worldY: number): void {
+    const at = (v: number) => Math.round(v);
+    if (this.sources.some((s) => s.type === type && at(s.x) === at(worldX) && at(s.y) === at(worldY))) return;
+    this.addSource(type, worldX, worldY);
+  }
+
   /** Scatter bug sources on non-colliding tiles (and, when given, only where `isWalkable` allows — e.g. inside the park). */
   addBugSpawns(map: Phaser.Tilemaps.Tilemap, count: number, isWalkable?: (worldX: number, worldY: number) => boolean): void {
     const mapW = map.widthInPixels;

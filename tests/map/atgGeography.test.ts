@@ -371,4 +371,25 @@ describe("places layer", () => {
       expect(h.x, h.name).toBeGreaterThan(W * TILE - 800);
     }
   });
+
+  it("sets the street colony on the city side of Ayala Ave, by the underpass: off the road, out of the park, within her reach", () => {
+    const named = (n: string) => places.find((p) => p.name === n)!;
+    const props = ["street_colony", "cat_rock", "cat_house_1", "cat_house_2", "cat_house_3", "street_food_bowl", "street_water_bowl"].map(named);
+    for (const p of props) {
+      const [x, y] = cellOf(p);
+      expect(blocked(x, y), p.name).toBe(false); // open pavement, not asphalt or a wall
+      expect(catReachable[cellIndex(x, y)], p.name).toBe(1);
+      expect(reachable[cellIndex(x, y)], p.name).toBe(0); // across the road from the park
+    }
+    const bowls = places.filter((p) => p.type === "colony_bowl");
+    expect(bowls.map((b) => b.props.source).sort()).toEqual(["feeding_station", "water_bowl"]);
+    // Space by a bowl eats rather than greets: bowls stand clear of the houses and Simba's rock
+    const home = named("street_colony");
+    for (const b of bowls) {
+      for (const p of [named("cat_rock"), ...places.filter((q) => q.type === "cat_house")])
+        expect(Math.hypot(b.x - p.x, b.y - p.y), `${b.name}-${p.name}`).toBeGreaterThanOrEqual(64);
+      // ...and outside the house cats' home ground, with a margin
+      expect(Math.hypot(b.x - home.x, b.y - home.y), b.name).toBeGreaterThanOrEqual(Number(home.props.radius) + 64);
+    }
+  });
 });

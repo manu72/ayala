@@ -284,6 +284,7 @@ export class BootScene extends Phaser.Scene {
 
   create(): void {
     makeLightTextures(this);
+    makeStreetColonyTextures(this);
     this.scene.start("StartScene");
   }
 }
@@ -319,6 +320,80 @@ function makeLightTextures(scene: Phaser.Scene): void {
       ctx.lineTo(0, 56);
       ctx.closePath();
       ctx.fill();
+      tex.refresh();
+    }
+  }
+}
+
+/** Draw `rows` (one char per pixel, "." clear) into a canvas texture `key`, colouring by `palette`. */
+function pixelTexture(scene: Phaser.Scene, key: string, rows: readonly string[], palette: Record<string, string>): void {
+  if (scene.textures.exists(key)) return;
+  const w = Math.max(...rows.map((r) => r.length));
+  const tex = scene.textures.createCanvas(key, w, rows.length);
+  const ctx = tex?.getContext();
+  if (!tex || !ctx) return;
+  rows.forEach((row, y) =>
+    [...row].forEach((ch, x) => {
+      const colour = palette[ch];
+      if (!colour) return;
+      ctx.fillStyle = colour;
+      ctx.fillRect(x, y, 1, 1);
+    }),
+  );
+  tex.refresh();
+}
+
+/** The street colony's props across Ayala Ave: a cat house, food and water bowls, Simba's rock. */
+function makeStreetColonyTextures(scene: Phaser.Scene): void {
+  pixelTexture(
+    scene,
+    "cat_house",
+    [
+      "........oooo........",
+      "......ooRRRRoo......",
+      "....ooRRRRRRRRoo....",
+      "..ooRRRRRRRRRRRRoo..",
+      ".orrrrrrrrrrrrrrrro.",
+      "orrrrrrrrrrrrrrrrrro",
+      "oooooooooooooooooooo",
+      ".owwwwwwwwwwwwwwwwo.",
+      ".owwwwwwddddwwwwwwo.",
+      ".owWwwwddddddwwwWwo.",
+      ".owwwwwddddddwwwwwo.",
+      ".owWwwwddddddwwwWwo.",
+      ".owwwwwddddddwwwwwo.",
+      ".oWWWWWddddddWWWWWo.",
+      ".oooooooooooooooooo.",
+    ],
+    { o: "#3b2618", R: "#b0503a", r: "#8a3b2a", w: "#c9955a", W: "#9c6b3c", d: "#24170f" },
+  );
+  const bowl = (key: string, inside: string, glint: string, plastic: string, rim: string) =>
+    pixelTexture(
+      scene,
+      key,
+      ["..BBBBBBBB..", ".BiiGiiiiiB.", "BbiiiiiGiibB", "BbbbbbbbbbbB", ".BbbbbbbbbB.", "..BBBBBBBB.."],
+      { B: rim, b: plastic, i: inside, G: glint },
+    );
+  bowl("cat_bowl_food", "#8b5a2b", "#b07a42", "#c0392b", "#7d2318");
+  bowl("cat_bowl_water", "#5fa8d8", "#c6ecff", "#9aa5ad", "#5d666c");
+
+  // a big rounded boulder with a flat, sunlit top for a cat to sit on
+  if (!scene.textures.exists("cat_rock")) {
+    const w = 40;
+    const h = 26;
+    const tex = scene.textures.createCanvas("cat_rock", w, h);
+    const ctx = tex?.getContext();
+    if (tex && ctx) {
+      const inBody = (x: number, y: number) => ((x - 20) / 19.5) ** 2 + ((y - 15) / 10.5) ** 2 <= 1;
+      const inTop = (x: number, y: number) => ((x - 20) / 15) ** 2 + ((y - 10) / 7) ** 2 <= 1;
+      for (let y = 0; y < h; y++)
+        for (let x = 0; x < w; x++) {
+          if (!inBody(x, y) && !inTop(x, y)) continue;
+          const edge = ([[1, 0], [-1, 0], [0, 1], [0, -1]] as const).some(([dx, dy]) => !inBody(x + dx, y + dy) && !inTop(x + dx, y + dy));
+          const speck = (x * 7 + y * 13) % 11 === 0; // fixed grain, no randomness
+          ctx.fillStyle = edge ? "#45423f" : inTop(x, y) ? (y < 7 && x > 12 && x < 26 ? "#c4c1ba" : speck ? "#97938d" : "#aaa69f") : y > 20 ? "#5f5c58" : speck ? "#6f6c67" : "#86827c";
+          ctx.fillRect(x, y, 1, 1);
+        }
       tex.refresh();
     }
   }

@@ -30,6 +30,8 @@ export interface NPCCatConfig {
    * walks; the default is the legacy 32 px cat sheet.
    */
   layout?: "legacy" | "pixellab";
+  /** This cat's own idle/walking/sleeping weights by time of day, over the defaults below (Simba hardly leaves his rock). */
+  behaviour?: Partial<Record<TimeOfDay, Record<string, number>>>;
 }
 
 /**
@@ -369,7 +371,7 @@ export class NPCCat extends BaseNPC {
   }
 
   private transitionFromIdle(): void {
-    const weights = BEHAVIOUR_WEIGHTS[this.currentPhase];
+    const weights = this.config.behaviour?.[this.currentPhase] ?? BEHAVIOUR_WEIGHTS[this.currentPhase];
     const next = this.weightedPick(weights);
     this.enterState(next as CatState);
   }

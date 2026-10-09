@@ -11,7 +11,7 @@
  "type": "map",
  "version": "1.10",
  "nextlayerid": 9,
- "nextobjectid": 316,
+ "nextobjectid": 323,
  "properties": [
   {
    "name": "source",
@@ -7238,6 +7238,111 @@
      "point": true,
      "x": 8720,
      "y": 7216,
+     "width": 0,
+     "height": 0
+    },
+    {
+     "id": 316,
+     "name": "street_colony",
+     "type": "street_colony",
+     "rotation": 0,
+     "visible": true,
+     "properties": [
+      {
+       "name": "radius",
+       "type": "float",
+       "value": 64
+      }
+     ],
+     "point": true,
+     "x": 4880,
+     "y": 6896,
+     "width": 0,
+     "height": 0
+    },
+    {
+     "id": 317,
+     "name": "cat_rock",
+     "type": "cat_rock",
+     "rotation": 0,
+     "visible": true,
+     "point": true,
+     "x": 4688,
+     "y": 6704,
+     "width": 0,
+     "height": 0
+    },
+    {
+     "id": 318,
+     "name": "cat_house_1",
+     "type": "cat_house",
+     "rotation": 0,
+     "visible": true,
+     "point": true,
+     "x": 4848,
+     "y": 6864,
+     "width": 0,
+     "height": 0
+    },
+    {
+     "id": 319,
+     "name": "cat_house_2",
+     "type": "cat_house",
+     "rotation": 0,
+     "visible": true,
+     "point": true,
+     "x": 4880,
+     "y": 6864,
+     "width": 0,
+     "height": 0
+    },
+    {
+     "id": 320,
+     "name": "cat_house_3",
+     "type": "cat_house",
+     "rotation": 0,
+     "visible": true,
+     "point": true,
+     "x": 4848,
+     "y": 6896,
+     "width": 0,
+     "height": 0
+    },
+    {
+     "id": 321,
+     "name": "street_food_bowl",
+     "type": "colony_bowl",
+     "rotation": 0,
+     "visible": true,
+     "properties": [
+      {
+       "name": "source",
+       "type": "string",
+       "value": "feeding_station"
+      }
+     ],
+     "point": true,
+     "x": 4720,
+     "y": 6800,
+     "width": 0,
+     "height": 0
+    },
+    {
+     "id": 322,
+     "name": "street_water_bowl",
+     "type": "colony_bowl",
+     "rotation": 0,
+     "visible": true,
+     "properties": [
+      {
+       "name": "source",
+       "type": "string",
+       "value": "water_bowl"
+      }
+     ],
+     "point": true,
+     "x": 4752,
+     "y": 6800,
      "width": 0,
      "height": 0
     }

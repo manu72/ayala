@@ -7,12 +7,27 @@ vi.mock("../../src/sprites/NPCCat", () => ({
     x: number;
     y: number;
     disposition: string;
-    constructor(_scene: unknown, cfg: { name: string; spriteKey: string; x: number; y: number; disposition: string }) {
+    behaviour: unknown;
+    tint: number | undefined;
+    state = "idle";
+    active = true;
+    onErrand = false;
+    inDialogue = false;
+    routes: unknown[] = [];
+    constructor(_scene: unknown, cfg: { name: string; spriteKey: string; x: number; y: number; disposition: string; behaviour?: unknown }) {
       this.npcName = cfg.name;
       this.spriteKey = cfg.spriteKey;
       this.x = cfg.x;
       this.y = cfg.y;
       this.disposition = cfg.disposition;
+      this.behaviour = cfg.behaviour;
+    }
+    setTint(t: number) {
+      this.tint = t;
+      return this;
+    }
+    followRoute(route: unknown) {
+      this.routes.push(route);
     }
   },
 }));
@@ -75,7 +90,9 @@ describe("ColonyDynamicsSystem — the dumping car yielding to Mamma Cat", () =>
 type Tag = { name: string; known: boolean };
 type Entry = { cat: NPCCat & { spriteKey: string; disposition: string }; indicator: Tag };
 
-/** A scene with one colony zone, enough to spawn the background roster. */
+const ROCK = { x: 4688, y: 6704 };
+
+/** A scene with colony zones (enough to spawn the background roster) and the street colony. */
 function rosterScene(registry: Map<string, unknown>) {
   const npcs: Entry[] = [];
   const scene = {
@@ -83,7 +100,15 @@ function rosterScene(registry: Map<string, unknown>) {
     places: [
       { name: "colony_central", type: "colony_zone", x: 500, y: 500, props: { radius: 200 } },
       { name: "colony_west", type: "colony_zone", x: 2400, y: 3000, props: { radius: 400 } },
+      { name: "street_colony", type: "street_colony", x: 4816, y: 6832, props: { radius: 72 } },
+      { name: "cat_rock", type: "cat_rock", ...ROCK, props: {} },
+      { name: "cat_house_1", type: "cat_house", x: 4848, y: 6864, props: {} },
+      { name: "cat_house_2", type: "cat_house", x: 4880, y: 6864, props: {} },
+      { name: "street_food_bowl", type: "colony_bowl", x: 4720, y: 6800, props: { source: "feeding_station" } },
     ],
+    add: { image: () => ({ setOrigin: () => ({ setDepth: () => undefined }), setDepth: () => undefined }) },
+    player: { x: 0, y: 0 },
+    narrateIfPerceivable: () => undefined,
     territory: { visitCell: () => 0 },
     map: { tileWidth: 32, width: 290 },
     physics: { add: { collider: () => undefined } },
@@ -135,5 +160,42 @@ describe("ColonyDynamicsSystem — colony cats' names", () => {
       expect(Math.hypot(catcat!.x - 2400, catcat!.y - 3000)).toBeLessThanOrEqual(72);
       expect(Math.hypot(mittens!.x - catcat!.x, mittens!.y - catcat!.y)).toBeLessThanOrEqual(36);
     }
+  });
+});
+
+describe("ColonyDynamicsSystem — the street colony across Ayala Ave", () => {
+  it("puts Simba on his rock and two friends by the cat houses, all friendly, named on greeting, numbered clear of the park roster", () => {
+    const registry = new Map<string, unknown>();
+    const first = rosterScene(registry);
+    const colony = new ColonyDynamicsSystem(first.scene);
+    colony.spawnInitialBackgroundCats();
+    colony.spawnStreetColony();
+    const street = first.npcs.slice(24);
+    expect(street.map((e) => e.cat.npcName)).toEqual(["Colony Cat 1001", "Colony Cat 1002", "Colony Cat 1003"]);
+    const [simba, , pandan] = street.map((e) => e.cat as unknown as NPCCat & { tint: number; routes: unknown[]; behaviour: unknown });
+    expect({ x: simba!.x, y: simba!.y }).toEqual(ROCK);
+    expect(simba!.tint).toBe(0xf0a848);
+    expect(simba!.behaviour).toMatchObject({ day: { walking: 0 } }); // he doesn't leave his rock in the sun
+    expect(street.every((e) => (e.cat as unknown as { disposition: string }).disposition === "friendly")).toBe(true);
+    expect(street.every((e) => colony.isStreetCat(e.cat))).toBe(true);
+    expect(colony.isStreetCat(first.npcs[2]!.cat)).toBe(false);
+    expect(colony.learnName(simba!)).toEqual({ name: "Simba", isNew: true });
+
+    // after a stroll he climbs back up
+    simba!.x += 30;
+    (colony as unknown as { tickStreetColony: () => void }).tickStreetColony();
+    expect(simba!.routes).toEqual([[ROCK]]);
+
+    // one snatched: never back, and park newcomers still number on from the park roster
+    colony.onCatRemoved(pandan);
+    const second = rosterScene(registry);
+    const again = new ColonyDynamicsSystem(second.scene);
+    again.reconcileFromSave({ [StoryKeys.COLONY_COUNT]: registry.get(StoryKeys.COLONY_COUNT) });
+    again.spawnInitialBackgroundCats();
+    again.spawnStreetColony();
+    expect(second.npcs.map((e) => e.cat.npcName)).not.toContain("Colony Cat 1003");
+    expect(second.npcs.find((e) => e.cat.npcName === "Colony Cat 1001")!.indicator).toEqual({ name: "Simba", known: true });
+    const dumped = (again as unknown as { addBackgroundCat: (x: number, y: number) => NPCCat }).addBackgroundCat(1, 1);
+    expect(dumped.npcName).toBe("Colony Cat 25");
   });
 });
