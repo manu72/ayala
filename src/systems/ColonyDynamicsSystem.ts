@@ -196,9 +196,12 @@ export class ColonyDynamicsSystem {
       const homeRadius = 80 + Math.random() * 80;
       this.addColonyCat(index, x, y, { cx: x, cy: y, radius: homeRadius }, disp);
     });
+    const tile = this.scene.map.tileWidth;
     for (const [index, rec] of newcomers) {
       if (this.lostIndices.has(index)) continue;
-      const { x, y } = this.pickReachablePointInZone({ cx: rec.x, cy: rec.y, radius: 48 });
+      // right where it lives (a hider's cover is a precise spot); somewhere near if the map has changed under it
+      const there = this.scene.territory.visitCell(Math.floor(rec.x / tile), Math.floor(rec.y / tile), this.scene.map.width) !== null;
+      const { x, y } = there ? rec : this.pickReachablePointInZone({ cx: rec.x, cy: rec.y, radius: 48 });
       const cat = this.addColonyCat(index, x, y, { cx: x, cy: y, radius: 100 }, "wary");
       if (rec.comfort < SETTLED) this.newcomers.track(cat, index, rec, true);
     }

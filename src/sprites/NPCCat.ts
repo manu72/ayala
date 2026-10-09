@@ -273,9 +273,9 @@ export class NPCCat extends BaseNPC {
     this.enterState("idle");
   }
 
-  /** Trigger alert state (e.g. player got too close to a territorial cat). */
+  /** Trigger alert state (e.g. player got too close to a territorial cat). A cat already running (fleeing, or bolting for cover) doesn't stop to look. */
   triggerAlert(): void {
-    if (this.state === "fleeing") return;
+    if (this.state === "fleeing" || (this.route !== null && this.routeRun)) return;
     this.enterState("alert");
   }
 

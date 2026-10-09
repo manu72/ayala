@@ -115,7 +115,7 @@ function rosterScene(registry: Map<string, unknown>) {
     player: { x: 0, y: 0 },
     narrateIfPerceivable: () => undefined,
     territory: { visitCell: () => 0 },
-    map: { tileWidth: 32, width: 290 },
+    map: { tileWidth: 32, width: 290, getTileset: () => null },
     physics: { add: { collider: () => undefined } },
     groundLayer: null,
     objectsLayer: null,
@@ -216,7 +216,7 @@ describe("ColonyDynamicsSystem — dumped pets Mamma Cat saw arrive", () => {
     expect(npcs.slice(0, 24).map((e) => e.cat.npcName)).toEqual(Array.from({ length: 24 }, (_, i) => `Colony Cat ${i + 1}`));
     const [scared, settled] = npcs.slice(24).map((e) => e.cat);
     expect(scared!.npcName).toBe("Colony Cat 25");
-    expect(Math.hypot(scared!.x - 3000, scared!.y - 3100)).toBeLessThanOrEqual(29);
+    expect({ x: scared!.x, y: scared!.y }).toEqual({ x: 3000, y: 3100 }); // right where it lives
     expect(colony.newcomers.has(scared!)).toBe(true);
     expect(settled!.npcName).toBe("Colony Cat 26");
     expect(colony.newcomers.has(settled!)).toBe(false);

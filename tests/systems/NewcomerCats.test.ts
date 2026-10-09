@@ -35,11 +35,13 @@ function fakeCat(x: number, y: number) {
       this.errand = { route, done, run };
       this.onErrand = true;
     },
+    /** As NPCCat: an alert stops a walk, but not a cat already running. */
     triggerAlert() {
-      this.state = "alert";
+      if (this.state === "fleeing" || this.errand?.run) return;
+      Object.assign(this, { state: "alert", errand: null, onErrand: false });
     },
     triggerFlee() {
-      this.state = "fleeing";
+      Object.assign(this, { state: "fleeing", alpha: 1, errand: null, onErrand: false });
     },
     /** Walk (or run) the errand to its end. */
     arrive() {
@@ -74,7 +76,7 @@ function world() {
     emotes: { show: vi.fn() },
     personNear: (x: number, y: number, r: number) => people.find((p) => Math.hypot(p.x - x, p.y - y) <= r) ?? null,
     npcs: [] as Array<{ cat: Cat }>,
-    catRoute: (_from: Point, to: Point) => [to],
+    catRoute: (_from: Point, to: Point): Point[] | null => [to],
     objectsLayer: { filterTiles: (fn: (t: (typeof tiles)[number]) => boolean) => tiles.filter(fn), getTileAt: () => null },
     overheadLayer: { filterTiles: (fn: (t: (typeof tiles)[number]) => boolean) => [...canopy.values()].filter(fn), getTileAt: (x: number, y: number) => canopy.get(`${x},${y}`) ?? null },
     groundLayer: { getTileAt: (x: number, y: number) => (x === 11 && y === 10 ? { collides: true } : null) },
@@ -85,10 +87,10 @@ function world() {
     scene.time.now += ms;
     newcomers.update(ms);
   };
-  const add = (index: number, saved = true, comfort = 0) => {
-    const cat = fakeCat(1000, 1000);
+  const add = (index: number, saved = true, comfort = 0, at: Point = { x: 1000, y: 1000 }) => {
+    const cat = fakeCat(at.x, at.y);
     scene.npcs.push({ cat });
-    newcomers.track(cat as unknown as NPCCat, index, { comfort, since: 1, x: 1000, y: 1000 }, saved);
+    newcomers.track(cat as unknown as NPCCat, index, { comfort, since: 1, ...at }, saved);
     return cat;
   };
   const saved = () => registry.get(StoryKeys.COLONY_NEWCOMERS) as Record<string, { comfort: number; x: number; y: number }> | undefined;
@@ -138,6 +140,131 @@ describe("NewcomerCats — dumped pets finding their feet", () => {
     w.tick(1000);
     expect(cat.alpha).toBe(1);
     expect(cat.habits).toMatchObject({ day: { walking: 0.25, sleeping: 0 } });
+  });
+
+  it("doesn't hide when it reaches cover if it settled on the way there", () => {
+    const w = world();
+    const cat = w.add(24, false); // just dumped, out in the open
+    Object.assign(w.player, { x: 880, y: 1000, isMoving: true });
+    w.tick();
+    expect(cat.errand?.run).toBe(true);
+    w.scene.dayNight.dayCount = 8; // a week here: settled, mid-run
+    w.tick();
+    expect(w.newcomers.has(cat as unknown as NPCCat)).toBe(false);
+    cat.arrive();
+    w.tick();
+    expect(cat.alpha).toBe(1);
+    expect(cat.habits).toBeUndefined();
+    expect(cat.home).toMatchObject({ r: 100 });
+  });
+
+  it("chased out of its cover (a snatcher's rush), it runs in plain sight, waits for quiet, then creeps back in and hides again", () => {
+    const w = world();
+    const cover = centre(BUSHES.east);
+    const cat = w.add(24, true, 0, cover); // a saved hider is back in its cover
+    expect(cat.alpha).toBeLessThan(0.5);
+    cat.triggerFlee();
+    w.tick();
+    expect(cat.alpha).toBe(1);
+    Object.assign(cat, { x: 1250, y: 1060, state: "alert" }); // where the flight took it
+    w.tick(7000);
+    expect(cat.alpha).toBe(1);
+    expect(cat.errand).toBeNull(); // not straight back toward whatever ran it out
+    w.tick(1000);
+    expect(cat.errand).toMatchObject({ run: false, route: [cover] });
+    // run off again on the way: the wait starts over
+    cat.triggerFlee();
+    w.tick();
+    cat.state = "alert";
+    w.tick(7000);
+    expect(cat.errand).toBeNull();
+    w.tick(1000);
+    expect(cat.errand).toMatchObject({ run: false, route: [cover] });
+    w.tick();
+    expect(cat.alpha).toBe(1); // in plain sight on the way
+    cat.arrive();
+    w.tick(1000);
+    expect(cat.alpha).toBeLessThan(0.5);
+    expect(cat.habits).toMatchObject({ day: { walking: 0 } });
+    expect(cat.home).toEqual({ ...cover, r: 8 });
+    expect(w.saved()?.["24"]).toMatchObject(cover);
+  });
+
+  it("creeping back, it still watches out, and runs for cover when something frightens it", () => {
+    const w = world();
+    const cat = w.add(24, true, 0, centre(BUSHES.east));
+    cat.triggerFlee();
+    w.tick();
+    Object.assign(cat, { x: 1250, y: 1060, state: "alert" });
+    w.tick(8000);
+    expect(cat.errand?.run).toBe(false);
+    w.people.push({ x: 1300, y: 1060 });
+    w.tick();
+    expect(cat.errand?.run).toBe(true);
+  });
+
+  it("running for cover, it doesn't stop for a passing jogger; stopped short (Mamma Cat stops it to talk), it's in plain sight and goes on in once it's quiet", () => {
+    const w = world();
+    const cat = w.add(24, false);
+    Object.assign(w.player, { x: 880, y: 1000, isMoving: true });
+    w.tick();
+    expect(cat.errand?.run).toBe(true);
+    Object.assign(cat, { x: 1050 }); // halfway there, still running
+    w.tick();
+    expect(cat.alpha).toBe(1);
+    cat.triggerAlert(); // a jogger glances at it
+    expect(cat.errand?.run).toBe(true);
+    Object.assign(cat, { errand: null, onErrand: false, state: "idle" }); // dialogue cuts the run short
+    Object.assign(w.player, { x: 0, y: 0, isMoving: false });
+    w.tick();
+    expect(cat.alpha).toBe(1);
+    w.tick(8000);
+    expect(cat.errand).toMatchObject({ run: false, route: [centre(BUSHES.east)] });
+    cat.arrive();
+    w.tick();
+    expect(cat.alpha).toBeLessThan(0.5);
+    expect(cat.habits).toMatchObject({ day: { walking: 0 } });
+  });
+
+  it("with no way back into its cover, it gives it up once, out in the open (no path search every frame)", () => {
+    const w = world();
+    const cat = w.add(24, true, 0, centre(BUSHES.east));
+    cat.triggerFlee();
+    w.tick();
+    Object.assign(cat, { x: 1250, y: 1060, state: "alert" });
+    const route = vi.fn(() => null);
+    w.scene.catRoute = route;
+    for (let t = 0; t < 20; t++) w.tick(1000);
+    expect(route).toHaveBeenCalledTimes(1);
+    expect(cat.alpha).toBe(1);
+    expect(cat.habits).toMatchObject({ day: { walking: 0.25 } });
+    expect(cat.home).toEqual({ x: 1250, y: 1060, r: 60 });
+  });
+
+  it("when it can't get right into its cover, it gives it up rather than sit see-through in the open", () => {
+    const w = world();
+    const cat = w.add(24, false);
+    Object.assign(w.player, { x: 880, y: 1000, isMoving: true });
+    w.tick();
+    const errand = cat.errand!;
+    Object.assign(cat, { x: 1060, errand: null, onErrand: false }); // the way ran out 40 px short
+    errand.done();
+    Object.assign(w.player, { x: 0, y: 0, isMoving: false });
+    w.tick();
+    expect(cat.alpha).toBe(1);
+    expect(cat.errand).toBeNull();
+    expect(cat.habits).toMatchObject({ day: { walking: 0.25 } });
+    expect(cat.home).toEqual({ x: 1060, y: 1000, r: 60 });
+  });
+
+  it("back next session, a hider is hidden only if it had got into cover", () => {
+    const w = world();
+    const inCover = w.add(24, true, 0, centre(BUSHES.south));
+    const onTheKerb = w.add(26, true, 0, { x: 1500, y: 1500 });
+    w.tick(1000);
+    expect(inCover.alpha).toBeLessThan(0.5);
+    expect(onTheKerb.alpha).toBe(1);
+    expect(w.saved()?.["26"]).toMatchObject({ x: 1500, y: 1500 });
   });
 
   it("a freezer keeps still when people come near and creeps off when they come close; a crouched Mamma Cat it lets come nearer", () => {

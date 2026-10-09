@@ -33,7 +33,11 @@ const BUSH_SEARCH_PX = 640;
 const FIRST_SHRUB = 8 * 16;
 /** It comes out of its bush after this long without a fright. */
 const HIDE_QUIET_MS = 90_000;
+/** Run out of its cover (or stopped short of it), it waits this long without a fright before creeping back in. */
+const SLINK_BACK_QUIET_MS = 8_000;
 const HIDDEN_ALPHA = 0.45;
+/** Further than this from its cover (a snatcher's rush sent it running), it's out in the open. */
+const OUT_OF_COVER_PX = 24;
 /** Mamma Cat sitting quietly (resting or loafing) this close settles it. */
 const SIT_WITH_PX = 96;
 const SIT_COMFORT_PER_MS = 0.5 / 1000;
@@ -60,7 +64,10 @@ interface Newcomer {
   saved: boolean;
   hides: boolean;
   bush: Point | null;
+  /** Its place is in its cover (`bush`): running there, hiding there, or slinking back after being chased out. */
   hidden: boolean;
+  /** Creeping back to its cover (and watching out as it goes). */
+  slinking: boolean;
   frightened: boolean;
   quietMs: number;
   greetedAt: number;
@@ -97,12 +104,13 @@ export class NewcomerCats {
 
   /** Background cat `index` is a newcomer still finding its feet (`saved`: Mamma Cat has seen it arrive). */
   track(cat: NPCCat, index: number, rec: NewcomerRecord, saved: boolean): void {
-    const n: Newcomer = { cat, index, rec, saved, hides: hidesWhenScared(index), bush: null, hidden: false, frightened: false, quietMs: 0, greetedAt: -Infinity, best: rec.comfort };
+    const n: Newcomer = { cat, index, rec, saved, hides: hidesWhenScared(index), bush: null, hidden: false, slinking: false, frightened: false, quietMs: 0, greetedAt: -Infinity, best: rec.comfort };
     this.list.push(n);
     cat.setManner(n.hides ? SKULK_SPEED : CREEP_SPEED, NEWCOMER_HABITS);
     cat.setHome(cat.x, cat.y, HOME_PX);
-    // a hider is back in its bush when Mamma Cat comes again
-    if (saved && n.hides) this.hide(n, { x: cat.x, y: cat.y });
+    // a hider is back in its cover when Mamma Cat comes again (if it ever got there)
+    const cover = saved && n.hides ? this.cover().find((b) => Math.hypot(b.x - cat.x, b.y - cat.y) <= OUT_OF_COVER_PX) : undefined;
+    if (cover) this.hide(n, cover);
     if (saved) this.records.set(index, rec);
   }
 
@@ -145,8 +153,8 @@ export class NewcomerCats {
   /** Every frame, after the cats' own updates. */
   update(delta: number): void {
     if (this.list.length === 0) return;
-    // an idle cat stands up into full view; one in its bush stays hidden
-    for (const n of this.list) if (n.hidden) n.cat.setAlpha(HIDDEN_ALPHA);
+    // an idle cat stands up into full view; one in its cover stays hidden (not one running from it)
+    for (const n of this.list) if (this.covered(n) && n.cat.state !== "fleeing") n.cat.setAlpha(HIDDEN_ALPHA);
     if (this.scene.dialogue.isActive) return;
     const p = this.scene.player;
     const sitting = p.isResting || p.isCatloaf;
@@ -172,6 +180,11 @@ export class NewcomerCats {
     return this.list.find((n) => n.cat === cat);
   }
 
+  /** Hidden, and really in its cover (not run out of it, or not there yet). */
+  private covered(n: Newcomer): boolean {
+    return n.hidden && n.bush !== null && Math.hypot(n.cat.x - n.bush.x, n.cat.y - n.bush.y) <= OUT_OF_COVER_PX;
+  }
+
   /** Raise (or lower) its comfort within what the days it has been here allow; settled, it's one of the colony. */
   private settleBy(n: Newcomer, amount: number): void {
     const before = n.rec.comfort;
@@ -193,12 +206,20 @@ export class NewcomerCats {
 
   private react(n: Newcomer, delta: number): void {
     const { cat } = n;
-    if (cat.onErrand || cat.state === "fleeing") return; // already creeping off, or running for its bush
-    const threat = this.threat(n);
+    if (cat.state === "fleeing") {
+      n.quietMs = 0; // something (a snatcher) is after it
+      return;
+    }
+    if (!cat.onErrand) n.slinking = false; // its creep back was cut short
+    if (cat.onErrand && !n.slinking) return; // already creeping off, or running for cover
+    const covered = this.covered(n);
+    const threat = this.threat(n, covered);
     if (!threat) {
       n.frightened = false;
       n.quietMs += delta;
-      if (n.hidden && n.quietMs >= HIDE_QUIET_MS) this.emerge(n);
+      // run out of its cover (a snatcher), or stopped short of it (Mamma Cat stopped it to talk): back in, once it's quiet
+      if (n.hidden && !covered && n.bush && !n.slinking && n.quietMs >= SLINK_BACK_QUIET_MS) this.slinkBack(n, n.bush);
+      else if (covered && n.quietMs >= HIDE_QUIET_MS) this.emerge(n);
       return;
     }
     n.quietMs = 0;
@@ -207,48 +228,61 @@ export class NewcomerCats {
       this.settleBy(n, -FRIGHT_COMFORT);
       this.scene.emotes.show(this.scene, cat, "alert");
     }
-    if (n.hides) this.bolt(n, threat);
+    if (n.hides) this.bolt(n, threat, covered);
     else if (Math.hypot(threat.x - cat.x, threat.y - cat.y) < CREEP_AWAY_PX) this.creepAway(n, threat);
     else if (cat.state !== "alert") cat.triggerAlert(); // freeze, and hope not to be seen
   }
 
   /** What frightens it now: Mamma Cat on the move, people, other cats. */
-  private threat(n: Newcomer): Point | null {
+  private threat(n: Newcomer, covered: boolean): Point | null {
     const { cat } = n;
     const p = this.scene.player;
-    const mammaR = n.hidden ? (p.isMoving && !p.isCrouching ? FLUSHED_PX : 0) : mammaAlarmRadius(p, n.rec.comfort);
+    const mammaR = covered ? (p.isMoving && !p.isCrouching ? FLUSHED_PX : 0) : mammaAlarmRadius(p, n.rec.comfort);
     if (Math.hypot(p.x - cat.x, p.y - cat.y) <= mammaR) return p;
-    const person = this.scene.personNear(cat.x, cat.y, n.hidden ? FLUSHED_PX : HUMAN_ALARM_PX);
-    if (person || n.hidden) return person;
+    const person = this.scene.personNear(cat.x, cat.y, covered ? FLUSHED_PX : HUMAN_ALARM_PX);
+    if (person || covered) return person;
     const other = this.scene.npcs.find(
       ({ cat: o }) => o !== cat && o.active && o.state !== "sleeping" && !this.has(o) && Math.hypot(o.x - cat.x, o.y - cat.y) <= CAT_ALARM_PX,
     );
     return other?.cat ?? null;
   }
 
-  /** Run for the nearest cover on its side of the fright (not the bush it was flushed from), or just run. */
-  private bolt(n: Newcomer, from: Point): void {
+  /** Run for the nearest cover on its side of the fright (not the cover it was flushed from), or just run. */
+  private bolt(n: Newcomer, from: Point, covered: boolean): void {
     const { cat } = n;
     const far = (b: Point) => Math.hypot(b.x - cat.x, b.y - cat.y);
-    const flushedFrom = n.hidden ? n.bush : null;
+    const flushedFrom = covered ? n.bush : null;
     const bushes = this.cover()
       .filter((b) => b !== flushedFrom && far(b) <= BUSH_SEARCH_PX && Math.hypot(b.x - from.x, b.y - from.y) >= far(b))
       .sort((a, b) => far(a) - far(b))
       .slice(0, 3);
-    n.hidden = false;
     cat.setAlpha(1);
+    n.slinking = false;
     for (const bush of bushes) {
       const route = this.scene.catRoute(cat, bush);
       if (!route) continue;
       n.bush = bush;
+      n.hidden = true; // on its way
       cat.setHome(bush.x, bush.y, 8);
       cat.followRoute(route, () => this.hide(n, bush), true);
       return;
     }
+    // nowhere to hide: out in the open, a frightened newcomer again
+    n.hidden = false;
+    cat.setManner(SKULK_SPEED, NEWCOMER_HABITS);
     cat.triggerFlee(from.x, from.y);
   }
 
   private hide(n: Newcomer, bush: Point): void {
+    if (!this.list.includes(n)) return; // settled (or snatched) on the way
+    n.slinking = false;
+    if (Math.hypot(n.cat.x - bush.x, n.cat.y - bush.y) > OUT_OF_COVER_PX) {
+      // the way ran out short of it (wedged against something): it gives that cover up and stays about here
+      n.hidden = false;
+      n.cat.setManner(SKULK_SPEED, NEWCOMER_HABITS);
+      n.cat.setHome(n.cat.x, n.cat.y, HOME_PX);
+      return;
+    }
     n.bush = bush;
     n.hidden = true;
     n.quietMs = 0;
@@ -257,6 +291,21 @@ export class NewcomerCats {
     n.cat.setManner(CREEP_SPEED, HIDING_HABITS);
     n.cat.setHome(bush.x, bush.y, 8);
     n.cat.setAlpha(HIDDEN_ALPHA);
+  }
+
+  /** Out of its cover: in plain sight, it creeps back in (or, with no way back, gives it up and stays about here). */
+  private slinkBack(n: Newcomer, bush: Point): void {
+    const { cat } = n;
+    cat.setAlpha(1);
+    cat.setManner(SKULK_SPEED, NEWCOMER_HABITS);
+    const route = this.scene.catRoute(cat, bush);
+    if (route) {
+      n.slinking = true;
+      cat.followRoute(route, () => this.hide(n, bush));
+      return;
+    }
+    n.hidden = false;
+    cat.setHome(cat.x, cat.y, HOME_PX);
   }
 
   /** All quiet for a good while: it dares out, but stays by its bush. */
