@@ -58,6 +58,8 @@ const LEGACY_CAT_SHEETS = ["mammacat", "blacky", "tiger", "jayco", "fluffy"];
  * learned the name of looks the same every session.
  */
 export function backgroundCatLook(index: number): Pick<NPCCatConfig, "spriteKey" | "scale" | "layout"> {
+  const street = STREET_COLONY[index - STREET_COLONY_BASE];
+  if (street) return { spriteKey: street.spriteKey };
   const pet = index === 0 ? PETS.catcat : index === 1 ? PETS.mittens : null;
   if (pet) return { spriteKey: pet.texture, scale: pet.scale, layout: "pixellab" };
   return { spriteKey: LEGACY_CAT_SHEETS[index % LEGACY_CAT_SHEETS.length] ?? "blacky" };
@@ -71,8 +73,24 @@ const COLONY_CAT_NAMES = [
   "Choco", "Mais", "Bibingka", "Sinigang", "Lambing", "Tala", "Ulan", "Kisig",
 ];
 
+/**
+ * The street colony on the city side of Ayala Ave, by the underpass: three cats
+ * the office guards look after, on reserved indices far above the park roster
+ * (whose indices grow one by one with newcomers), so neither ever renumbers the other.
+ */
+export const STREET_COLONY_BASE = 1000;
+export const STREET_COLONY = [
+  // Simba: golden, fluffy, king of the rock in the middle of the walkway
+  { name: "Simba", spriteKey: "fluffy", tint: 0xf0a848 },
+  { name: "Bantay", spriteKey: "blacky", tint: 0x3a3a3a },
+  { name: "Pandan", spriteKey: "tiger", tint: 0xb4ab9c },
+] as const;
+export const isStreetColonyIndex = (index: number): boolean => index >= STREET_COLONY_BASE && index < STREET_COLONY_BASE + STREET_COLONY.length;
+
 /** Background colony cat `index`'s name: fixed per index, numbered once the list runs out. */
 export function colonyCatName(index: number): string {
+  const street = STREET_COLONY[index - STREET_COLONY_BASE];
+  if (street) return street.name;
   const base = COLONY_CAT_NAMES[index % COLONY_CAT_NAMES.length] ?? "Mingming";
   const round = Math.floor(index / COLONY_CAT_NAMES.length);
   return round === 0 ? base : `${base} ${round + 1}`;

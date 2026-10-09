@@ -1,7 +1,7 @@
 import type Phaser from "phaser";
 import type { GameScene } from "../scenes/GameScene";
 import type { HUDScene } from "../scenes/HUDScene";
-import { NPCCat } from "../sprites/NPCCat";
+import { NPCCat, type NPCCatConfig } from "../sprites/NPCCat";
 import { ThreatIndicator } from "./ThreatIndicator";
 import { StoryKeys } from "../registry/storyKeys";
 import {
@@ -15,9 +15,12 @@ import {
   colonyCatName,
   computeBackgroundSpawnCount,
   decrementColonyTotal,
+  isStreetColonyIndex,
   readIndexList,
+  STREET_COLONY,
+  STREET_COLONY_BASE,
 } from "../utils/colonySpawn";
-import { placesOfType } from "../utils/mapPlaces";
+import { placeNamed, placesOfType } from "../utils/mapPlaces";
 import { inCarPath } from "../utils/kerbsideDropoff";
 
 const DUMPED_COMFORT_WINDOW_MS = 5_000;
@@ -54,6 +57,9 @@ export class ColonyDynamicsSystem {
   private namedIndices = new Set<number>();
   private lostIndices = new Set<number>();
   private nextIndex = 0;
+  /** Simba and his rock: after a stroll he climbs back up. */
+  private perch: { cat: NPCCat; at: { x: number; y: number } } | null = null;
+  private streetColonyNarrated = false;
 
   constructor(scene: GameScene) {
     this.scene = scene;
@@ -156,17 +162,18 @@ export class ColonyDynamicsSystem {
       cy: z.y,
       radius: Number(z.props.radius) || 300,
     }));
+    this.namedIndices = new Set(readIndexList(this.scene.registry.get(StoryKeys.COLONY_NAMED)));
+    this.lostIndices = new Set(readIndexList(this.scene.registry.get(StoryKeys.COLONY_LOST)));
     if (zones.length === 0) return;
     // Cat cat and Mittens (indices 0 and 1) are friends with Ella: they share a
     // home in the west colony, which her walk passes through, and like Mamma Cat from the start.
     const petsZone = zones.find((z) => z.name === "colony_west") ?? zones[0]!;
     let petsHome: { x: number; y: number } | null = null;
 
-    this.namedIndices = new Set(readIndexList(this.scene.registry.get(StoryKeys.COLONY_NAMED)));
-    this.lostIndices = new Set(readIndexList(this.scene.registry.get(StoryKeys.COLONY_LOST)));
     const count = computeBackgroundSpawnCount(this.colonyCountValue, NAMED_AND_MAMMA_COUNT, VISIBLE_BACKGROUND_CAP);
     const indices = backgroundIndices(count, this.lostIndices);
-    this.nextIndex = Math.max(-1, ...indices, ...this.lostIndices) + 1;
+    // newcomers number on from the park roster, never into the street colony's block
+    this.nextIndex = Math.max(-1, ...indices, ...[...this.lostIndices].filter((i) => i < STREET_COLONY_BASE)) + 1;
     indices.forEach((index, i) => {
       if (index <= 1) {
         const near = petsHome ? { cx: petsHome.x, cy: petsHome.y, radius: 60 } : { cx: petsZone.cx, cy: petsZone.cy, radius: 120 };
@@ -183,6 +190,73 @@ export class ColonyDynamicsSystem {
     });
   }
 
+  /**
+   * The street colony across Ayala Ave by the underpass (map `street_colony`,
+   * `cat_house`, `cat_rock`, `colony_bowl` places): three friendly cats the
+   * office guards look after, their houses and bowls, and Simba's rock. The
+   * bowls are food sources (GameScene). Call after {@link spawnInitialBackgroundCats}.
+   */
+  spawnStreetColony(): void {
+    const places = this.scene.places;
+    const colony = placeNamed(places, "street_colony");
+    const rock = placeNamed(places, "cat_rock");
+    const houses = placesOfType(places, "cat_house");
+    if (!colony || !rock || houses.length === 0) return;
+    const add = this.scene.add;
+    // the rock's top face (texture 20,10) under Simba's feet, about 12 px below his centre
+    add.image(rock.x, rock.y + 12, "cat_rock").setOrigin(0.5, 10 / 26).setDepth(2.95);
+    for (const h of houses) add.image(h.x, h.y + 14, "cat_house").setOrigin(0.5, 1).setDepth(2.96);
+    for (const b of placesOfType(places, "colony_bowl"))
+      add.image(b.x, b.y + 8, b.props.source === "water_bowl" ? "cat_bowl_water" : "cat_bowl_food").setDepth(1.9);
+
+    const home = { cx: colony.x, cy: colony.y, radius: Number(colony.props.radius) || 64 };
+    STREET_COLONY.forEach((look, k) => {
+      const index = STREET_COLONY_BASE + k;
+      if (this.lostIndices.has(index)) return;
+      if (k === 0) {
+        const simba = this.addColonyCat(index, rock.x, rock.y, { cx: rock.x, cy: rock.y, radius: 40 }, "friendly", {
+          // a sun lover: sits and dozes up there all day, strolls a little at dawn and dusk
+          behaviour: {
+            dawn: { idle: 0.5, walking: 0.1, sleeping: 0.4 },
+            day: { idle: 0.4, walking: 0, sleeping: 0.6 },
+            evening: { idle: 0.5, walking: 0.2, sleeping: 0.3 },
+            night: { idle: 0.2, walking: 0.1, sleeping: 0.7 },
+          },
+        });
+        simba.setTint(look.tint);
+        this.perch = { cat: simba, at: { x: rock.x, y: rock.y } };
+        return;
+      }
+      const house = houses[(k - 1) % houses.length]!;
+      this.addColonyCat(index, house.x, house.y + 8, home, "friendly").setTint(look.tint);
+    });
+  }
+
+  /** One of the street colony across Ayala Ave (they have their own bowls: no trips to the park's water). */
+  isStreetCat(cat: NPCCat): boolean {
+    const index = this.backgroundIndex.get(cat);
+    return index !== undefined && isStreetColonyIndex(index);
+  }
+
+  /** Back up on his rock after a stroll; and the first time each session she finds the street colony, she takes it in. */
+  private tickStreetColony(): void {
+    const p = this.perch;
+    if (p && p.cat.active && p.cat.state === "idle" && !p.cat.onErrand && !p.cat.inDialogue && Math.hypot(p.cat.x - p.at.x, p.cat.y - p.at.y) > 8)
+      p.cat.followRoute([p.at], () => undefined);
+    const colony = placeNamed(this.scene.places, "street_colony");
+    if (this.streetColonyNarrated || !colony || !p) return;
+    // by the houses, or by Simba's rock as she comes up from the underpass
+    const player = this.scene.player;
+    const near = [colony, p.at].find((q) => Math.hypot(player.x - q.x, player.y - q.y) <= 160);
+    if (!near) return;
+    this.streetColonyNarrated = true;
+    this.scene.narrateIfPerceivable(
+      "Little houses tucked against the wall, bowls set out by the building guards. Three cats live here, and the golden one up on the rock watches you come.",
+      near,
+      200,
+    );
+  }
+
   /** Background cat `index` (fixed look and name), with its colliders and name tag. */
   private addColonyCat(
     index: number,
@@ -190,6 +264,7 @@ export class ColonyDynamicsSystem {
     y: number,
     homeZone: { cx: number; cy: number; radius: number },
     disposition: "neutral" | "wary" | "friendly" | "territorial",
+    opts: Pick<NPCCatConfig, "behaviour"> = {},
   ): NPCCat {
     const cat = new NPCCat(this.scene, {
       name: `Colony Cat ${index + 1}`,
@@ -198,6 +273,7 @@ export class ColonyDynamicsSystem {
       y,
       homeZone,
       disposition,
+      ...opts,
     });
     this.backgroundIndex.set(cat, index);
     const ground = this.scene.groundLayer;
@@ -218,6 +294,7 @@ export class ColonyDynamicsSystem {
    */
   tick(): void {
     if (this.scene.dialogue.isActive || this.dumpingInProgressFlag) return;
+    this.tickStreetColony();
     // Registry values are persisted through save/load and typed as `unknown`.
     // Normalise defensively so a corrupt/edited save (NaN, negative, non-
     // finite, string) can't silently wedge the dumping state machine —

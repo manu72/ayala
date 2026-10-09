@@ -638,6 +638,7 @@ export class GameScene extends Phaser.Scene {
     this.spawnNPC("Pedigree", "fluffy", "spawn_pedigree", "neutral", 150, 6448, 4656);
     this.spawnGingerTwins();
     this.colony.spawnInitialBackgroundCats();
+    this.colony.spawnStreetColony();
     this.startWaterTrips();
 
     this.restoreDispositions();
@@ -672,6 +673,11 @@ export class GameScene extends Phaser.Scene {
       this.foodSources.restoreFromStates(savedSourceStates);
     } else {
       this.placeFoodSources();
+    }
+    // the street colony's bowls across Ayala Ave, also for saves made before they were there
+    for (const bowl of placesOfType(this.places, "colony_bowl")) {
+      const source = bowl.props.source;
+      if (source === "feeding_station" || source === "water_bowl") this.foodSources.ensureSource(source, bowl.x, bowl.y);
     }
 
     if (this.input.keyboard) {
@@ -1999,7 +2005,8 @@ export class GameScene extends Phaser.Scene {
   private startWaterTrips(): void {
     const spots = drinkSpots(this.map.width, this.map.height, TILE_SIZE, this.isWaterCell, (cx, cy) => !this.isExplorationCellBlocked(cx, cy));
     this.waterTrips = new CatWaterTrips<NPCCat>({
-      cats: () => this.npcs.map(({ cat }) => cat),
+      // the street colony across Ayala Ave has its own water bowl (and no road-free way to the park's)
+      cats: () => this.npcs.map(({ cat }) => cat).filter((cat) => !this.colony.isStreetCat(cat)),
       spots,
       route: (from, to) => {
         const { path } = routeHumanPath([from, to], this.createHumanNavigationGrid());
@@ -2427,7 +2434,9 @@ export class GameScene extends Phaser.Scene {
     this.shelterPoints = shelterNames
       .map((name) => this.map.findObject("spawns", (o) => o.name === name))
       .filter((s): s is Phaser.Types.Tilemaps.TiledObject => Boolean(s))
-      .map((s) => ({ x: s.x ?? 0, y: s.y ?? 0 }));
+      .map((s) => ({ x: s.x ?? 0, y: s.y ?? 0 }))
+      // the street colony's cat houses across Ayala Ave
+      .concat(placesOfType(this.places, "cat_house").map(({ x, y }) => ({ x, y })));
   }
 
   // ──────────── NPC Interaction ────────────

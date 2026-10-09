@@ -704,6 +704,19 @@ for (const f of features) {
 // easter egg: zombies loiter on the city side of Makati Ave, against the map's east edge
 const ZOMBIES = [[533, 115], [521, -11], [505, -49], [533, -99], [499, -163], [505, -251]]
 ZOMBIES.forEach((p, n) => point(`zombie_${n + 1}`, 'zombie_home', nearestCell(p, clear)))
+// a street colony of 3 on the city side of Ayala Ave, where the underpass comes up by the end of
+// Legazpi St: houses in the nook of the L.V. Locsin wall, bowls the office guards fill, and Simba's
+// rock in the middle of the walkway
+{
+  const open = (x, y) => !blocked(idx(x, y))
+  const at = (name, type, p, props) => point(name, type, nearestCell(p, open), props)
+  // the two house cats' home: the nook itself, well clear of the bowls (Space by a bowl eats, not greets)
+  at('street_colony', 'street_colony', [264, -230], { radius: 64 })
+  at('cat_rock', 'cat_rock', [253, -219])
+  ;[[263, -229], [265, -229], [263, -231]].forEach((p, n) => at(`cat_house_${n + 1}`, 'cat_house', p))
+  at('street_food_bowl', 'colony_bowl', [255, -225], { source: 'feeding_station' })
+  at('street_water_bowl', 'colony_bowl', [257, -225], { source: 'water_bowl' })
+}
 
 // ─────────────────────────────────────────
 // GROUND ART — dual-grid autotiles baked into atg-ground.png (visual only)

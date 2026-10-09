@@ -1,7 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import {
+  backgroundCatLook,
   backgroundIndices,
   colonyCatName,
+  isStreetColonyIndex,
+  STREET_COLONY_BASE,
   computeBackgroundSpawnCount,
   decrementColonyTotal,
   readIndexList,
@@ -102,5 +105,15 @@ describe('colony cat names', () => {
     expect(readIndexList([1, -1, 2.5, 'x', null, NaN, 4])).toEqual([1, 4])
     expect(readIndexList(undefined)).toEqual([])
     expect(readIndexList('3')).toEqual([])
+  })
+
+  it('names the street colony across Ayala Ave from its own block, Simba first, clear of the park roster', () => {
+    const street = [0, 1, 2].map((k) => STREET_COLONY_BASE + k)
+    expect(street.map(colonyCatName)).toEqual(['Simba', 'Bantay', 'Pandan'])
+    expect(backgroundCatLook(STREET_COLONY_BASE).spriteKey).toBe('fluffy')
+    expect(street.every(isStreetColonyIndex)).toBe(true)
+    expect([STREET_COLONY_BASE - 1, STREET_COLONY_BASE + 3, 0, 24].some(isStreetColonyIndex)).toBe(false)
+    const park = Array.from({ length: 200 }, (_, i) => colonyCatName(i))
+    expect(park).not.toContain('Simba')
   })
 })
