@@ -19,8 +19,20 @@ self.addEventListener("activate", (event) => {
 /** Same-origin game files only: never the AI proxy. */
 const cacheable = (url) => url.origin === self.location.origin && !url.pathname.includes("/api/");
 
+/** cache.put rejects a 200 whose Cache-Control directive contains no-store. */
+const storable = (response) => {
+  if (response.status !== 200) return false;
+  const control = response.headers.get("Cache-Control") ?? "";
+  return !control.split(",").some((directive) => directive.trim().toLowerCase().startsWith("no-store"));
+};
+
+/** Resolves when the write finishes or is skipped. Callers hand it to waitUntil. */
 const store = (request, response) => {
-  if (response.status === 200) void caches.open(CACHE).then((cache) => cache.put(request, response)).catch(() => {});
+  if (!storable(response)) return Promise.resolve();
+  return caches
+    .open(CACHE)
+    .then((cache) => cache.put(request, response.clone()))
+    .catch(() => {});
 };
 
 /** The cached page (any query), else the app's start page; undefined when there is none. */
@@ -35,12 +47,14 @@ self.addEventListener("fetch", (event) => {
   if (request.method !== "GET" || !cacheable(new URL(request.url))) return;
 
   if (request.mode === "navigate") {
-    // no-cache: revalidate, or the HTTP cache (GitHub Pages: max-age=600) hands back the old page after a deploy
+    // no-cache: revalidate, or the HTTP cache (GitHub Pages: max-age=600) hands back the old page after a deploy.
+    // `write` is assigned inside `network`'s first reaction, before this waitUntil continuation reads it.
+    let write = Promise.resolve();
     const network = fetch(request.url, { cache: "no-cache", credentials: "same-origin" }).then((response) => {
-      store(request, response.clone());
+      write = store(request, response);
       return response;
     });
-    event.waitUntil(network.catch(() => {}));
+    event.waitUntil(network.then(() => write).catch(() => {}));
     event.respondWith(
       (async () => {
         // One bar of signal can hang the request for a minute: after 3 s use the cached page if there is one.
@@ -57,16 +71,20 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  event.respondWith(
-    caches.match(request).catch(() => undefined).then(
-      (hit) =>
-        hit ??
-        fetch(request).then((response) => {
-          store(request, response.clone());
-          return response;
-        }),
-    ),
-  );
+  // Same ordering as navigation: the write promise is stored before `opened` fulfills, so waitUntil covers it.
+  let write = Promise.resolve();
+  const opened = caches
+    .match(request)
+    .catch(() => undefined)
+    .then((hit) => {
+      if (hit) return hit;
+      return fetch(request).then((response) => {
+        write = store(request, response);
+        return response;
+      });
+    });
+  event.waitUntil(opened.then(() => write).catch(() => {}));
+  event.respondWith(opened);
 });
 
 // The page downloads most files before this worker takes over on a first visit; it posts their
@@ -82,7 +100,7 @@ self.addEventListener("message", (event) => {
           if (!cacheable(url) || (await cache.match(url))) return;
           try {
             const response = await fetch(url);
-            if (response.status === 200) await cache.put(url, response);
+            if (storable(response)) await cache.put(url, response);
           } catch {
             // offline or gone: it will be cached the next time it is fetched
           }

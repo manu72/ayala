@@ -1,7 +1,7 @@
 # WORKING_MEMORY
 
 > Persistent memory layer for AI-assisted development sessions.
-> Last Updated: 2026-05-03
+> Last Updated: 2026-10-10
 > Version: 0.3.7
 
 ---
@@ -204,6 +204,12 @@ SmallDog.png, WhiteDog.png, BrownDog.png — randomly assigned to dog walkers
 - **Transient state that affects future scoring must be save-backed.** If a flag is set by an event before an autosave but consumed later (e.g. "snatched this night" consumed at dawn), mirror it into a tracked registry/save key before saving and clear that key when the scoring event consumes it.
 - **`localStorage` access itself can throw:** In Firefox with `dom.storage.enabled=false`, sandboxed iframes, and Safari with storage blocked for third-party contexts, *reading* `window.localStorage` triggers a SecurityError from the getter. `typeof localStorage` does NOT suppress this — `typeof` only guards undeclared identifiers, and the global is declared. Any boot-path code that touches storage must wrap the reference acquisition (not just `getItem`/`setItem`) in try/catch and fall back to `undefined`. See `GameScene.create()` around `migrateLegacyIntroFlag`.
 - **Chapter narration autosave waits for the modal.** The chapter is committed before its narration closes. `canAutoSaveNow` and `autoSave` both no-op while `chapterNarrationActive` is set; the modal's completion callback still saves once the dialogue is inactive. A page-hide during those lines must not persist the new chapter.
+
+### Offline cache and boot loading
+
+- **Phaser's per-file XHR timeout wins.** `File` builds `xhrSettings` with `timeout: 0`, and `MergeXHRSettings` copies that over `loader.xhr.timeout`. Setting only `this.load.xhr.timeout` never fires. Set `file.xhrSettings.timeout` in the `addfile` handler (BootScene does both). A stalled asset otherwise leaves `ASSETS_READY` false, and StartScene stays on "Starting…" even though `update()` already switches to the retry line when the value is `"failed"`.
+- **`cache.put` rejects `Cache-Control: no-store`.** Skip the write when a directive starts with `no-store`. The put promise has to be what `fetch`'s `waitUntil` waits on (navigation included); dropping it lets the worker die before the write finishes.
+- **`navigator.serviceWorker.ready` is the worker already in control.** During an update that is the previous build. Snapshot the loaded URL list and `postMessage` it only after the worker whose script `build` param equals `BUILD_ID` reaches `activated` — `activate` deletes every other `ayala-*` cache.
 
 ### Entity Identity
 

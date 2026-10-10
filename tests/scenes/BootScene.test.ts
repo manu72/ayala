@@ -8,7 +8,10 @@ function hub() {
     on: (e: string, fn: Handler) => void handlers.set(e, [...(handlers.get(e) ?? []), fn]),
     once(e: string, fn: Handler) {
       const wrapped: Handler = (...a) => {
-        handlers.set(e, (handlers.get(e) ?? []).filter((h) => h !== wrapped));
+        handlers.set(
+          e,
+          (handlers.get(e) ?? []).filter((h) => h !== wrapped),
+        );
         fn(...a);
       };
       this.on(e, wrapped);
@@ -26,15 +29,19 @@ vi.mock("phaser", () => {
     queued: string[] = [];
     load = Object.assign(hub(), {
       start: vi.fn(),
+      xhr: { timeout: 0 },
       ...Object.fromEntries(
-        ["image", "tilemapTiledJSON", "atlas", "spritesheet", "audio", "svg"].map((m) => [m, (key: string) => this.queued.push(key)]),
+        ["image", "tilemapTiledJSON", "atlas", "spritesheet", "audio", "svg"].map((m) => [
+          m,
+          (key: string) => this.queued.push(key),
+        ]),
       ),
     });
   }
   return { default: { Scene } };
 });
 
-import { ASSETS_READY, BootScene } from "../../src/scenes/BootScene";
+import { ASSET_XHR_TIMEOUT_MS, ASSETS_READY, BootScene } from "../../src/scenes/BootScene";
 
 function boot() {
   const scene = new BootScene() as unknown as {
@@ -42,7 +49,7 @@ function boot() {
     registry: Map<string, unknown>;
     scene: { launch: ReturnType<typeof vi.fn>; stop: ReturnType<typeof vi.fn> };
     queued: string[];
-    load: ReturnType<typeof hub> & { start: ReturnType<typeof vi.fn> };
+    load: ReturnType<typeof hub> & { start: ReturnType<typeof vi.fn>; xhr: { timeout: number } };
   };
   scene.create();
   return scene;
@@ -74,13 +81,16 @@ describe("BootScene title-first loading", () => {
     expect(scene.scene.stop).toHaveBeenCalledOnce();
   });
 
-  it("puts the build id on asset URLs, except audio", () => {
+  it("puts the build id on asset URLs, except audio, and bounds each request", () => {
     const scene = boot();
-    const image = { url: "assets/sprites/a.png" };
-    const audio = { url: "assets/sounds/b.mp3" };
+    expect(scene.load.xhr.timeout).toBe(ASSET_XHR_TIMEOUT_MS);
+    const image = { url: "assets/sprites/a.png", xhrSettings: { timeout: 0 } };
+    const audio = { url: "assets/sounds/b.mp3", xhrSettings: { timeout: 0 } };
     scene.load.emit("addfile", "a", "image", scene.load, image);
     scene.load.emit("addfile", "b", "audio", scene.load, audio);
     expect(image.url).toBe("assets/sprites/a.png?v=test");
     expect(audio.url).toBe("assets/sounds/b.mp3");
+    expect(image.xhrSettings.timeout).toBe(ASSET_XHR_TIMEOUT_MS);
+    expect(audio.xhrSettings.timeout).toBe(ASSET_XHR_TIMEOUT_MS);
   });
 });

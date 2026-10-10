@@ -8,6 +8,13 @@ import { cacheLoadedFiles } from "../utils/offlineCache";
 export const ASSETS_READY = "ASSETS_READY";
 export const ASSET_PROGRESS = "ASSET_PROGRESS";
 
+/**
+ * Per-request cap so a stalled download cannot leave ASSETS_READY false.
+ * Phaser still retries twice (loader.maxRetries), then the loader's complete
+ * event reports the failure and StartScene offers a retry.
+ */
+export const ASSET_XHR_TIMEOUT_MS = 45_000;
+
 export class BootScene extends Phaser.Scene {
   constructor() {
     super({ key: "BootScene" });
@@ -298,9 +305,13 @@ export class BootScene extends Phaser.Scene {
     this.registry.set(ASSET_PROGRESS, 0);
     this.scene.launch("StartScene");
 
-    // Audio (~7 MB) keeps its plain URL: mixing it across builds is harmless, and after a deploy
-    // it then revalidates (ETag) instead of downloading again.
+    // File xhrSettings.timeout defaults to 0 and overrides this.load.xhr in MergeXHRSettings,
+    // so a loader-only timeout never fires. Set both before the queue starts.
+    this.load.xhr.timeout = ASSET_XHR_TIMEOUT_MS;
     this.load.on("addfile", (_key: string, type: string, _loader: unknown, file: Phaser.Loader.File) => {
+      file.xhrSettings.timeout = ASSET_XHR_TIMEOUT_MS;
+      // Audio (~7 MB) keeps its plain URL: mixing it across builds is harmless, and after a deploy
+      // it then revalidates (ETag) instead of downloading again.
       if (typeof file.url === "string" && type !== "audio") file.url = versionedUrl(file.url);
     });
     this.load.on("progress", (p: number) => this.registry.set(ASSET_PROGRESS, p));
