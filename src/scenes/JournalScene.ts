@@ -312,7 +312,7 @@ export class JournalScene extends Phaser.Scene {
       const days = daysUntilSunday(new Date());
       const label = gameScene.sunday.isSunday
         ? `Today is Sunday: the Paseo market (06:00–10:00) and the ${gameScene.sunday.festive ? "Festival of Lights" : "Sunday Lights"} (17:00–23:00)`
-        : `Sunday market & lights: ${days === 1 ? "tomorrow" : `in ${days} days`}`;
+        : `Sunday market & lights: ${days === 0 ? "from the next dawn" : days === 1 ? "tomorrow" : `in ${days} days`}`;
       this.container.add(
         this.add.text(0, yOffset, label, { fontFamily: FONT_FAMILY, fontSize: "12px", color: "#ffd34d" }),
       );

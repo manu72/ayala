@@ -259,8 +259,16 @@ export class CatDialogueController {
     // A rumour she hasn't heard takes this press (scripted, no trust); her usual conversation is the next one.
     const rumour = scene.eggs?.takeCatLines(name) ?? scene.curiosity?.takeRumour(name);
     if (rumour) {
+      // engaged like the AI path: the cat stays put, and tickEngagement breaks it off if she walks away
+      cat.engageDialogue(scene.player.x, scene.player.y, "curious");
+      scene.player.faceToward(cat.x, cat.y);
+      this.engagedDialogueNPC = cat;
       scene.emotes.show(scene, cat, "curious");
       scene.dialogue.show(rumour, () => {
+        if (this.engagedDialogueNPC === cat) {
+          cat.disengageDialogue();
+          this.engagedDialogueNPC = null;
+        }
         this.lastDialoguePartner = cat;
         this.lastDialoguePartnerAt = scene.time.now;
       });

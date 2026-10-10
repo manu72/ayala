@@ -166,7 +166,7 @@ export class EasterEggSystem {
     }
     if (!this.carrying) {
       if (this.state.letter !== "given" && this.state.letter !== "carried" && near(this.letterSpot())) return this.pickUp("letter"), true;
-      if (this.state.plush !== "carried" && near(this.plushSpot())) return this.pickUp("plush"), true;
+      if (this.state.plush !== "given" && this.state.plush !== "carried" && near(this.plushSpot())) return this.pickUp("plush"), true;
     }
     const collar = placeNamed(this.scene.places, "egg_collar");
     if (this.state.collar === undefined && near(collar)) return this.digCollar(collar!), true;
@@ -179,12 +179,14 @@ export class EasterEggSystem {
   /** Lines a named cat has for her right now from an egg (Blacky at 3am, Pedigree after the collar). */
   takeCatLines(catName: string): string[] | null {
     const h = this.scene.sunday.hour();
-    if (catName === "Blacky" && !this.state.blackyStory && h >= STORY_HOURS[0] && h < STORY_HOURS[1]) {
+    // never in place of a first meeting (same rule as CuriositySystem's rumours)
+    const met = (key: string) => !!this.scene.registry.get(key);
+    if (catName === "Blacky" && met("MET_BLACKY") && !this.state.blackyStory && h >= STORY_HOURS[0] && h < STORY_HOURS[1]) {
       this.state.blackyStory = true;
       this.persist();
       return BLACKY_STORY;
     }
-    if (catName === "Pedigree" && this.state.collar !== undefined && !this.state.pedigreeThanked) {
+    if (catName === "Pedigree" && met("PEDIGREE_TALKS") && this.state.collar !== undefined && !this.state.pedigreeThanked) {
       this.state.pedigreeThanked = true;
       this.persist();
       return PEDIGREE_THANKS;
@@ -466,12 +468,13 @@ export class EasterEggSystem {
   }
 
   private gather(time: number): void {
+    const scene = this.scene;
+    const named = NAMED_CATS.map((n) => scene.npcs.find((e) => e.cat.npcName === n)?.cat).filter((c): c is NonNullable<typeof c> => !!c?.active);
+    if (named.length === 0) return;
     this.state.gathered = true;
     this.persist();
-    const scene = this.scene;
     const { player } = scene;
     const centre = { x: player.x, y: player.y };
-    const named = NAMED_CATS.map((n) => scene.npcs.find((e) => e.cat.npcName === n)?.cat).filter((c): c is NonNullable<typeof c> => !!c?.active);
     // every other cat she knows by name: the colony she greeted, Cat cat and Mittens, settled newcomers, the street cats
     const fringe = scene.npcs.map((e) => e.cat).filter((c) => c.active && !named.includes(c) && scene.colony.knowsCat(c));
     const rng = seededRng(mixSeed(scene.dayNight.dayCount, 5150));

@@ -87,7 +87,7 @@ describe("EasterEggSystem", () => {
   });
 
   it("Pedigree's collar takes three digs, and only then does she thank Mamma Cat (once)", () => {
-    const { scene, shown } = makeScene();
+    const { scene, shown } = makeScene(new Map([["PEDIGREE_TALKS", 1]]));
     const eggs = new EasterEggSystem(scene);
     expect(eggs.takeCatLines("Pedigree")).toBeNull();
     scene.player.x = 700;
@@ -102,13 +102,58 @@ describe("EasterEggSystem", () => {
   });
 
   it("Blacky's Midnight Story is told only around 3am, once", () => {
-    const { scene, setHour } = makeScene();
+    const { scene, setHour } = makeScene(new Map([["MET_BLACKY", true]]));
     const eggs = new EasterEggSystem(scene);
     setHour(1);
     expect(eggs.takeCatLines("Blacky")).toBeNull();
     setHour(3);
     expect(eggs.takeCatLines("Blacky")?.[1]).toMatch(/one before you/);
     expect(eggs.takeCatLines("Blacky")).toBeNull();
+  });
+
+  it("never takes the place of a first meeting: Blacky's story and Pedigree's thanks wait until they've met her", () => {
+    const { scene, reg, setHour } = makeScene();
+    const eggs = new EasterEggSystem(scene);
+    setHour(3);
+    expect(eggs.takeCatLines("Blacky")).toBeNull();
+    scene.player.x = 700;
+    scene.player.y = 110;
+    eggs.tryInteract();
+    eggs.tryInteract();
+    eggs.tryInteract();
+    expect(eggs.takeCatLines("Pedigree")).toBeNull();
+    reg.set("MET_BLACKY", true);
+    reg.set("PEDIGREE_TALKS", 1);
+    expect(eggs.takeCatLines("Blacky")).not.toBeNull();
+    expect(eggs.takeCatLines("Pedigree")).not.toBeNull();
+  });
+
+  it("once the plush is given to Kish it can't be picked up (and handed over) again", () => {
+    const { scene, reg } = makeScene();
+    const kish = { x: 2000, y: 400, visible: true, active: true };
+    (scene.camille as { activeKishNPC: unknown }).activeKishNPC = kish;
+    const eggs = new EasterEggSystem(scene);
+    scene.player.x = 400;
+    scene.player.y = 105;
+    expect(eggs.tryInteract()).toBe(true); // picks it up
+    scene.player.x = 1990;
+    scene.player.y = 400;
+    expect(eggs.tryInteract()).toBe(true); // gives it to Kish
+    expect((reg.get(EGGS_KEY) as { plush: string }).plush).toBe("given");
+    scene.player.x = 400;
+    scene.player.y = 105;
+    expect(eggs.tryInteract()).toBe(false);
+    expect((reg.get(EGGS_KEY) as { plush: string }).plush).toBe("given");
+  });
+
+  it("the gathering stays available when none of the named cats is about", () => {
+    const { scene, reg } = makeScene();
+    scene.dayNight.currentPhase = "evening";
+    (scene.camille as { pendingEncounterNumber: number }).pendingEncounterNumber = 5;
+    scene.trust.getCatTrust = () => 100;
+    const eggs = new EasterEggSystem(scene);
+    eggs.update(0, 16);
+    expect((reg.get(EGGS_KEY) as { gathered?: boolean }).gathered).toBeUndefined();
   });
 
   it("finds each hidden kitten once, when she comes close", () => {

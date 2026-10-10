@@ -159,7 +159,7 @@ export class AudioSystem {
       this.festival.play();
     }
     this.festival?.setVolume(FESTIVAL_VOLUME * lvl);
-    if (this.ayala && !this.dangerActive && this.fadeTweens.length === 0) {
+    if (this.ayala && !this.dangerActive && !this.fadeTweens.some((t) => t.isPlaying())) {
       this.ayala.setVolume(this.currentTargets().ayala * (1 - 0.75 * lvl));
     }
   }

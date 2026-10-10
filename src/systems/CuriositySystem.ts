@@ -264,6 +264,7 @@ export class CuriositySystem {
         this.scene.tweens.add({ targets: this.windowTell, y: w.y - 27, yoyo: true, repeat: -1, duration: 650, ease: "Sine.easeInOut" });
       }
     } else if ((!open || !near) && this.windowTell) {
+      this.scene.tweens.killTweensOf(this.windowTell);
       this.windowTell.destroy();
       this.windowTell = null;
     }
@@ -276,7 +277,7 @@ export class CuriositySystem {
     const body = player.body as Phaser.Physics.Arcade.Body | null;
     const still = (body?.velocity.length() ?? 1) < 1;
     const guard = this.friendlyGuardNear();
-    if (!guard || !still || dialogue.isActive || day - this.state.taleDay < TALE_EVERY_DAYS) {
+    if (!guard || !still || player.isResting || dialogue.isActive || day - this.state.taleDay < TALE_EVERY_DAYS) {
       this.sitMs = 0;
       return;
     }
