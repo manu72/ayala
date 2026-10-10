@@ -165,6 +165,16 @@ describe("AudioSystem music loaded after the title screen", () => {
   });
 });
 
+describe("AudioSystem one-shots whose file failed to load", () => {
+  it("skip the meow and the growl instead of throwing", () => {
+    const scene = createSceneMock([]);
+    const audio = startedAudio(scene);
+    audio.playMeow();
+    audio.playCatGrowl();
+    expect(scene.sound.play).not.toHaveBeenCalled();
+  });
+});
+
 describe("AudioSystem traffic SFX", () => {
   it("rate-limits the screech and the horn independently", () => {
     const scene = createSceneMock();

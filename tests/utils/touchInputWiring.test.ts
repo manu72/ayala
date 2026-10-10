@@ -50,6 +50,7 @@ function createGameObject() {
     setInteractive: vi.fn(() => obj),
     setOrigin: vi.fn(() => obj),
     setPadding: vi.fn(() => obj),
+    setScale: vi.fn(() => obj),
     setPosition: vi.fn((x: number, y: number) => {
       obj.x = x;
       obj.y = y;
@@ -724,6 +725,58 @@ describe("touch input scene wiring", () => {
     scene.registry.get.mockImplementation((key: string) => key === "GAME_OVER");
     scene["saveAndPauseOnHide"]();
     expect(scene.autoSave).toHaveBeenCalledOnce();
+  });
+
+  it("a start chosen before the game assets have loaded runs once they have", () => {
+    const hasSave = vi.spyOn(SaveSystem, "hasSave").mockReturnValue(false);
+    try {
+      const scene = new StartScene() as unknown as AnyScene;
+      let ready = false;
+      scene.registry.get.mockImplementation((key: string) => (key === "ASSETS_READY" ? ready : key === "ASSET_PROGRESS" ? 0.5 : undefined));
+      scene.cameras.main.setBackgroundColor = vi.fn();
+      scene.input.keyboard.on = vi.fn();
+      const startFreshGame = vi.spyOn(scene as never, "startFreshGame").mockResolvedValue(undefined as never);
+      scene.create();
+      const surface = latestSurface();
+
+      surface.texts.find((t) => t.text === "New Game")!.emit("pointerdown", { wasTouch: true });
+      scene.update();
+      expect(startFreshGame).not.toHaveBeenCalled();
+      expect(surface.texts.some((t) => t.text === "Starting… 50%")).toBe(true);
+
+      ready = true;
+      scene.update();
+      expect(startFreshGame).toHaveBeenCalledOnce();
+
+      // a second tap before the scene changes doesn't start a second game
+      surface.texts.find((t) => t.text === "New Game")!.emit("pointerdown", { wasTouch: true });
+      expect(startFreshGame).toHaveBeenCalledOnce();
+    } finally {
+      hasSave.mockRestore();
+    }
+  });
+
+  it("a failed download offers a retry instead of starting a game", () => {
+    const hasSave = vi.spyOn(SaveSystem, "hasSave").mockReturnValue(false);
+    try {
+      const scene = new StartScene() as unknown as AnyScene;
+      let status: unknown = false;
+      scene.registry.get.mockImplementation((key: string) => (key === "ASSETS_READY" ? status : undefined));
+      scene.cameras.main.setBackgroundColor = vi.fn();
+      scene.input.keyboard.on = vi.fn();
+      const startFreshGame = vi.spyOn(scene as never, "startFreshGame").mockResolvedValue(undefined as never);
+      scene.create();
+      const surface = latestSurface();
+
+      status = "failed";
+      scene.update();
+      surface.texts.find((t) => t.text === "New Game")!.emit("pointerdown", { wasTouch: false });
+      scene.update();
+      expect(startFreshGame).not.toHaveBeenCalled();
+      expect(surface.texts.some((t) => t.text.startsWith("Couldn't load the game"))).toBe(true);
+    } finally {
+      hasSave.mockRestore();
+    }
   });
 
   it("on touch, New Game only erases an existing save on a second tap; a mouse click is unchanged", () => {

@@ -142,7 +142,7 @@ export class AudioSystem {
    * Silently no-op when muted or when the scene isn't running.
    */
   playMeow(): void {
-    if (this.muted || !this.scene) return;
+    if (this.muted || !this.scene || !this.scene.cache.audio.exists("sfx_meow_happy")) return;
     this.scene.sound.play("sfx_meow_happy", { volume: MEOW_VOLUME });
   }
 
@@ -152,7 +152,7 @@ export class AudioSystem {
    * don't stack into a garbled chorus.
    */
   playCatGrowl(): void {
-    if (this.muted || !this.scene) return;
+    if (this.muted || !this.scene || !this.scene.cache.audio.exists("sfx_cat_growl_warning")) return;
     const now = this.scene.time.now;
     if (now - this.lastCatGrowlAt < CAT_GROWL_COOLDOWN_MS) return;
     this.lastCatGrowlAt = now;

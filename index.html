@@ -38,9 +38,44 @@
         width: 100%;
         height: 100%;
       }
+      /* Static stand-in for the title screen while the game code downloads; StartScene removes it.
+         Sized like the 816x624 canvas (Phaser FIT): font sizes are 40 / 14 / 12 px of 624. */
+      #splash {
+        position: fixed;
+        inset: 0;
+        z-index: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: Courier, "Courier New", monospace;
+        text-align: center;
+      }
+      #splash > div {
+        position: relative;
+        width: min(100vw, 100vh * 816 / 624);
+        width: min(100vw, 100dvh * 816 / 624);
+        aspect-ratio: 816 / 624;
+        background: #111;
+      }
+      #splash p {
+        position: absolute;
+        left: 0;
+        right: 0;
+        transform: translateY(-50%);
+      }
+      #splash .title { top: 30%; color: #fff; font-weight: bold; font-size: min(6.41vh, 4.9vw); font-size: min(6.41dvh, 4.9vw); }
+      #splash .sub { top: 38%; color: #888; font-size: min(2.24vh, 1.72vw); font-size: min(2.24dvh, 1.72vw); }
+      #splash .load { top: 80%; color: #777; font-size: min(1.92vh, 1.47vw); font-size: min(1.92dvh, 1.47vw); }
     </style>
   </head>
   <body>
+    <div id="splash">
+      <div>
+        <p class="title">AYALA</p>
+        <p class="sub">A story about finding home</p>
+        <p class="load">Loading…</p>
+      </div>
+    </div>
     <div id="game-container"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>
