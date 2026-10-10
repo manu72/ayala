@@ -20,6 +20,11 @@ export class BootScene extends Phaser.Scene {
   }
 
   preload(): void {
+    // Loading bar: on a phone the boot download takes seconds, and a black screen looks broken.
+    const { width, height } = this.cameras.main;
+    const bar = this.add.rectangle(width / 2 - 160, height / 2, 320, 4, 0xffffff, 0.8).setOrigin(0, 0.5).setScale(0, 1);
+    this.load.on("progress", (p: number) => bar.setScale(p, 1));
+
     this.load.image("park-tiles", "assets/tilesets/park-tiles.png");
     this.load.image("trees-pale", "assets/tilesets/trees-pale.png");
     this.load.image("plants", "assets/tilesets/plants.png");
@@ -265,19 +270,13 @@ export class BootScene extends Phaser.Scene {
       });
     }
 
-    // Audio: two looping background tracks and a one-shot meow SFX.
-    // Phaser's SoundManager keeps these cached across scene restarts so we
-    // only pay the decode cost once at boot.
-    this.load.audio("bgm_ayala", "assets/sounds/ayala_loop_Luminous Rain.mp3");
-    this.load.audio("bgm_snatcher", "assets/sounds/snatcher_loop_Stay the Course.mp3");
-    this.load.audio("sfx_meow_happy", "assets/sounds/meow_happy.wav");
-    this.load.audio("sfx_meow_kitten", "assets/sounds/meow_kitten.wav");
+    // Audio SFX. The music loops load after the title screen is up (see create()).
+    this.load.audio("sfx_meow_happy", "assets/sounds/meow_happy.mp3");
+    this.load.audio("sfx_meow_kitten", "assets/sounds/meow_kitten.mp3");
     this.load.audio("sfx_cat_growl_warning", "assets/sounds/cat_growl_warning.mp3");
     // Traffic reactions to Mamma Cat on the road (synthesised by scripts/generate-sfx.mjs).
     this.load.audio("sfx_tyre_screech", "assets/sounds/tyre_screech.wav");
     this.load.audio("sfx_car_horn", "assets/sounds/car_horn.wav");
-    // generated placeholder (scripts/generate-sfx.mjs) until a licensed royalty-free track replaces the file
-    this.load.audio("sfx_sunday_lights", "assets/sounds/sunday_lights.wav");
 
     // Lucide volume-2 / volume-x glyphs for the HUD mute toggle. Rasterised
     // at 20x20 to match the HUD icon slot exactly (avoids runtime scaling).
@@ -288,7 +287,19 @@ export class BootScene extends Phaser.Scene {
   create(): void {
     makeLightTextures(this);
     makeStreetColonyTextures(this);
-    this.scene.start("StartScene");
+    this.load.removeAllListeners("progress");
+    this.children.removeAll(true);
+
+    // The music loops (~70% of the download) and the Sunday track aren't needed to start
+    // playing: AudioSystem starts each the moment it is cached. So they stream in behind
+    // the title screen, and this scene keeps running (it owns the loader) until they're in.
+    this.scene.launch("StartScene");
+    this.load.audio("bgm_ayala", "assets/sounds/ayala_loop_Luminous Rain.mp3");
+    this.load.audio("bgm_snatcher", "assets/sounds/snatcher_loop_Stay the Course.mp3");
+    // generated placeholder (scripts/generate-sfx.mjs) until a licensed royalty-free track replaces the file
+    this.load.audio("sfx_sunday_lights", "assets/sounds/sunday_lights.wav");
+    this.load.once("complete", () => this.scene.stop());
+    this.load.start();
   }
 }
 
