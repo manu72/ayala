@@ -59,7 +59,7 @@ Then the final encounter with Camille proceeds as normal, but with the colony wa
 **Payoff:** Rewards the player who has truly earned the colony's love. Makes the ending even more emotional — Mamma Cat isn't just chosen, she's _blessed_ by her community.
 
 
-**Built (`EasterEggSystem`):** When Camille's last encounter is waiting and every named cat's trust is 80+, the eight walk in one by one (from far off they appear a short walk away), sit round Mamma Cat facing her, the camera pulls back, and the line plays. The encounter waits until they have gathered; beat 5 itself is unchanged.
+**Built (`EasterEggSystem`):** When Camille's last encounter is waiting and every named cat's trust is 80+, the eight named cats walk in one by one and sit in a close ring round Mamma Cat, facing her. Every other cat she knows by name (the colony cats she greeted, Cat cat and Mittens, settled newcomers, the street cats) comes too, slowly, almost shyly: from further off, at a creep, stopping once on the way to look at her, then sitting on a loose, uneven fringe further out. No names or mood icons over anyone. When they are all there the camera pulls back wide enough to take in the fringe and the line plays. The encounter waits for them; beat 5 itself is unchanged.
 ---
 
 ### ✅ The Developer's Note

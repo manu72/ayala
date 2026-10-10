@@ -3,6 +3,9 @@ import type { GameScene } from "../scenes/GameScene";
 import type { HUDScene } from "../scenes/HUDScene";
 import type { HumanNPC } from "../sprites/HumanNPC";
 import { placeNamed, placesOfType, type Pt } from "../utils/mapPlaces";
+import { fringeStarts, gatheringSlots } from "../utils/gathering";
+import { mixSeed, seededRng } from "../utils/forage";
+import type { NPCCat } from "../sprites/NPCCat";
 
 /**
  * The secrets in docs/Ayala_Easter_Eggs.md: the Hidden Letter and the Stuffed Cat (carried in her
@@ -18,6 +21,15 @@ const NAMED_CATS = ["Blacky", "Tiger", "Jayco", "Jayco Jr", "Fluffy", "Pedigree"
 const GATHERING_TRUST = 80;
 /** Gathering cats further off than this appear this far away and walk the rest. */
 const GATHER_WALK_PX = 240;
+/** The fringe (every other cat she knows) appears further out, creeps in slowly, and stops once on the way. */
+const FRINGE_WALK_PX = 260;
+const FRINGE_WALK_SPEED = 22;
+const NAMED_GAP_MS = 2200;
+const FRINGE_FIRST_MS = 3500;
+const FRINGE_SPREAD_MS = 13_000;
+/** From the last cat setting off until the line: time to walk in and sit. */
+const GATHER_SETTLE_MS = 14_000;
+const GATHER_HOLD_MS = 7000;
 const BIRTH_TRUST = 50;
 const BIRTH_CHANCE = 0.4;
 const REACH_PX = 30;
@@ -445,42 +457,73 @@ export class EasterEggSystem {
     this.persist();
     const scene = this.scene;
     const { player } = scene;
-    const cats = NAMED_CATS.map((n) => scene.npcs.find((e) => e.cat.npcName === n)?.cat).filter((c): c is NonNullable<typeof c> => !!c);
-    this.gatheringUntil = time + 3000 * cats.length + 6000;
-    cats.forEach((cat, i) => {
-      const a = (i / cats.length) * Math.PI * 2;
-      const slot = { x: player.x + Math.cos(a) * 64, y: player.y + Math.sin(a) * 52 };
-      scene.time.delayedCall(i * 2200, () => {
-        const sit = () => {
-          cat.setHome(slot.x, slot.y, 8);
-          cat.drink(player, 15 * 60_000, () => {});
-        };
-        // from far off (the other end of the park), she sees them come the last stretch, one by one
-        const far = Phaser.Math.Distance.Between(cat.x, cat.y, slot.x, slot.y) > GATHER_WALK_PX;
-        if (far) {
-          const a = Phaser.Math.Angle.Between(slot.x, slot.y, cat.x, cat.y);
-          const entry = { x: slot.x + Math.cos(a) * GATHER_WALK_PX, y: slot.y + Math.sin(a) * GATHER_WALK_PX };
-          const ok = scene.isInPark(entry.x, entry.y);
-          cat.setPosition(ok ? entry.x : slot.x, ok ? entry.y : slot.y).setAlpha(0);
-          scene.tweens.add({ targets: cat, alpha: 1, duration: 1200 });
-        }
-        const route = scene.catRoute(cat, slot);
-        if (route) cat.followRoute(route, sit);
-        else {
-          cat.setPosition(slot.x, slot.y);
-          if (!far) cat.setAlpha(0);
-          scene.tweens.add({ targets: cat, alpha: 1, duration: 1200 });
-          sit();
-        }
-      });
-    });
+    const centre = { x: player.x, y: player.y };
+    const named = NAMED_CATS.map((n) => scene.npcs.find((e) => e.cat.npcName === n)?.cat).filter((c): c is NonNullable<typeof c> => !!c?.active);
+    // every other cat she knows by name: the colony she greeted, Cat cat and Mittens, settled newcomers, the street cats
+    const fringe = scene.npcs.map((e) => e.cat).filter((c) => c.active && !named.includes(c) && scene.colony.knowsCat(c));
+    const rng = seededRng(mixSeed(scene.dayNight.dayCount, 5150));
+    const slots = gatheringSlots(centre, named.length, fringe.length, rng);
+    const lastNamedMs = (named.length - 1) * NAMED_GAP_MS;
+    const fringeAt = fringeStarts(fringe.length, FRINGE_FIRST_MS, FRINGE_SPREAD_MS, rng);
+    const settledMs = Math.max(lastNamedMs, fringeAt[fringeAt.length - 1] ?? 0) + GATHER_SETTLE_MS;
+    this.gatheringUntil = time + settledMs + GATHER_HOLD_MS;
+
+    // no names, no moods over anyone: just the cats
+    for (const e of scene.npcs) if (named.includes(e.cat) || fringe.includes(e.cat)) e.indicator.setHidden(true);
+    named.forEach((cat, i) => scene.time.delayedCall(i * NAMED_GAP_MS, () => this.comeTo(cat, slots.inner[i]!, centre, GATHER_WALK_PX)));
+    // the rest come slowly, almost shyly: from further off, at a creep, stopping once on the way to look at her
+    fringe.forEach((cat, i) =>
+      scene.time.delayedCall(fringeAt[i]!, () => {
+        cat.setManner(FRINGE_WALK_SPEED);
+        this.comeTo(cat, slots.fringe[i]!, centre, FRINGE_WALK_PX, 1200 + rng() * 2000);
+      }),
+    );
+
     const cam = scene.cameras.main;
     const zoom = cam.zoom;
-    scene.time.delayedCall(2200 * cats.length + 2500, () => {
-      cam.zoomTo(Math.max(1.4, zoom * 0.6), 1800, "Sine.easeInOut", true);
+    scene.time.delayedCall(settledMs, () => {
+      // wide enough to take in the fringe, so she can see them all
+      cam.zoomTo(Math.max(fringe.length > 0 ? 1.05 : 1.4, zoom * (fringe.length > 0 ? 0.42 : 0.6)), 2400, "Sine.easeInOut", true);
       this.narrate("They came. All of them. To say goodbye.");
-      scene.time.delayedCall(5000, () => cam.zoomTo(zoom, 1600, "Sine.easeInOut", true));
+      scene.time.delayedCall(GATHER_HOLD_MS, () => cam.zoomTo(zoom, 2000, "Sine.easeInOut", true));
     });
+  }
+
+  /**
+   * One cat comes to its place round her and sits there facing her. From far off it appears `walkPx`
+   * away and walks the rest; with `pauseMs` it stops halfway to look at her first.
+   */
+  private comeTo(cat: NPCCat, slot: Pt, centre: Pt, walkPx: number, pauseMs = 0): void {
+    const scene = this.scene;
+    const sit = () => {
+      cat.setHome(slot.x, slot.y, 6);
+      // if the story moves on without them, they get up again in the end, names and all
+      cat.drink(centre, 15 * 60_000, () => scene.npcs.find((e) => e.cat === cat)?.indicator.setHidden(false));
+    };
+    const fadeIn = () => {
+      cat.setAlpha(0);
+      scene.tweens.add({ targets: cat, alpha: 1, duration: 1600 });
+    };
+    if (Phaser.Math.Distance.Between(cat.x, cat.y, slot.x, slot.y) > walkPx) {
+      const a = Phaser.Math.Angle.Between(slot.x, slot.y, cat.x, cat.y);
+      const entry = { x: slot.x + Math.cos(a) * walkPx, y: slot.y + Math.sin(a) * walkPx };
+      if (scene.isInPark(entry.x, entry.y)) cat.setPosition(entry.x, entry.y);
+      else cat.setPosition(slot.x, slot.y);
+      fadeIn();
+    }
+    const walk = () => {
+      const route = scene.catRoute(cat, slot);
+      if (route) cat.followRoute(route, sit);
+      else {
+        cat.setPosition(slot.x, slot.y);
+        sit();
+      }
+    };
+    if (pauseMs <= 0) return walk();
+    const mid = { x: (cat.x + slot.x) / 2, y: (cat.y + slot.y) / 2 };
+    const toMid = scene.catRoute(cat, mid);
+    if (!toMid) return walk();
+    cat.followRoute(toMid, () => cat.drink(centre, pauseMs, walk));
   }
 
   // ──────────── props ────────────

@@ -87,6 +87,12 @@ export class ThreatIndicator {
     this.icon.setColor(cfg.color);
   }
 
+  /** Hide the name and mood icon (a quiet moment: the Colony Gathering). */
+  setHidden(hidden: boolean): void {
+    this.icon.setVisible(!hidden);
+    this.label.setVisible(!hidden);
+  }
+
   update(): void {
     this.updatePosition();
   }
