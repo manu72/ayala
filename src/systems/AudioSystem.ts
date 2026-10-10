@@ -67,6 +67,8 @@ export class AudioSystem {
   private ayala: MusicSound | null = null;
   private snatcher: MusicSound | null = null;
   private festival: MusicSound | null = null;
+  /** Waiting for the music loops to finish loading (see start()). */
+  private onAudioCached: (() => void) | null = null;
   private fadeTweens: Phaser.Tweens.Tween[] = [];
   private dangerActive = false;
   private muted: boolean;
@@ -88,18 +90,38 @@ export class AudioSystem {
   start(scene: Phaser.Scene): void {
     if (this.started) return;
     this.scene = scene;
-
-    this.ayala = scene.sound.add("bgm_ayala", { loop: true, volume: 0 }) as MusicSound;
-    this.snatcher = scene.sound.add("bgm_snatcher", { loop: true, volume: 0 }) as MusicSound;
-
-    // Start both tracks at volume 0 so crossfades are seamless. The browser
-    // autoplay policy is already satisfied by the StartScene click that led
-    // us here.
-    this.ayala.play();
-    this.snatcher.play();
-
-    this.applyVolumesImmediate();
     this.started = true;
+
+    // The music streams in after the title screen (BootScene), so on a first visit it
+    // may not be cached yet: start each loop the moment it is.
+    if (!this.startMusic()) {
+      this.onAudioCached = () => {
+        if (this.startMusic()) this.stopWaitingForMusic();
+      };
+      scene.cache.audio.events.on("add", this.onAudioCached); // Phaser.Cache.Events.ADD
+    }
+  }
+
+  /** Starts whichever loops are cached and not yet playing; true once both are. */
+  private startMusic(): boolean {
+    this.ayala ??= this.startLoop("bgm_ayala");
+    this.snatcher ??= this.startLoop("bgm_snatcher");
+    this.applyVolumesImmediate();
+    return this.ayala !== null && this.snatcher !== null;
+  }
+
+  // Both tracks play at all times from volume 0 so crossfades are seamless. The browser
+  // autoplay policy is already satisfied by the StartScene click that led us here.
+  private startLoop(key: string): MusicSound | null {
+    if (!this.scene?.cache.audio.exists(key)) return null;
+    const loop = this.scene.sound.add(key, { loop: true, volume: 0 }) as MusicSound;
+    loop.play();
+    return loop;
+  }
+
+  private stopWaitingForMusic(): void {
+    if (this.onAudioCached) this.scene?.cache.audio.events.off("add", this.onAudioCached);
+    this.onAudioCached = null;
   }
 
   /**
@@ -120,7 +142,7 @@ export class AudioSystem {
    * Silently no-op when muted or when the scene isn't running.
    */
   playMeow(): void {
-    if (this.muted || !this.scene) return;
+    if (this.muted || !this.scene || !this.scene.cache.audio.exists("sfx_meow_happy")) return;
     this.scene.sound.play("sfx_meow_happy", { volume: MEOW_VOLUME });
   }
 
@@ -130,7 +152,7 @@ export class AudioSystem {
    * don't stack into a garbled chorus.
    */
   playCatGrowl(): void {
-    if (this.muted || !this.scene) return;
+    if (this.muted || !this.scene || !this.scene.cache.audio.exists("sfx_cat_growl_warning")) return;
     const now = this.scene.time.now;
     if (now - this.lastCatGrowlAt < CAT_GROWL_COOLDOWN_MS) return;
     this.lastCatGrowlAt = now;
@@ -188,6 +210,7 @@ export class AudioSystem {
 
   /** Stop playback and release tweens. Safe to call multiple times. */
   stop(): void {
+    this.stopWaitingForMusic();
     this.killFadeTweens();
     this.ayala?.stop();
     this.snatcher?.stop();
@@ -195,8 +218,8 @@ export class AudioSystem {
     if (this.scene && this.festival) this.scene.sound.remove(this.festival as Phaser.Sound.BaseSound);
     this.festival = null;
     if (this.scene) {
-      this.scene.sound.remove(this.ayala as Phaser.Sound.BaseSound);
-      this.scene.sound.remove(this.snatcher as Phaser.Sound.BaseSound);
+      if (this.ayala) this.scene.sound.remove(this.ayala as Phaser.Sound.BaseSound);
+      if (this.snatcher) this.scene.sound.remove(this.snatcher as Phaser.Sound.BaseSound);
     }
     this.ayala = null;
     this.snatcher = null;
@@ -229,42 +252,30 @@ export class AudioSystem {
    * start-up state.
    */
   private applyVolumesImmediate(): void {
-    if (!this.ayala || !this.snatcher) return;
+    if (!this.ayala && !this.snatcher) return;
     this.killFadeTweens();
     const target = this.currentTargets();
-    this.ayala.setVolume(target.ayala);
-    this.snatcher.setVolume(target.snatcher);
+    this.ayala?.setVolume(target.ayala);
+    this.snatcher?.setVolume(target.snatcher);
   }
 
   private fadeToCurrentTargets(): void {
-    if (!this.scene || !this.ayala || !this.snatcher) return;
+    if (!this.scene) return;
     this.killFadeTweens();
 
     // When muted, snap straight to zero — the dangerActive state was already
     // updated by setDanger(), so unmuting later will fade in the right track.
     if (this.muted) {
-      this.ayala.setVolume(0);
-      this.snatcher.setVolume(0);
+      this.ayala?.setVolume(0);
+      this.snatcher?.setVolume(0);
       return;
     }
 
     const target = this.currentTargets();
-    this.fadeTweens.push(
-      this.scene.tweens.add({
-        targets: this.ayala,
-        volume: target.ayala,
-        duration: FADE_MS,
-        ease: "Linear",
-      }),
-    );
-    this.fadeTweens.push(
-      this.scene.tweens.add({
-        targets: this.snatcher,
-        volume: target.snatcher,
-        duration: FADE_MS,
-        ease: "Linear",
-      }),
-    );
+    for (const [loop, volume] of [[this.ayala, target.ayala], [this.snatcher, target.snatcher]] as const) {
+      if (!loop) continue; // still loading
+      this.fadeTweens.push(this.scene.tweens.add({ targets: loop, volume, duration: FADE_MS, ease: "Linear" }));
+    }
   }
 
   private killFadeTweens(): void {

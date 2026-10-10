@@ -48,6 +48,14 @@ export class SnatcherSystem {
   private readonly snatchersList: HumanNPC[] = [];
   private spawnChecked = false;
   private snatchedThisNightFlag = false;
+  /** A capture is playing out (fade + dialogue); without this every frame in range re-captures and drains all lives. */
+  private capturing = false;
+  /**
+   * Set when a capture cannot reload a save. Player grabs stay off until
+   * Mamma is outside every snatcher's detection radius — clearing
+   * `capturing` alone would recapture on the next frame.
+   */
+  private holdPlayerCapture = false;
 
   constructor(scene: GameScene) {
     this.scene = scene;
@@ -126,9 +134,14 @@ export class SnatcherSystem {
    *     named-cat snatches rare in practice.
    */
   checkDetection(): void {
-    if (this.snatchersList.length === 0) return;
+    if (this.snatchersList.length === 0) {
+      this.holdPlayerCapture = false;
+      return;
+    }
+    if (this.capturing) return;
 
     const colonyVictims: NPCCat[] = [];
+    let playerInRange = false;
 
     for (const snatcher of this.snatchersList) {
       if (!snatcher.visible) continue;
@@ -155,8 +168,15 @@ export class SnatcherSystem {
         detectionRadius = 192;
       }
 
+      if (dist < detectionRadius) playerInRange = true;
+
       // Safe sleeping spots are invisible to snatchers
       if (this.scene.player.isResting && this.scene.isNearShelter(this.scene.player.x, this.scene.player.y)) {
+        continue;
+      }
+
+      // Beat-5 pickup dialogue completes from onHide. Leave that modal up.
+      if (this.scene.camille.isBeat5PickupDialogueActive) {
         continue;
       }
 
@@ -165,7 +185,7 @@ export class SnatcherSystem {
         const chaseSpeed = 35;
         snatcher.setVelocity(Math.cos(angle) * chaseSpeed, Math.sin(angle) * chaseSpeed);
 
-        if (dist < PLAYER_CAPTURE_RANGE) {
+        if (!this.holdPlayerCapture && dist < PLAYER_CAPTURE_RANGE) {
           // Apply pending colony captures BEFORE the player-capture
           // scene-restart flow so their counter bump reaches the save
           // file alongside the player's.
@@ -174,6 +194,10 @@ export class SnatcherSystem {
           return;
         }
       }
+    }
+
+    if (this.holdPlayerCapture && !playerInRange) {
+      this.holdPlayerCapture = false;
     }
 
     for (const victim of colonyVictims) this.handleColonyCatSnatch(victim);
@@ -189,6 +213,8 @@ export class SnatcherSystem {
     this.despawnAll();
     this.spawnChecked = false;
     this.snatchedThisNightFlag = false;
+    this.capturing = false;
+    this.holdPlayerCapture = false;
   }
 
   // ──────────── Internal ────────────
@@ -316,10 +342,8 @@ export class SnatcherSystem {
    */
   private handleColonyCatSnatch(cat: NPCCat): void {
     const near =
-      Phaser.Math.Distance.Between(this.scene.player.x, this.scene.player.y, cat.x, cat.y) <=
-      GP.SNATCHER_WITNESS_DIST;
-    const los =
-      near && this.scene.hasLineOfSight(this.scene.player.x, this.scene.player.y, cat.x, cat.y);
+      Phaser.Math.Distance.Between(this.scene.player.x, this.scene.player.y, cat.x, cat.y) <= GP.SNATCHER_WITNESS_DIST;
+    const los = near && this.scene.hasLineOfSight(this.scene.player.x, this.scene.player.y, cat.x, cat.y);
 
     this.scene.removeColonyCat(cat);
 
@@ -336,46 +360,67 @@ export class SnatcherSystem {
   }
 
   /**
-   * Player capture path: record score, bump lifetime counter, autosave
-   * (or clear save if this was the final life), then fade to black and
-   * restart the scene via the `loadSave` + `snatcherCapture` data flags
-   * so the save's `PLAYER_SNATCHED_COUNT` bump survives the reload
-   * (WORKING_MEMORY "Persisting counters across save-based scene
-   * restarts").
+   * Player capture path. The fade starts immediately, but life loss, the
+   * snatch counter, and the save or game-over write wait until it
+   * finishes. Beat-5 pickup can open during that fade; committing first
+   * would stick after the grab is cancelled. On cancel, `resetFX()`
+   * clears the black frame and nothing is written.
+   *
+   * A confirmed grab still autosaves (or clears the save on the final
+   * life) before `scene.restart({ loadSave, snatcherCapture })`, so
+   * `PLAYER_SNATCHED_COUNT` survives the reload. If that reload has no
+   * save, player capture stays suppressed until Mamma leaves detection
+   * range.
    */
   private handleSnatcherCapture(): void {
-    const finalLife = this.scene.loseLife();
-    this.scene.scoring.recordSnatch();
-    this.snatchedThisNightFlag = true;
-    markSnatchedThisNight(this.scene.registry);
+    if (this.scene.camille.isBeat5PickupDialogueActive) return;
+    this.capturing = true;
 
-    const prev = this.scene.registry.get(StoryKeys.PLAYER_SNATCHED_COUNT);
-    const prevCount = typeof prev === "number" && Number.isFinite(prev) && prev >= 0 ? Math.floor(prev) : 0;
-    this.scene.registry.set(StoryKeys.PLAYER_SNATCHED_COUNT, prevCount + 1);
-    if (!finalLife) {
-      this.scene.autoSave();
-    } else {
-      SaveSystem.clear();
-      markGameOver(this.scene.registry);
-    }
-
+    let settled = false;
     this.scene.cameras.main.fade(100, 0, 0, 0, false, (_cam: Phaser.Cameras.Scene2D.Camera, progress: number) => {
-      if (progress >= 1) {
-        this.scene.dialogue.show(["Hands. Darkness. You can't move. You can't breathe.", "..."], () => {
+      if (progress < 1 || settled) return;
+      settled = true;
+      if (this.scene.camille.isBeat5PickupDialogueActive) {
+        this.capturing = false;
+        this.scene.cameras.main.resetFX();
+        return;
+      }
+
+      const finalLife = this.scene.loseLife();
+      this.scene.scoring.recordSnatch();
+      this.snatchedThisNightFlag = true;
+      markSnatchedThisNight(this.scene.registry);
+
+      const prev = this.scene.registry.get(StoryKeys.PLAYER_SNATCHED_COUNT);
+      const prevCount = typeof prev === "number" && Number.isFinite(prev) && prev >= 0 ? Math.floor(prev) : 0;
+      this.scene.registry.set(StoryKeys.PLAYER_SNATCHED_COUNT, prevCount + 1);
+      if (!finalLife) {
+        this.scene.autoSave();
+      } else {
+        SaveSystem.clear();
+        markGameOver(this.scene.registry);
+      }
+
+      this.scene.dialogue.dismiss(); // a dialogue already open would make show() a no-op and strand the black screen
+      this.scene.dialogue.show(
+        ["Hands. Darkness. You can't move. You can't breathe.", "..."],
+        () => {
           if (finalLife) {
             this.scene.cameras.main.resetFX();
             this.scene.triggerGameOver("snatched");
             return;
           }
           const hasSave = SaveSystem.load() !== null;
+          this.scene.cameras.main.resetFX();
           if (hasSave) {
-            this.scene.cameras.main.resetFX();
             this.scene.scene.restart({ loadSave: true, snatcherCapture: true });
-          } else {
-            this.scene.cameras.main.resetFX();
+            return;
           }
-        });
-      }
+          this.capturing = false;
+          this.holdPlayerCapture = true;
+        },
+        { completeOnClose: true },
+      ); // faded to black: closing early must still restart or end the game
     });
   }
 }

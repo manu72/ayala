@@ -11,11 +11,26 @@ import carHornWav from "../../public/assets/sounds/car_horn.wav?inline";
 
 function createSceneMock(cachedAudio: string[] = ["sfx_tyre_screech", "sfx_car_horn"]) {
   const music = () => ({ play: vi.fn(), stop: vi.fn(), setVolume: vi.fn() });
+  const cacheListeners = new Set<() => void>();
   return {
     time: { now: 0 },
     sound: { add: vi.fn(music), play: vi.fn(), remove: vi.fn() },
-    cache: { audio: { exists: vi.fn((key: string) => cachedAudio.includes(key)) } },
-    tweens: { add: vi.fn() },
+    cache: {
+      audio: {
+        exists: vi.fn((key: string) => cachedAudio.includes(key)),
+        events: {
+          on: vi.fn((_e: string, fn: () => void) => void cacheListeners.add(fn)),
+          off: vi.fn((_e: string, fn: () => void) => void cacheListeners.delete(fn)),
+        },
+        /** Test helper: a file finished loading. */
+        add(key: string) {
+          cachedAudio.push(key);
+          for (const fn of [...cacheListeners]) fn();
+        },
+        listenerCount: () => cacheListeners.size,
+      },
+    },
+    tweens: { add: vi.fn(() => ({ remove: vi.fn(), isPlaying: () => false })) },
     events: { emit: vi.fn() },
   };
 }
@@ -120,6 +135,42 @@ describe.each([
     const scene = createSceneMock([]);
     const audio = startedAudio(scene);
     expect(() => play(audio)).not.toThrow();
+    expect(scene.sound.play).not.toHaveBeenCalled();
+  });
+});
+
+describe("AudioSystem music loaded after the title screen", () => {
+  it("starts each loop the moment it is cached, then stops listening", () => {
+    const scene = createSceneMock([]);
+    const audio = startedAudio(scene);
+    expect(scene.sound.add).not.toHaveBeenCalled();
+
+    scene.cache.audio.add("bgm_ayala");
+    expect(scene.sound.add.mock.calls.map((c: unknown[]) => c[0])).toEqual(["bgm_ayala"]);
+    audio.setDanger(true); // fades only the loaded loop, no throw
+    scene.cache.audio.add("bgm_snatcher");
+    expect(scene.sound.add.mock.calls.map((c: unknown[]) => c[0])).toEqual(["bgm_ayala", "bgm_snatcher"]);
+    expect(scene.cache.audio.listenerCount()).toBe(0);
+    audio.stop();
+  });
+
+  it("starts at once when already cached, and stop() drops a pending wait", () => {
+    const cached = createSceneMock(["bgm_ayala", "bgm_snatcher"]);
+    startedAudio(cached);
+    expect(cached.sound.add).toHaveBeenCalledTimes(2);
+
+    const waiting = createSceneMock([]);
+    startedAudio(waiting).stop();
+    expect(waiting.cache.audio.listenerCount()).toBe(0);
+  });
+});
+
+describe("AudioSystem one-shots whose file failed to load", () => {
+  it("skip the meow and the growl instead of throwing", () => {
+    const scene = createSceneMock([]);
+    const audio = startedAudio(scene);
+    audio.playMeow();
+    audio.playCatGrowl();
     expect(scene.sound.play).not.toHaveBeenCalled();
   });
 });

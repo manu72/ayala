@@ -8,6 +8,8 @@ export interface DialogueLayoutOptions {
   reservedLeftPx?: number;
   reservedRightPx?: number;
   horizontalGapPx?: number;
+  /** Touch layout: hide the tiny early-close "x", which sits a thumb-width from the Rest button. */
+  hideCloseButton?: boolean;
 }
 
 /**
@@ -25,10 +27,15 @@ export interface DialogueLayoutOptions {
  *    `dismiss()`), after internal state is cleared. Use it to tear down
  *    any caller-owned bubbles or side-channels, regardless of whether
  *    the beat completed cleanly.
+ *  - `completeOnClose` runs `onComplete` even when the player closes the
+ *    box early (click outside / x). For beats that would otherwise
+ *    soft-lock (fade-to-black finales, overlays torn down in onComplete).
+ *    Programmatic `dismiss()` (scene teardown) still skips it.
  */
 export interface DialogueHooks {
   onLineShown?: (index: number) => void;
   onHide?: () => void;
+  completeOnClose?: boolean;
 }
 
 /**
@@ -37,6 +44,8 @@ export interface DialogueHooks {
  *
  * Non-blocking: the player can move while dialogue is visible.
  * Dismissible: click outside the box or the X button to close early.
+ * A touch outside the box advances instead (stray taps are common on
+ * phones and must not skip story beats).
  * Early dismissal does NOT fire onComplete (story-critical callbacks
  * only run when the player reads through all lines), but it DOES
  * fire `hooks.onHide()` so callers can always tear down paired
@@ -73,7 +82,9 @@ export class DialogueSystem {
       .setInteractive()
       .setDepth(99)
       .setVisible(false);
-    this.backdrop.on("pointerdown", () => this.dismiss());
+    this.backdrop.on("pointerdown", (pointer?: Phaser.Input.Pointer) =>
+      pointer?.wasTouch ? this.advance() : this.closeEarly(),
+    );
     if (this.backdrop.input) this.backdrop.input.enabled = false;
 
     this.background = scene.add
@@ -131,9 +142,10 @@ export class DialogueSystem {
         event?: Phaser.Types.Input.EventData,
       ) => {
         event?.stopPropagation();
-        this.dismiss();
+        this.closeEarly();
       },
     );
+    if (layout.hideCloseButton) this.closeBtn.setVisible(false);
 
     this.container = scene.add.container(boxCenterX, height - 65, [
       this.background,
@@ -181,6 +193,14 @@ export class DialogueSystem {
   dismiss(): void {
     if (!this.active) return;
     this.hide();
+  }
+
+  /** Player closed the box early (click outside / x). Same as dismiss() unless the beat opted into completeOnClose. */
+  private closeEarly(): void {
+    if (!this.active) return;
+    const doneHook = this.hooks?.completeOnClose ? this.onComplete : null;
+    this.hide();
+    if (doneHook) doneHook();
   }
 
   advance(): void {

@@ -9,6 +9,9 @@ interface ImportMetaEnv {
   readonly VITE_AI_DEBUG_DIALOGUE?: string;
 }
 
+/** Set per build in vite.config.ts. */
+declare const __BUILD_ID__: string;
+
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }

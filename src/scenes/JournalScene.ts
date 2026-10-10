@@ -130,11 +130,17 @@ export class JournalScene extends Phaser.Scene {
     this.container = this.add.container(PANEL_PADDING, PANEL_PADDING + 40);
     let yOffset = 0;
 
-    for (const entry of entries) {
+    // Cats in two columns: entry i goes in column i % 2, and each row is as tall as its taller entry
+    const colW = (width - PANEL_PADDING * 2) / 2;
+    let rowTop = yOffset;
+    entries.forEach((entry, i) => {
+      const x = (i % 2) * colW;
+      if (i % 2 === 0) rowTop = yOffset;
+      let y = rowTop;
       // Name line with disposition indicator
       const dispSymbol = this.getDispositionSymbol(entry.disposition);
       const nameText = this.container.add(
-        this.add.text(0, yOffset, `${dispSymbol} ${entry.name}`, {
+        this.add.text(x, y, `${dispSymbol} ${entry.name}`, {
           fontFamily: FONT_FAMILY,
           fontSize: "15px",
           fontStyle: "bold",
@@ -142,41 +148,40 @@ export class JournalScene extends Phaser.Scene {
         }),
       );
       nameText.setData("__journal", true);
-      yOffset += LINE_HEIGHT + 4;
+      y += LINE_HEIGHT + 4;
 
       // Description
-      this.container.add(
-        this.add.text(12, yOffset, `"${entry.description}"`, {
-          fontFamily: FONT_FAMILY,
-          fontSize: "12px",
-          fontStyle: "italic",
-          color: "#aaaaaa",
-          wordWrap: { width: width - PANEL_PADDING * 2 - 24 },
-        }),
-      );
-      yOffset += LINE_HEIGHT + 2;
+      const description = this.add.text(x + 12, y, `"${entry.description}"`, {
+        fontFamily: FONT_FAMILY,
+        fontSize: "12px",
+        fontStyle: "italic",
+        color: "#aaaaaa",
+        wordWrap: { width: colW - 24 },
+      });
+      this.container.add(description);
+      y += Math.max(LINE_HEIGHT + 2, description.height + 2);
 
       // Met day
       this.container.add(
-        this.add.text(12, yOffset, `Met: Day ${entry.metOnDay}`, {
+        this.add.text(x + 12, y, `Met: Day ${entry.metOnDay}`, {
           fontFamily: FONT_FAMILY,
           fontSize: "11px",
           color: "#888888",
         }),
       );
-      yOffset += LINE_HEIGHT;
+      y += LINE_HEIGHT;
 
       // Trust hearts (each heart = 20 points, 5 hearts max)
       const hearts = this.buildHeartString(entry.trust);
       this.container.add(
-        this.add.text(12, yOffset, `Trust: ${hearts}`, {
+        this.add.text(x + 12, y, `Trust: ${hearts}`, {
           fontFamily: FONT_FAMILY,
           fontSize: "12px",
           color: "#cc6688",
         }),
       );
-      yOffset += LINE_HEIGHT + 12;
-    }
+      yOffset = Math.max(yOffset, y + LINE_HEIGHT + 12);
+    });
 
     const wonders = gameScene?.curiosity?.wonders() ?? [];
     if (wonders.length > 0) {

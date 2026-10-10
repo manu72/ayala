@@ -1,6 +1,19 @@
 import Phaser from "phaser";
 import { PETS, PET_FRAME } from "../data/pets";
 import { PIXEL_CROWD, pixelCrowdTexture, type PixelLookId } from "../data/ambient-roles";
+import { versionedUrl } from "../config/buildId";
+import { cacheLoadedFiles } from "../utils/offlineCache";
+
+/** Registry keys: game assets loaded (StartScene waits for this), and load progress 0..1. */
+export const ASSETS_READY = "ASSETS_READY";
+export const ASSET_PROGRESS = "ASSET_PROGRESS";
+
+/**
+ * Per-request cap so a stalled download cannot leave ASSETS_READY false.
+ * Phaser still retries twice (loader.maxRetries), then the loader's complete
+ * event reports the failure and StartScene offers a retry.
+ */
+export const ASSET_XHR_TIMEOUT_MS = 45_000;
 
 export class BootScene extends Phaser.Scene {
   constructor() {
@@ -19,7 +32,8 @@ export class BootScene extends Phaser.Scene {
     });
   }
 
-  preload(): void {
+  /** Everything a game needs to start. Music is queued separately, after these. */
+  private queueGameAssets(): void {
     this.load.image("park-tiles", "assets/tilesets/park-tiles.png");
     this.load.image("trees-pale", "assets/tilesets/trees-pale.png");
     this.load.image("plants", "assets/tilesets/plants.png");
@@ -265,19 +279,13 @@ export class BootScene extends Phaser.Scene {
       });
     }
 
-    // Audio: two looping background tracks and a one-shot meow SFX.
-    // Phaser's SoundManager keeps these cached across scene restarts so we
-    // only pay the decode cost once at boot.
-    this.load.audio("bgm_ayala", "assets/sounds/ayala_loop_Luminous Rain.mp3");
-    this.load.audio("bgm_snatcher", "assets/sounds/snatcher_loop_Stay the Course.mp3");
-    this.load.audio("sfx_meow_happy", "assets/sounds/meow_happy.wav");
-    this.load.audio("sfx_meow_kitten", "assets/sounds/meow_kitten.wav");
+    // Audio SFX. The music loops load after the title screen is up (see create()).
+    this.load.audio("sfx_meow_happy", "assets/sounds/meow_happy.mp3");
+    this.load.audio("sfx_meow_kitten", "assets/sounds/meow_kitten.mp3");
     this.load.audio("sfx_cat_growl_warning", "assets/sounds/cat_growl_warning.mp3");
     // Traffic reactions to Mamma Cat on the road (synthesised by scripts/generate-sfx.mjs).
     this.load.audio("sfx_tyre_screech", "assets/sounds/tyre_screech.wav");
     this.load.audio("sfx_car_horn", "assets/sounds/car_horn.wav");
-    // generated placeholder (scripts/generate-sfx.mjs) until a licensed royalty-free track replaces the file
-    this.load.audio("sfx_sunday_lights", "assets/sounds/sunday_lights.wav");
 
     // Lucide volume-2 / volume-x glyphs for the HUD mute toggle. Rasterised
     // at 20x20 to match the HUD icon slot exactly (avoids runtime scaling).
@@ -288,7 +296,47 @@ export class BootScene extends Phaser.Scene {
   create(): void {
     makeLightTextures(this);
     makeStreetColonyTextures(this);
-    this.scene.start("StartScene");
+
+    // Title first: StartScene needs no assets, so it shows at once and the game loads behind
+    // it (StartScene starts a game only once ASSETS_READY). Then the music and the Sunday track,
+    // which AudioSystem starts the moment each is cached. This scene keeps running because it
+    // owns the loader; it stops itself when everything is in.
+    this.registry.set(ASSETS_READY, false);
+    this.registry.set(ASSET_PROGRESS, 0);
+    this.scene.launch("StartScene");
+
+    // File xhrSettings.timeout defaults to 0 and overrides this.load.xhr in MergeXHRSettings,
+    // so a loader-only timeout never fires. Set both before the queue starts.
+    this.load.xhr.timeout = ASSET_XHR_TIMEOUT_MS;
+    this.load.on("addfile", (_key: string, type: string, _loader: unknown, file: Phaser.Loader.File) => {
+      file.xhrSettings.timeout = ASSET_XHR_TIMEOUT_MS;
+      // Audio (~7 MB) keeps its plain URL: mixing it across builds is harmless, and after a deploy
+      // it then revalidates (ETag) instead of downloading again.
+      if (typeof file.url === "string" && type !== "audio") file.url = versionedUrl(file.url);
+    });
+    this.load.on("progress", (p: number) => this.registry.set(ASSET_PROGRESS, p));
+    this.queueGameAssets();
+    this.load.once("complete", (_loader: unknown, _ok: number, failed: number) => {
+      this.load.removeAllListeners("progress");
+      if (failed > 0) {
+        // a game started without its map or sprites would crash; StartScene offers a retry
+        this.registry.set(ASSETS_READY, "failed");
+        this.scene.stop();
+        return;
+      }
+      this.registry.set(ASSETS_READY, true);
+      cacheLoadedFiles(); // playable now: keep it offline even if the music never finishes
+      this.load.audio("bgm_ayala", "assets/sounds/ayala_loop_Luminous Rain.mp3");
+      this.load.audio("bgm_snatcher", "assets/sounds/snatcher_loop_Stay the Course.mp3");
+      // generated placeholder (scripts/generate-sfx.mjs) until a licensed royalty-free track replaces the file
+      this.load.audio("sfx_sunday_lights", "assets/sounds/sunday_lights.wav");
+      this.load.once("complete", () => {
+        cacheLoadedFiles();
+        this.scene.stop();
+      });
+      this.load.start();
+    });
+    this.load.start();
   }
 }
 

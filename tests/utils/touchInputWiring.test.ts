@@ -49,6 +49,8 @@ function createGameObject() {
     setDepth: vi.fn(() => obj),
     setInteractive: vi.fn(() => obj),
     setOrigin: vi.fn(() => obj),
+    setPadding: vi.fn(() => obj),
+    setScale: vi.fn(() => obj),
     setPosition: vi.fn((x: number, y: number) => {
       obj.x = x;
       obj.y = y;
@@ -234,6 +236,8 @@ import { EMPTY_MOVEMENT_INTENT } from "../../src/input/playerIntent";
 import { GameScene } from "../../src/scenes/GameScene";
 import { HUDScene } from "../../src/scenes/HUDScene";
 import { JournalScene } from "../../src/scenes/JournalScene";
+import { StartScene } from "../../src/scenes/StartScene";
+import { SaveSystem } from "../../src/systems/SaveSystem";
 
 function latestSurface() {
   const surface = sceneSurfaces[sceneSurfaces.length - 1];
@@ -262,7 +266,14 @@ function makeFrozenUpdateScene() {
 
   Object.assign(scene, {
     camille: { trySpawnAmbientDawnVisit: vi.fn(), tick: vi.fn() },
-    catDialogue: { tickEngagement: vi.fn(), refreshLastPartner: vi.fn(), isSkippedPartner: vi.fn(() => false), lastPartnerName: null, show: vi.fn(), clearPartnerIfMatches: vi.fn() },
+    catDialogue: {
+      tickEngagement: vi.fn(),
+      refreshLastPartner: vi.fn(),
+      isSkippedPartner: vi.fn(() => false),
+      lastPartnerName: null,
+      show: vi.fn(),
+      clearPartnerIfMatches: vi.fn(),
+    },
     collapse: { tick: vi.fn(() => "continue") },
     humans: {
       updatePlayerStationaryAnchor: vi.fn(),
@@ -319,6 +330,22 @@ describe("touch input scene wiring", () => {
     sceneSurfaces.length = 0;
   });
 
+  it("lays out JournalScene cats in two columns, left then right", () => {
+    const scene = new JournalScene() as unknown as AnyScene;
+    const gameScene = makeJournalGameScene();
+    scene.scene.get.mockImplementation((key: unknown) => (key === "GameScene" ? gameScene : undefined));
+    const cat = (name: string) => ({ name, description: "d", metOnDay: 1, trust: 0, disposition: "neutral" });
+    vi.spyOn(scene as never, "gatherEntries").mockReturnValue([cat("Tiger"), cat("Jayco"), cat("Fluffy")] as never);
+
+    scene.create();
+    const nameText = (name: string) => latestSurface().texts.find((t) => t.text.endsWith(` ${name}`))!;
+
+    expect(nameText("Tiger")).toMatchObject({ x: 0, y: 0 });
+    expect(nameText("Jayco")).toMatchObject({ x: 384, y: 0 });
+    expect(nameText("Fluffy").x).toBe(0);
+    expect(nameText("Fluffy").y).toBeGreaterThan(0);
+  });
+
   it("routes JournalScene drag and wheel scrolling through setScrollY", () => {
     const scene = new JournalScene() as unknown as AnyScene;
     const gameScene = makeJournalGameScene();
@@ -339,9 +366,7 @@ describe("touch input scene wiring", () => {
 
   it("removes JournalScene drag and wheel listeners on shutdown", () => {
     const scene = new JournalScene() as unknown as AnyScene;
-    scene.scene.get.mockImplementation((key: unknown) =>
-      key === "GameScene" ? makeJournalGameScene() : undefined,
-    );
+    scene.scene.get.mockImplementation((key: unknown) => (key === "GameScene" ? makeJournalGameScene() : undefined));
 
     scene.create();
     const surface = latestSurface();
@@ -441,13 +466,13 @@ describe("touch input scene wiring", () => {
       surface.texts.slice(0, 7).map((label, index) => [label.text, surface.containers[index + 1]!]),
     );
 
-    expect(labelToButton.get("Run")).toMatchObject({ x: 688, y: 568 });
-    expect(labelToButton.get("Act")).toMatchObject({ x: 760, y: 568 });
-    expect(labelToButton.get("Rest")).toMatchObject({ x: 688, y: 496 });
-    expect(labelToButton.get("Crouch")).toMatchObject({ x: 688, y: 424 });
-    expect(labelToButton.get("Look")).toMatchObject({ x: 760, y: 496 });
-    expect(labelToButton.get("Journal")).toMatchObject({ x: 760, y: 424 });
-    expect(labelToButton.get("Pause")).toMatchObject({ x: 760, y: 352 });
+    expect(labelToButton.get("Run")).toMatchObject({ x: 664, y: 560 });
+    expect(labelToButton.get("Act")).toMatchObject({ x: 752, y: 560 });
+    expect(labelToButton.get("Rest")).toMatchObject({ x: 664, y: 472 });
+    expect(labelToButton.get("Crouch")).toMatchObject({ x: 664, y: 384 });
+    expect(labelToButton.get("Look")).toMatchObject({ x: 752, y: 472 });
+    expect(labelToButton.get("Journal")).toMatchObject({ x: 752, y: 384 });
+    expect(labelToButton.get("Pause")).toMatchObject({ x: 752, y: 296 });
   });
 
   it("keeps touch controls anchored when dialogue opens", () => {
@@ -633,7 +658,7 @@ describe("touch input scene wiring", () => {
     expect(gameScene.setTouchRun).toHaveBeenCalledOnce();
     expect(gameScene.setTouchRun).toHaveBeenLastCalledWith(true);
 
-    runButtonBackground.emit("pointerupoutside", runPointer);
+    scene.input.emit("pointerupoutside", runPointer);
 
     expect(gameScene.setTouchRun).toHaveBeenNthCalledWith(1, true);
     expect(gameScene.setTouchRun).toHaveBeenNthCalledWith(2, false);
@@ -668,8 +693,175 @@ describe("touch input scene wiring", () => {
     expect(gameScene.setTouchRun).toHaveBeenCalledOnce();
     expect(gameScene.setTouchRun).toHaveBeenLastCalledWith(true);
 
-    runButtonBackground.emit("pointerupoutside", { id: 21 });
+    scene.input.emit("pointerupoutside", { id: 21 });
     expect(gameScene.setTouchRun).toHaveBeenNthCalledWith(2, false);
+  });
+
+  it("releases a held touch button when the thumb slides off and lifts elsewhere", () => {
+    const scene = new HUDScene() as unknown as AnyScene;
+    const gameScene = { clearTouchInputState: vi.fn(), setTouchRun: vi.fn() };
+    scene.scene.get.mockImplementation((key: unknown) => (key === "GameScene" ? gameScene : undefined));
+
+    scene["buildTouchControls"](816, 624);
+    const runButtonBackground = latestSurface().rectangles[1]!;
+
+    runButtonBackground.emit("pointerdown", { id: 5 }, 0, 0, { stopPropagation: vi.fn() });
+    scene.input.emit("pointerup", { id: 5 }, []);
+
+    expect(gameScene.setTouchRun).toHaveBeenNthCalledWith(1, true);
+    expect(gameScene.setTouchRun).toHaveBeenNthCalledWith(2, false);
+  });
+
+  it("starts the ending fade only once per run (beat 5, chapter check and load recovery all ask)", () => {
+    const scene = makeFrozenUpdateScene();
+    scene.startChapter6Sequence();
+    scene.startChapter6Sequence();
+    expect(scene.cameras.main.fade).toHaveBeenCalledOnce();
+  });
+
+  it("saves and pauses when the page is hidden, but not after a final-life capture", () => {
+    const scene = makeFrozenUpdateScene();
+    Object.assign(scene, { autoSave: vi.fn(), isPaused: false, playerInputFrozen: false, togglePause: vi.fn() });
+
+    scene["saveAndPauseOnHide"]();
+    expect(scene.autoSave).toHaveBeenCalledOnce();
+    expect(scene.togglePause).toHaveBeenCalledOnce();
+
+    scene.registry.get.mockImplementation((key: string) => key === "GAME_OVER");
+    scene["saveAndPauseOnHide"]();
+    expect(scene.autoSave).toHaveBeenCalledOnce();
+  });
+
+  it("defers autosave while chapter narration is open and saves once it closes", () => {
+    const scene = makeFrozenUpdateScene();
+    Object.assign(scene, {
+      playerInputFrozen: false,
+      cinematicActive: false,
+      gameOverTriggered: false,
+      isPaused: false,
+      togglePause: vi.fn(),
+    });
+    const performSave = vi.spyOn(scene as never, "performSave").mockImplementation(() => undefined);
+
+    const dialogue = {
+      isActive: false,
+      dismiss: vi.fn(),
+      advance: vi.fn(),
+      show: vi.fn(),
+    };
+    scene.scene.get.mockImplementation((key: unknown) => (key === "HUDScene" ? { dialogue } : undefined));
+
+    expect(scene.canAutoSaveNow()).toBe(true);
+    scene.autoSave();
+    expect(performSave).toHaveBeenCalledOnce();
+
+    let finished: (() => void) | undefined;
+    let hidden: (() => void) | undefined;
+    dialogue.show.mockImplementation((_lines: string[], onComplete?: () => void, hooks?: { onHide?: () => void }) => {
+      dialogue.isActive = true;
+      finished = onComplete;
+      hidden = hooks?.onHide;
+    });
+
+    scene["showChapterNarration"](["Morning."], () => {
+      scene.autoSave();
+    });
+
+    expect(scene.canAutoSaveNow()).toBe(false);
+    scene.autoSave();
+    scene["saveAndPauseOnHide"]();
+    expect(performSave).toHaveBeenCalledOnce();
+    expect(scene.togglePause).toHaveBeenCalledOnce();
+
+    dialogue.isActive = false;
+    hidden?.();
+    finished?.();
+    expect(performSave).toHaveBeenCalledTimes(2);
+    expect(scene.canAutoSaveNow()).toBe(true);
+  });
+
+  it("a start chosen before the game assets have loaded runs once they have", () => {
+    const hasSave = vi.spyOn(SaveSystem, "hasSave").mockReturnValue(false);
+    try {
+      const scene = new StartScene() as unknown as AnyScene;
+      let ready = false;
+      scene.registry.get.mockImplementation((key: string) =>
+        key === "ASSETS_READY" ? ready : key === "ASSET_PROGRESS" ? 0.5 : undefined,
+      );
+      scene.cameras.main.setBackgroundColor = vi.fn();
+      scene.input.keyboard.on = vi.fn();
+      const startFreshGame = vi.spyOn(scene as never, "startFreshGame").mockResolvedValue(undefined as never);
+      scene.create();
+      const surface = latestSurface();
+
+      surface.texts.find((t) => t.text === "New Game")!.emit("pointerdown", { wasTouch: true });
+      scene.update();
+      expect(startFreshGame).not.toHaveBeenCalled();
+      expect(surface.texts.some((t) => t.text === "Starting… 50%")).toBe(true);
+
+      ready = true;
+      scene.update();
+      expect(startFreshGame).toHaveBeenCalledOnce();
+
+      // a second tap before the scene changes doesn't start a second game
+      surface.texts.find((t) => t.text === "New Game")!.emit("pointerdown", { wasTouch: true });
+      expect(startFreshGame).toHaveBeenCalledOnce();
+    } finally {
+      hasSave.mockRestore();
+    }
+  });
+
+  it("a failed download offers a retry instead of starting a game", () => {
+    const hasSave = vi.spyOn(SaveSystem, "hasSave").mockReturnValue(false);
+    try {
+      const scene = new StartScene() as unknown as AnyScene;
+      let status: unknown = false;
+      scene.registry.get.mockImplementation((key: string) => (key === "ASSETS_READY" ? status : undefined));
+      scene.cameras.main.setBackgroundColor = vi.fn();
+      scene.input.keyboard.on = vi.fn();
+      const startFreshGame = vi.spyOn(scene as never, "startFreshGame").mockResolvedValue(undefined as never);
+      scene.create();
+      const surface = latestSurface();
+
+      status = "failed";
+      scene.update();
+      surface.texts.find((t) => t.text === "New Game")!.emit("pointerdown", { wasTouch: false });
+      scene.update();
+      expect(startFreshGame).not.toHaveBeenCalled();
+      expect(surface.texts.some((t) => t.text.startsWith("Couldn't load the game"))).toBe(true);
+    } finally {
+      hasSave.mockRestore();
+    }
+  });
+
+  it("on touch, New Game only erases an existing save on a second tap; a mouse click is unchanged", () => {
+    const hasSave = vi.spyOn(SaveSystem, "hasSave").mockReturnValue(true);
+    const load = vi.spyOn(SaveSystem, "load").mockReturnValue(null);
+    const makeStart = () => {
+      const scene = new StartScene() as unknown as AnyScene;
+      scene.cameras.main.setBackgroundColor = vi.fn();
+      scene.input.keyboard.on = vi.fn();
+      const startFreshGame = vi.spyOn(scene as never, "startFreshGame").mockResolvedValue(undefined as never);
+      scene.create();
+      const newGame = latestSurface().texts.find((t) => t.text === "New Game")!;
+      return { newGame, startFreshGame };
+    };
+
+    try {
+      const touch = makeStart();
+      touch.newGame.emit("pointerdown", { wasTouch: true });
+      expect(touch.startFreshGame).not.toHaveBeenCalled();
+      expect(touch.newGame.text).toBe("Tap again to erase your save");
+      touch.newGame.emit("pointerdown", { wasTouch: true });
+      expect(touch.startFreshGame).toHaveBeenCalledOnce();
+
+      const mouse = makeStart();
+      mouse.newGame.emit("pointerdown", { wasTouch: false });
+      expect(mouse.startFreshGame).toHaveBeenCalledOnce();
+    } finally {
+      hasSave.mockRestore();
+      load.mockRestore();
+    }
   });
 
   it("uses queued touch Act to advance active dialogue like Space", () => {
@@ -680,9 +872,7 @@ describe("touch input scene wiring", () => {
       show: vi.fn(),
       advance: vi.fn(),
     };
-    scene.scene.get.mockImplementation((key: unknown) =>
-      key === "HUDScene" ? { dialogue } : undefined,
-    );
+    scene.scene.get.mockImplementation((key: unknown) => (key === "HUDScene" ? { dialogue } : undefined));
     Object.assign(scene, {
       dialogueRequestInFlight: false,
       isPaused: false,
@@ -708,9 +898,7 @@ describe("touch input scene wiring", () => {
         dialogue.isActive = false;
       }),
     };
-    scene.scene.get.mockImplementation((key: unknown) =>
-      key === "HUDScene" ? { dialogue } : undefined,
-    );
+    scene.scene.get.mockImplementation((key: unknown) => (key === "HUDScene" ? { dialogue } : undefined));
     Object.assign(scene, {
       dialogueRequestInFlight: false,
       isPaused: false,
@@ -764,7 +952,11 @@ describe("touch input scene wiring", () => {
   it("clears GameScene touch queues and preserves touch run across stick updates", () => {
     const scene = new GameScene() as unknown as AnyScene;
     const setExternalMovementIntent = vi.fn();
-    scene["player"] = { cancelExternalCrouchPress: vi.fn(), clearExternalMovementIntent: vi.fn(), setExternalMovementIntent };
+    scene["player"] = {
+      cancelExternalCrouchPress: vi.fn(),
+      clearExternalMovementIntent: vi.fn(),
+      setExternalMovementIntent,
+    };
 
     scene.queueTouchInteract();
     scene.queueTouchPeek();

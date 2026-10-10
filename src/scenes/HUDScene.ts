@@ -26,8 +26,8 @@ const BAR_H = 10;
 const BAR_GAP = 6;
 const BAR_LABEL_W = 50;
 const FONT_FAMILY = "Arial, Helvetica, sans-serif";
-const TOUCH_BUTTON_FONT_SIZE = "14px";
-const TOUCH_BUTTON_COMPACT_FONT_SIZE = "12px";
+const TOUCH_BUTTON_FONT_SIZE = "16px";
+const TOUCH_BUTTON_COMPACT_FONT_SIZE = "14px";
 const TOUCH_EDGE_MARGIN_PX = 24;
 const TOUCH_DIALOGUE_GAP_PX = 16;
 const TOUCH_ACTION_COLUMNS = 2;
@@ -260,6 +260,7 @@ export class HUDScene extends Phaser.Scene {
               TOUCH_ACTION_COLUMNS * TOUCH_BUTTON_SIZE_PX +
               (TOUCH_ACTION_COLUMNS - 1) * TOUCH_BUTTON_GAP_PX,
             horizontalGapPx: TOUCH_DIALOGUE_GAP_PX,
+            hideCloseButton: true,
           }
         : undefined,
     );
@@ -353,7 +354,7 @@ export class HUDScene extends Phaser.Scene {
       .setStrokeStyle(2, 0xffffff, 0.45)
       .setInteractive();
 
-    this.touchStickKnob = this.add.circle(stickX, stickY, 18, 0xffffff, 0.35);
+    this.touchStickKnob = this.add.circle(stickX, stickY, TOUCH_STICK_RADIUS_PX * 0.375, 0xffffff, 0.35);
     this.touchControlsContainer.add([this.touchStickBase, this.touchStickKnob]);
 
     this.touchStickBase.on(
@@ -528,7 +529,15 @@ export class HUDScene extends Phaser.Scene {
       handlers.down?.();
     });
     bg.on("pointerup", releasePointer);
-    bg.on("pointerupoutside", releasePointer);
+    // A thumb that slides off before lifting releases elsewhere. Phaser only reports that
+    // at scene level (game objects never get "pointerupoutside"), so listen there too.
+    const releaseElsewhere = (pointer: Phaser.Input.Pointer) => releasePointer(pointer);
+    this.input.on("pointerup", releaseElsewhere);
+    this.input.on("pointerupoutside", releaseElsewhere);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.input.off("pointerup", releaseElsewhere);
+      this.input.off("pointerupoutside", releaseElsewhere);
+    });
 
     return button;
   }
@@ -572,7 +581,8 @@ export class HUDScene extends Phaser.Scene {
   // ──────────── Pause Menu ────────────
 
   private createPauseMenu(width: number, height: number): Phaser.GameObjects.Container {
-    const overlay = this.add.rectangle(0, 0, width, height, 0x000000, 0.6);
+    // interactive so taps that miss a menu item don't fall through to the dialogue behind
+    const overlay = this.add.rectangle(0, 0, width, height, 0x000000, 0.6).setInteractive();
 
     const title = this.add
       .text(0, -110, "PAUSED", {
@@ -600,12 +610,15 @@ export class HUDScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
 
-    const saveBtn = this.createMenuButton(0, -24, "Save Game", () => {
+    // Touch: larger options further apart so a thumb can hit Resume safely
+    const rowY = (row: number) => (this.shouldShowTouchControls() ? -8 + row * 72 : -24 + row * 40);
+
+    const saveBtn = this.createMenuButton(0, rowY(0), "Save Game", () => {
       const gameScene = this.scene.get("GameScene") as GameScene;
       gameScene.autoSave();
     });
 
-    const journalBtn = this.createMenuButton(0, 16, "Colony Journal", () => {
+    const journalBtn = this.createMenuButton(0, rowY(1), "Colony Journal", () => {
       this.pauseContainer.setVisible(false);
       const gameScene = this.scene.get("GameScene") as GameScene;
       if (!this.scene.isActive("JournalScene")) {
@@ -616,15 +629,17 @@ export class HUDScene extends Phaser.Scene {
       }
     });
 
-    const resumeBtn = this.createMenuButton(0, 56, "Resume", () => {
+    const resumeBtn = this.createMenuButton(0, rowY(2), "Resume", () => {
       const gameScene = this.scene.get("GameScene") as GameScene;
       gameScene.resumeGame();
       this.pauseContainer.setVisible(false);
     });
 
-    const quitBtn = this.createMenuButton(0, 96, "Quit to Title", () => {
+    const quitBtn = this.createMenuButton(0, rowY(3), "Quit to Title", () => {
       const gameScene = this.scene.get("GameScene") as GameScene;
       this.pauseContainer.setVisible(false);
+      // on touch, Quit sits a thumb-width under Resume; don't let a mis-tap cost progress
+      if (this.shouldShowTouchControls() && gameScene.canAutoSaveNow()) gameScene.autoSave();
       gameScene.quitToTitle();
     });
 
@@ -717,14 +732,16 @@ export class HUDScene extends Phaser.Scene {
   }
 
   private createMenuButton(x: number, y: number, label: string, callback: () => void): Phaser.GameObjects.Text {
+    const touch = this.shouldShowTouchControls();
     const btn = this.add
       .text(x, y, label, {
         fontFamily: FONT_FAMILY,
-        fontSize: "18px",
+        fontSize: touch ? "28px" : "18px",
         color: "#cccccc",
       })
       .setOrigin(0.5)
       .setInteractive({ useHandCursor: true });
+    if (touch) btn.setPadding(48, 18);
 
     btn.on("pointerover", () => btn.setColor("#ffffff"));
     btn.on("pointerout", () => btn.setColor("#cccccc"));

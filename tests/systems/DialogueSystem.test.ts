@@ -530,6 +530,55 @@ describe('DialogueSystem.dismiss — early close never fires onComplete', () => 
   })
 })
 
+describe('DialogueSystem — touch and soft-lock guards', () => {
+  it('a touch outside the box advances instead of dismissing, and completes on the last line', () => {
+    const onComplete = vi.fn()
+    const { system, backdrop, body } = buildDialogue()
+    system.show(['A', 'B'], onComplete)
+    backdrop.emit('pointerdown', { wasTouch: true })
+    expect(system.isActive).toBe(true)
+    expect(body.text).toBe('B')
+    backdrop.emit('pointerdown', { wasTouch: true })
+    expect(system.isActive).toBe(false)
+    expect(onComplete).toHaveBeenCalledOnce()
+  })
+
+  it('a mouse click outside the box still dismisses without onComplete', () => {
+    const onComplete = vi.fn()
+    const { system, backdrop } = buildDialogue()
+    system.show(['A', 'B'], onComplete)
+    backdrop.emit('pointerdown', { wasTouch: false })
+    expect(system.isActive).toBe(false)
+    expect(onComplete).not.toHaveBeenCalled()
+  })
+
+  it('completeOnClose runs onComplete once when the player closes early (backdrop or x)', () => {
+    for (const close of ['backdrop', 'closeBtn'] as const) {
+      const onComplete = vi.fn()
+      const parts = buildDialogue()
+      parts.system.show(['A', 'B'], onComplete, { completeOnClose: true })
+      parts[close].emit('pointerdown', { wasTouch: false }, 0, 0, { stopPropagation: vi.fn() })
+      parts.spaceKey.emit('down')
+      expect(parts.system.isActive).toBe(false)
+      expect(onComplete).toHaveBeenCalledOnce()
+    }
+  })
+
+  it('completeOnClose does not fire on programmatic dismiss() (scene teardown)', () => {
+    const onComplete = vi.fn()
+    const { system } = buildDialogue()
+    system.show(['A', 'B'], onComplete, { completeOnClose: true })
+    system.dismiss()
+    expect(onComplete).not.toHaveBeenCalled()
+  })
+
+  it('hideCloseButton hides the x', () => {
+    const h = makeSceneHarness()
+    new DialogueSystem(h.scene, { hideCloseButton: true })
+    expect(h.texts[2]!.visible).toBe(false)
+  })
+})
+
 // ──────────────────────────────────────────────────────────────
 // Degraded-environment guard
 // ──────────────────────────────────────────────────────────────
