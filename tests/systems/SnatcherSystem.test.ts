@@ -12,6 +12,7 @@ vi.mock("../../src/sprites/HumanNPC", () => ({ HumanNPC: class {} }));
 vi.mock("../../src/sprites/NPCCat", () => ({ NPCCat: class {} }));
 vi.mock("../../src/systems/SaveSystem", () => ({ SaveSystem: { clear: vi.fn(), load: vi.fn(() => ({})) } }));
 
+import { SaveSystem } from "../../src/systems/SaveSystem";
 import { SnatcherSystem } from "../../src/systems/SnatcherSystem";
 
 function makeCaptureScene() {
@@ -49,9 +50,28 @@ function makeCaptureScene() {
 describe("SnatcherSystem capture", () => {
   it("captures once per catch, not once per frame while the snatcher stays in range", () => {
     const { scene, system } = makeCaptureScene();
+    let finishFade: ((cam: unknown, progress: number) => void) | undefined;
+    scene.cameras.main.fade.mockImplementation(
+      (
+        _ms: number,
+        _r: number,
+        _g: number,
+        _b: number,
+        _force: boolean,
+        cb: (cam: unknown, progress: number) => void,
+      ) => {
+        finishFade = cb;
+      },
+    );
 
     system.checkDetection();
     system.checkDetection();
+    system.checkDetection();
+
+    expect(scene.loseLife).not.toHaveBeenCalled();
+    expect(scene.cameras.main.fade).toHaveBeenCalledOnce();
+
+    finishFade?.({}, 1);
     system.checkDetection();
 
     expect(scene.loseLife).toHaveBeenCalledOnce();
@@ -93,6 +113,8 @@ describe("SnatcherSystem capture", () => {
 
   it("does not dismiss Beat-5 pickup dialogue if it opens during the capture fade", () => {
     const { scene, dialogue, state, system } = makeCaptureScene();
+    scene.loseLife.mockReturnValue(true);
+    vi.mocked(SaveSystem.clear).mockClear();
     scene.cameras.main.fade.mockImplementation(
       (
         _ms: number,
@@ -109,8 +131,52 @@ describe("SnatcherSystem capture", () => {
 
     system.checkDetection();
 
-    expect(scene.loseLife).toHaveBeenCalledOnce();
+    expect(scene.loseLife).not.toHaveBeenCalled();
+    expect(scene.autoSave).not.toHaveBeenCalled();
+    expect(scene.scoring.recordSnatch).not.toHaveBeenCalled();
+    expect(SaveSystem.clear).not.toHaveBeenCalled();
+    expect(scene.registry.set).not.toHaveBeenCalled();
+    expect(scene.triggerGameOver).not.toHaveBeenCalled();
+    expect(scene.cameras.main.resetFX).toHaveBeenCalledOnce();
     expect(dialogue.dismiss).not.toHaveBeenCalled();
     expect(dialogue.show).not.toHaveBeenCalled();
+  });
+
+  it("does not recapture while the player remains in range when no save can be loaded", () => {
+    const { scene, dialogue, system } = makeCaptureScene();
+    vi.mocked(SaveSystem.load).mockReturnValueOnce(null);
+    scene.cameras.main.fade.mockImplementation(
+      (
+        _ms: number,
+        _r: number,
+        _g: number,
+        _b: number,
+        _force: boolean,
+        cb: (cam: unknown, progress: number) => void,
+      ) => {
+        cb({}, 1);
+      },
+    );
+    dialogue.show.mockImplementation((_lines: string[], onComplete: () => void) => {
+      onComplete();
+    });
+
+    system.checkDetection();
+    expect(scene.loseLife).toHaveBeenCalledOnce();
+    expect(scene.scene.restart).not.toHaveBeenCalled();
+
+    scene.player.x = 124;
+    system.checkDetection();
+    system.checkDetection();
+    expect(scene.loseLife).toHaveBeenCalledOnce();
+    expect(scene.cameras.main.fade).toHaveBeenCalledOnce();
+
+    scene.player.x = 400;
+    system.checkDetection();
+    expect(scene.loseLife).toHaveBeenCalledOnce();
+
+    scene.player.x = 100;
+    system.checkDetection();
+    expect(scene.loseLife).toHaveBeenCalledTimes(2);
   });
 });
