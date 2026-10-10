@@ -105,6 +105,8 @@ interface Car extends LaneCar, CarSprites {
 }
 
 interface Lane {
+  /** The map `traffic` place this lane belongs to (one carriageway). */
+  road: string;
   pts: Pt[];
   length: number;
   /** Fraction of the car cap this lane gets (its share of total lane length). */
@@ -176,6 +178,7 @@ export interface TrafficClock {
  */
 export class TrafficSystem {
   private readonly lanes: Lane[] = [];
+  private closed: ReadonlySet<string> = new Set();
   private readonly fitted = new Map<string, number>();
   private readonly pool: CarSprites[] = [];
   private readonly maxCars: number;
@@ -227,7 +230,7 @@ export class TrafficSystem {
       let kerbward: Lane | undefined;
       for (let k = 0; k < lanes; k++) {
         const pts = offsetPolyline(centre, laneOffset(lanes, k));
-        const lane: Lane = { pts, length: polylineLength(pts), share: 0, target: 0, cars: [], spawnIn: 0, stretch: null, mainRoad, next: null, cat: null, stops: [] };
+        const lane: Lane = { road: place.name, pts, length: polylineLength(pts), share: 0, target: 0, cars: [], spawnIn: 0, stretch: null, mainRoad, next: null, cat: null, stops: [] };
         if (kerbward) {
           lane.right = kerbward;
           kerbward.left = lane;
@@ -238,6 +241,20 @@ export class TrafficSystem {
     }
     const total = this.lanes.reduce((sum, lane) => sum + lane.length, 0);
     for (const lane of this.lanes) lane.share = total > 0 ? lane.length / total : 0;
+  }
+
+  /**
+   * Close carriageways (map `traffic` place names) to cars, e.g. Paseo de Roxas for the Sunday
+   * market: nothing spawns there, cars out of view are taken off at once, and those in view drive
+   * on out. Pass [] to reopen.
+   */
+  setClosedRoads(roads: ReadonlyArray<string>): void {
+    this.closed = new Set(roads);
+  }
+
+  /** Cars still on a closed carriageway (in view, driving out). */
+  carsOnClosedRoads(): number {
+    return this.lanes.filter((l) => this.closed.has(l.road)).reduce((n, l) => n + l.cars.length, 0);
   }
 
   get carCount(): number {
@@ -293,7 +310,13 @@ export class TrafficSystem {
     this.night = nightLevel(clock.currentPhase, clock.phaseProgress);
     const phase = DAY_NIGHT_PHASES[clock.currentPhase];
     const density = trafficDensity(hourOfDay(phase.startHour, DAY_NIGHT_PHASES[phase.next].startHour, clock.phaseProgress));
-    for (const lane of this.lanes) lane.target = density * this.maxCars * lane.share;
+    for (const lane of this.lanes) {
+      const closed = this.closed.has(lane.road);
+      lane.target = closed ? 0 : density * this.maxCars * lane.share;
+      if (closed && lane.cars.some((c) => !c.shown)) {
+        lane.cars = lane.cars.filter((c) => c.shown || (this.recycle(c), false));
+      }
+    }
 
     // The camera's worldView is only filled in by its first render; start (and
     // prewarm) only then, so prewarmed cars stay out of view instead of fading in beside the cat.

@@ -126,6 +126,12 @@ export class ColonyDynamicsSystem {
     }
   }
 
+  /** A background cat whose name Mamma Cat has learned (by greeting it): one she knows. */
+  knowsCat(cat: NPCCat): boolean {
+    const index = this.backgroundIndex.get(cat);
+    return index !== undefined && this.namedIndices.has(index);
+  }
+
   /**
    * Mamma Cat greets a background cat: she learns its name (kept in the save,
    * shown over it from then on). Returns the name and whether it is new to

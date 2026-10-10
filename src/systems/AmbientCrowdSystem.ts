@@ -171,6 +171,8 @@ const PROP_BEHIND_DEPTH = 2.995;
 const BLANKET_DEPTH = 2.4;
 /** Leaving through an exit that is on screen: fade out instead of popping. */
 const FADE_MS = 600;
+/** In a hushed zone, someone still in view this long after the hush began fades out instead of walking. */
+const HUSH_FADE_AFTER_MS = 15_000;
 /** Food, water and shelter POIs (FoodSource / shelter lists in GameScene) the hostile extra guard keeps away from. */
 const RESOURCE_POI =
   /^poi_(safe_sleep|feeding_station|water_bowl|starbucks|covered_area|pyramid_steps|fountain|restaurant_scraps|shops_supermarket|escalator|library)/;
@@ -202,6 +204,10 @@ export class AmbientCrowdSystem {
   private readonly pool: Person[] = [];
   private readonly free: Person[] = [];
   private readonly active: Person[] = [];
+  /** A place strangers keep away from (the Colony Gathering): no crowd, no guards inside it. */
+  private hush: { x: number; y: number; r: number } | null = null;
+  private hushSince = 0;
+  private readonly hushedGuards = new Set<CrowdGuard>();
   private readonly guards: CrowdGuard[] = [];
   private readonly counts: number[] = CROWD_ROLES.map(() => 0);
   private readonly staying: number[] = CROWD_ROLES.map(() => 0);
@@ -349,6 +355,61 @@ export class AmbientCrowdSystem {
     this.drawBlankets();
     this.tickTreats(phase);
     this.updateGuards(deltaMs, slot);
+    this.hushStep();
+  }
+
+  /**
+   * Keep the crowd and the guards out of `zone` (null lifts it): people out of view there just go,
+   * people in view get up and walk off (and fade if they're still there a while later), and guards
+   * inside it stand down until it lifts.
+   */
+  setHush(zone: { x: number; y: number; r: number } | null): void {
+    this.hush = zone;
+    this.hushSince = this.timeMs;
+    if (!zone) for (const g of [...this.hushedGuards]) this.unhushGuard(g);
+  }
+
+  private hushStep(): void {
+    const z = this.hush;
+    if (!z) return;
+    const inside = (x: number, y: number) => (x - z.x) ** 2 + (y - z.y) ** 2 < z.r * z.r;
+    for (let i = this.active.length - 1; i >= 0; i--) {
+      const p = this.active[i];
+      if (!p || p.role < 0 || p.fadeLeft > 0 || !inside(p.x, p.y)) continue;
+      if (!p.visible) this.despawn(p);
+      else if (this.timeMs - this.hushSince > HUSH_FADE_AFTER_MS) p.fadeLeft = FADE_MS;
+      else if (!p.shed) this.leave(p);
+    }
+    for (const g of this.guards) {
+      const hide = g.onDuty && inside(g.npc.x, g.npc.y);
+      if (hide && !this.hushedGuards.has(g)) {
+        this.hushedGuards.add(g);
+        (g.npc.body as Phaser.Physics.Arcade.Body).enable = false;
+        g.npc.setVisible(false);
+        g.indicator?.setHidden(true);
+      } else if (!hide && this.hushedGuards.has(g)) this.unhushGuard(g);
+    }
+  }
+
+  private unhushGuard(g: CrowdGuard): void {
+    this.hushedGuards.delete(g);
+    if (!g.onDuty) return;
+    (g.npc.body as Phaser.Physics.Arcade.Body).enable = true;
+    g.npc.setVisible(true);
+    g.indicator?.setHidden(false);
+  }
+
+  /** Get up (or turn off the path) and head for the nearest exit. */
+  private leave(p: Person): void {
+    p.shed = true;
+    if (p.mode === "still") {
+      p.dwellLeft = Math.min(p.dwellLeft, 1000 + Math.random() * 5000);
+    } else if (p.mode === "graph" || (p.mode === "hop" && p.hopThen === "graph")) {
+      // Finish the current segment, then head for the nearest exit.
+      this.chooseExit(p, p.toNode);
+    } else if (p.mode === "wait") {
+      this.chooseExit(p, p.node); // retried from step() once the exit route is cached
+    } // hopping onto a seat: the short shed dwell makes them leave right after sitting
   }
 
   destroy(): void {
@@ -507,15 +568,7 @@ export class AmbientCrowdSystem {
         this.despawn(pick);
         continue;
       }
-      pick.shed = true;
-      if (pick.mode === "still") {
-        pick.dwellLeft = Math.min(pick.dwellLeft, 1000 + Math.random() * 5000);
-      } else if (pick.mode === "graph" || (pick.mode === "hop" && pick.hopThen === "graph")) {
-        // Finish the current segment, then head for the nearest exit.
-        this.chooseExit(pick, pick.toNode);
-      } else if (pick.mode === "wait") {
-        this.chooseExit(pick, pick.node); // retried from step() once the exit route is cached
-      } // hopping onto a seat: the short shed dwell makes them leave right after sitting
+      this.leave(pick);
       return; // one visible person per tick, so the view empties gradually
     }
   }

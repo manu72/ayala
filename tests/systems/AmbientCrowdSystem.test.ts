@@ -242,7 +242,7 @@ function makeScene(view: { x: number; y: number; w: number; h: number }) {
       graphics: () => chain({}, ['setDepth', 'clear', 'fillStyle', 'fillRect', 'fillCircle', 'fillEllipse', 'destroy']),
       circle: () => chain({}, ['setDepth', 'destroy']),
       text: () => {
-        const t = chain({ destroyed: false } as { destroyed: boolean }, ['setOrigin', 'setDepth', 'setPosition', 'setText', 'setColor'])
+        const t = chain({ destroyed: false } as { destroyed: boolean }, ['setOrigin', 'setDepth', 'setPosition', 'setText', 'setColor', 'setVisible'])
         ;(t as unknown as { destroy: () => void }).destroy = () => {
           t.destroyed = true
         }
@@ -266,6 +266,7 @@ interface CrowdPerson {
   visible: boolean
   shed: boolean
   intent: string
+  fadeLeft: number
 }
 const activeOf = (crowd: AmbientCrowdSystem) => (crowd as unknown as { active: CrowdPerson[] }).active
 
@@ -293,6 +294,22 @@ function setup(at: { x: number; y: number }) {
 }
 
 describe('AmbientCrowdSystem', () => {
+  it('keeps a hushed zone clear (the Colony Gathering): out-of-view people go at once, the rest walk off or fade', () => {
+    const { crowd, run } = setup(restaurantRow)
+    run(20, 'day', 0.35)
+    const zone = { x: restaurantRow.x, y: restaurantRow.y, r: 480 }
+    const inside = () => activeOf(crowd).filter((p) => p.role >= 0 && (p.x - zone.x) ** 2 + (p.y - zone.y) ** 2 < zone.r ** 2)
+    expect(inside().length).toBeGreaterThan(5)
+    crowd.setHush(zone)
+    run(1, 'day', 0.35)
+    for (const p of inside()) expect(p.visible || p.fadeLeft > 0).toBe(true) // only people in view are still here
+    run(20, 'day', 0.35)
+    expect(inside()).toHaveLength(0)
+    crowd.setHush(null)
+    run(20, 'day', 0.35)
+    expect(inside().length).toBeGreaterThan(5) // the park fills again once it lifts
+  })
+
   it('fills toward the lunch head-count around the camera without ever touching the player', () => {
     const { crowd, view, player, emotes, scene, crowdSprites, run } = setup(restaurantRow)
     let maxPop = 0

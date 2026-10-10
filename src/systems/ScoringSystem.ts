@@ -13,6 +13,8 @@ export interface RunScoreState {
   dumpedPetsComforted: number[];
   foodSourcesDiscovered: string[];
   runSnatchCount: number;
+  /** Points from forage finds and dug-up treasure (absent in pre-forage saves). */
+  findPoints?: number;
 }
 
 export interface ScoreBreakdownItem {
@@ -35,6 +37,7 @@ export interface ScoreBreakdown {
   closeFriends: ScoreBreakdownItem;
   dumpedPetsComforted: ScoreBreakdownItem;
   foodSourcesDiscovered: ScoreBreakdownItem;
+  finds: ScoreBreakdownItem;
 }
 
 export function createDefaultRunScoreState(): RunScoreState {
@@ -50,6 +53,7 @@ export function createDefaultRunScoreState(): RunScoreState {
     dumpedPetsComforted: [],
     foodSourcesDiscovered: [],
     runSnatchCount: 0,
+    findPoints: 0,
   };
 }
 
@@ -70,6 +74,7 @@ export class ScoringSystem {
     totalExplorableCells: 0,
     closeFriendsMade: 0,
     runSnatchCount: 0,
+    findPoints: 0,
   };
 
   private visitedCells = new Set<number>();
@@ -163,6 +168,11 @@ export class ScoringSystem {
     if (trimmed.length > 0) this.foodSourcesDiscovered.add(trimmed);
   }
 
+  recordFind(points: number): void {
+    if (this.suspended) return;
+    this.state.findPoints = (this.state.findPoints ?? 0) + sanitizeNonNegativeInt(points);
+  }
+
   getBreakdown(): ScoreBreakdown {
     const territoryPercent = this.territoryPercent;
     const distanceThousands = Math.floor(this.state.distanceTravelledPx / 1000);
@@ -214,6 +224,11 @@ export class ScoringSystem {
         value: this.foodSourcesDiscovered.size,
         points: this.foodSourcesDiscovered.size * SCORING_WEIGHTS.foodSourceDiscovered,
       },
+      finds: {
+        label: "Finds",
+        value: this.state.findPoints ?? 0,
+        points: this.state.findPoints ?? 0,
+      },
     };
   }
 
@@ -237,6 +252,7 @@ export class ScoringSystem {
       totalExplorableCells: sanitizeNonNegativeInt(data.totalExplorableCells),
       closeFriendsMade: sanitizeNonNegativeInt(data.closeFriendsMade),
       runSnatchCount: sanitizeNonNegativeInt(data.runSnatchCount),
+      findPoints: sanitizeNonNegativeInt(data.findPoints),
     };
 
     this.visitedCells = new Set(sanitizeNumberArray(data.visitedCells));

@@ -271,10 +271,13 @@ export class BootScene extends Phaser.Scene {
     this.load.audio("bgm_ayala", "assets/sounds/ayala_loop_Luminous Rain.mp3");
     this.load.audio("bgm_snatcher", "assets/sounds/snatcher_loop_Stay the Course.mp3");
     this.load.audio("sfx_meow_happy", "assets/sounds/meow_happy.wav");
+    this.load.audio("sfx_meow_kitten", "assets/sounds/meow_kitten.wav");
     this.load.audio("sfx_cat_growl_warning", "assets/sounds/cat_growl_warning.mp3");
     // Traffic reactions to Mamma Cat on the road (synthesised by scripts/generate-sfx.mjs).
     this.load.audio("sfx_tyre_screech", "assets/sounds/tyre_screech.wav");
     this.load.audio("sfx_car_horn", "assets/sounds/car_horn.wav");
+    // generated placeholder (scripts/generate-sfx.mjs) until a licensed royalty-free track replaces the file
+    this.load.audio("sfx_sunday_lights", "assets/sounds/sunday_lights.wav");
 
     // Lucide volume-2 / volume-x glyphs for the HUD mute toggle. Rasterised
     // at 20x20 to match the HUD icon slot exactly (avoids runtime scaling).

@@ -3,6 +3,7 @@ import type { GameScene } from "./GameScene";
 import type { HUDScene } from "./HUDScene";
 import { StoryKeys } from "../registry/storyKeys";
 import { readLifetimeCount } from "../utils/lifetimeCount";
+import { daysUntilSunday } from "../utils/realCalendar";
 
 const FONT_FAMILY = "Arial, Helvetica, sans-serif";
 const BG_COLOR = 0x111118;
@@ -177,6 +178,79 @@ export class JournalScene extends Phaser.Scene {
       yOffset += LINE_HEIGHT + 12;
     }
 
+    const wonders = gameScene?.curiosity?.wonders() ?? [];
+    if (wonders.length > 0) {
+      this.container.add(
+        this.add.text(0, yOffset, "Things I wonder about", { fontFamily: FONT_FAMILY, fontSize: "14px", fontStyle: "bold", color: "#f0e8d0" }),
+      );
+      yOffset += LINE_HEIGHT + 4;
+      for (const w of wonders) {
+        const line = this.add.text(12, yOffset, `${w.open ? "?" : "✓"} ${w.text}`, {
+          fontFamily: FONT_FAMILY,
+          fontSize: "11px",
+          color: w.open ? "#ffd34d" : "#7ee07e",
+          wordWrap: { width: width - PANEL_PADDING * 2 - 24 },
+        });
+        this.container.add(line);
+        yOffset += Math.max(LINE_HEIGHT, line.height + 2);
+      }
+      yOffset += 8;
+    }
+
+    const notes = gameScene?.forage?.fieldNotes();
+    if (notes) {
+      const tierColor = { common: "#f0e8d0", uncommon: "#7ee07e", rare: "#ffd34d" } as const;
+      const section = (title: string, items: typeof notes.found, total: number) => {
+        this.container.add(
+          this.add.text(0, yOffset, `${title}: ${items.length}/${total}`, {
+            fontFamily: FONT_FAMILY,
+            fontSize: "14px",
+            fontStyle: "bold",
+            color: "#f0e8d0",
+          }),
+        );
+        yOffset += LINE_HEIGHT + 4;
+        for (const item of items) {
+          const star = item.hazard ? "⚠ " : item.tier === "rare" ? "★ " : item.tier === "uncommon" ? "✦ " : "";
+          const line = this.add.text(12, yOffset, `${star}${item.emoji} ${item.name}: ${item.verdict}`, {
+            fontFamily: FONT_FAMILY,
+            fontSize: "11px",
+            color: item.hazard ? "#ff8a65" : tierColor[item.tier],
+            wordWrap: { width: width - PANEL_PADDING * 2 - 24 },
+          });
+          this.container.add(line);
+          yOffset += Math.max(LINE_HEIGHT, line.height + 2);
+          if (item.realCats) {
+            const real = this.add.text(24, yOffset, `Real cats: ${item.realCats}`, {
+              fontFamily: FONT_FAMILY,
+              fontSize: "10px",
+              fontStyle: "italic",
+              color: "#8fb8c8",
+              wordWrap: { width: width - PANEL_PADDING * 2 - 36 },
+            });
+            this.container.add(real);
+            yOffset += Math.max(LINE_HEIGHT, real.height + 2);
+          }
+        }
+        yOffset += 8;
+      };
+      section("Field notes", notes.found, notes.total);
+      section("Treasure box", notes.treasures, notes.treasureTotal);
+      if (notes.sunday.length > 0) section("Sunday market finds", notes.sunday, notes.sundayTotal);
+    }
+
+    const kittens = gameScene?.eggs?.kittenCount();
+    if (kittens && kittens.found > 0) {
+      this.container.add(
+        this.add.text(0, yOffset, `Hidden kittens: ${kittens.found}/${kittens.total}`, { fontFamily: FONT_FAMILY, fontSize: "14px", fontStyle: "bold", color: "#f0e8d0" }),
+      );
+      yOffset += LINE_HEIGHT + 4;
+      this.container.add(
+        this.add.text(12, yOffset, "You found kittens hiding. They're still too small to know you.", { fontFamily: FONT_FAMILY, fontSize: "11px", color: "#c8c0a8" }),
+      );
+      yOffset += LINE_HEIGHT + 8;
+    }
+
     if (gameScene?.scoring) {
       const breakdown = gameScene.scoring.getBreakdown();
       this.container.add(
@@ -232,6 +306,18 @@ export class JournalScene extends Phaser.Scene {
       }),
     );
     yOffset += LINE_HEIGHT;
+
+    // The weekly rhythm: Sunday market and lights (real calendar)
+    if (gameScene?.sunday) {
+      const days = daysUntilSunday(new Date());
+      const label = gameScene.sunday.isSunday
+        ? `Today is Sunday: the Paseo market (06:00–10:00) and the ${gameScene.sunday.festive ? "Festival of Lights" : "Sunday Lights"} (17:00–23:00)`
+        : `Sunday market & lights: ${days === 0 ? "from the next dawn" : days === 1 ? "tomorrow" : `in ${days} days`}`;
+      this.container.add(
+        this.add.text(0, yOffset, label, { fontFamily: FONT_FAMILY, fontSize: "12px", color: "#ffd34d" }),
+      );
+      yOffset += LINE_HEIGHT;
+    }
 
     // Territory status
     if (gameScene?.territory?.isClaimed) {

@@ -717,6 +717,20 @@ ZOMBIES.forEach((p, n) => point(`zombie_${n + 1}`, 'zombie_home', nearestCell(p,
   at('street_food_bowl', 'colony_bowl', [255, -225], { source: 'feeding_station' })
   at('street_water_bowl', 'colony_bowl', [257, -225], { source: 'water_bowl' })
 }
+// the empty shop on restaurant row (OSM shop=vacant): where Mamma Cat stands at its glass
+point('vacant_shop_window', 'shop_window', nearestCell([266, -37], (x, y) => !blocked(idx(x, y))))
+// easter eggs (docs/Ayala_Easter_Eggs.md): where each hides; the game draws and runs them
+{
+  const at = (name, type, p) => point(name, type, clearCell(p))
+  at('egg_letter', 'egg_letter', [367, -63]) // tucked by a bush near Blackbird
+  at('egg_collar', 'egg_collar', [355, -91]) // Pedigree's buried collar, in the shade by her spot
+  at('egg_balloon_tree', 'egg_balloon_tree', [241, 11]) // the big tree in the central gardens
+  at('egg_plush', 'egg_plush', [275, 57]) // the playground, by the carabao
+  at('egg_birth', 'egg_birth', [251, -3]) // behind a dense bush in the central gardens
+  at('egg_ghost', 'egg_ghost', [165, -45]) // the Exchange Plaza fountain's edge
+  at('egg_dev_corner', 'egg_dev_corner', [7, -1]) // a quiet corner at the park's west tip, by the monument
+  ;[[347, -31], [105, 7], [289, -97], [291, 33], [407, 57], [196, 25]].forEach((p, n) => at(`egg_kitten_${n + 1}`, 'egg_kitten', p))
+}
 
 // ─────────────────────────────────────────
 // GROUND ART — dual-grid autotiles baked into atg-ground.png (visual only)
