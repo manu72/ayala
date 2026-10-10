@@ -88,6 +88,8 @@ export class CamilleEncounterSystem {
   private eraTeardownPending = false;
   private pendingEncounter = 0;
   private beat5DecisionActive = false;
+  /** True only while the frozen Beat-5 pickup modal is actually on screen. */
+  private beat5PickupDialogueActive = false;
   private beat5DecisionTimer: Phaser.Time.TimerEvent | null = null;
   private kishSlowDownShown = false;
   /**
@@ -129,6 +131,14 @@ export class CamilleEncounterSystem {
     return this.encounterActive;
   }
 
+  /**
+   * Frozen Beat-5 pickup modal. That beat completes from `onHide`, so another
+   * system dismissing it also starts Chapter 6.
+   */
+  get isBeat5PickupDialogueActive(): boolean {
+    return this.beat5PickupDialogueActive;
+  }
+
   get activeCamilleNPC(): HumanNPC | null {
     return this.camilleNPC;
   }
@@ -167,6 +177,7 @@ export class CamilleEncounterSystem {
     this.eraTeardownPending = false;
     this.pendingEncounter = 0;
     this.beat5DecisionActive = false;
+    this.beat5PickupDialogueActive = false;
     if (this.beat5DecisionTimer) {
       this.beat5DecisionTimer.remove(false);
       this.beat5DecisionTimer = null;
@@ -418,6 +429,7 @@ export class CamilleEncounterSystem {
   shutdownCamilleState(): void {
     this.cancelBeat5Decision();
     this.beat5DecisionActive = false;
+    this.beat5PickupDialogueActive = false;
     this.scene.playerInputFrozen = false;
 
     // Abort any in-flight `requestEncounterLines` LLM call so (a) the
@@ -557,6 +569,7 @@ export class CamilleEncounterSystem {
     this.kishSlowDownShown = false;
     this.cancelBeat5Decision();
     this.beat5DecisionActive = false;
+    this.beat5PickupDialogueActive = false;
     this.scene.playerInputFrozen = false;
     for (const npc of [this.camilleNPC, this.manuNPC, this.kishNPC]) {
       if (!npc) continue;
@@ -686,6 +699,7 @@ export class CamilleEncounterSystem {
     }
 
     const narratorLines = steps.map((s) => s.narrator);
+    const dialogueOpenBefore = this.scene.dialogue.isActive;
     let currentBubble: Phaser.GameObjects.Text | null = null;
     let completed = false;
     const clearBubble = (): void => {
@@ -719,6 +733,7 @@ export class CamilleEncounterSystem {
         },
         onHide: (): void => {
           clearBubble();
+          if (opts?.completeOnDismiss) this.beat5PickupDialogueActive = false;
           if (completed) return;
           if (isCamilleBeat) {
             this.resumeEraHumans();
@@ -741,6 +756,9 @@ export class CamilleEncounterSystem {
         },
       },
     );
+    if (opts?.completeOnDismiss && !dialogueOpenBefore && this.scene.dialogue.isActive) {
+      this.beat5PickupDialogueActive = true;
+    }
   }
 
   /**
@@ -1082,11 +1100,7 @@ export class CamilleEncounterSystem {
    * is side-effect-free; the orchestrator in `runEncounterBeat` guards
    * the `.then`/`.catch` boundary where state mutation actually happens.
    */
-  private async requestEncounterLines(
-    n: 2 | 3 | 4,
-    objective: string,
-    signal?: AbortSignal,
-  ): Promise<string[] | null> {
+  private async requestEncounterLines(n: 2 | 3 | 4, objective: string, signal?: AbortSignal): Promise<string[] | null> {
     const scene = this.scene;
     if (!(scene.dialogueService instanceof FallbackDialogueService)) {
       return null;

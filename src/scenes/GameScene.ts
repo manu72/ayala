@@ -43,10 +43,7 @@ import {
 import { CatWaterTrips } from "../systems/CatWaterTrips";
 import { drinkSpots, isWaterTile, waterWithin } from "../utils/waterEdge";
 import { StoryKeys, migrateLegacyIntroFlag } from "../registry/storyKeys";
-import {
-  ScriptedDialogueService,
-  type DialogueService,
-} from "../services/DialogueService";
+import { ScriptedDialogueService, type DialogueService } from "../services/DialogueService";
 import { AIDialogueService } from "../services/AIDialogueService";
 import { FallbackDialogueService } from "../services/FallbackDialogueService";
 import type { DialogueHooks } from "../systems/DialogueSystem";
@@ -60,7 +57,13 @@ import { EGGS_KEY, EasterEggSystem } from "../systems/EasterEggSystem";
 import { CamilleEncounterSystem } from "../systems/CamilleEncounterSystem";
 import { hasLineOfSightTiles } from "../utils/lineOfSight";
 import { exposeFacesTowardRoads, isRoadTile } from "../utils/roadTiles";
-import { createNavigationGrid, routeHumanPath, sameRegion, walkableRegions, type NavigationGrid } from "../utils/humanRoutePath";
+import {
+  createNavigationGrid,
+  routeHumanPath,
+  sameRegion,
+  walkableRegions,
+  type NavigationGrid,
+} from "../utils/humanRoutePath";
 import {
   closestOnPolyline,
   placeNamed,
@@ -275,6 +278,12 @@ export class GameScene extends Phaser.Scene {
   private gameOverTriggered = false;
   /** The ending fade has begun this run; beat 5, the chapter check and load recovery can all ask for it. */
   private chapter6Started = false;
+  /**
+   * Chapter narration is on screen. The chapter is already committed in
+   * memory; saving waits until the modal closes so the write matches lines
+   * the player has finished.
+   */
+  private chapterNarrationActive = false;
 
   // Kish "slow down" flag + Camille personal lines moved into
   // `CamilleEncounterSystem`. Use `this.camille.getPersonalLineForNamedCat(name)`
@@ -324,6 +333,7 @@ export class GameScene extends Phaser.Scene {
     // player body/alpha here because `playerInputFrozen` is a scene-level
     // flag read by scene `update()`.
     this.playerInputFrozen = false;
+    this.chapterNarrationActive = false;
     if (this.player) {
       const body = this.player.body as Phaser.Physics.Arcade.Body | undefined;
       body?.setEnable(true);
@@ -484,6 +494,7 @@ export class GameScene extends Phaser.Scene {
     this.pendingGameOverReason = null;
     this.gameOverTriggered = false;
     this.chapter6Started = false;
+    this.chapterNarrationActive = false;
     this.emotes = new EmoteSystem();
     this.chapters = new ChapterSystem();
     this.audio = new AudioSystem();
@@ -698,7 +709,8 @@ export class GameScene extends Phaser.Scene {
     // the street colony's bowls across Ayala Ave, also for saves made before they were there
     for (const bowl of placesOfType(this.places, "colony_bowl")) {
       const source = bowl.props.source;
-      if (source === "feeding_station" || source === "water_bowl") this.foodSources.ensureSource(source, bowl.x, bowl.y);
+      if (source === "feeding_station" || source === "water_bowl")
+        this.foodSources.ensureSource(source, bowl.x, bowl.y);
     }
     // after the food sources (tells keep clear of them) and the save's registry restore
     this.forage = new ForageSystem(this);
@@ -902,11 +914,20 @@ export class GameScene extends Phaser.Scene {
     const frame = options.frame ?? DROPOFF_SUV_FRAME;
     const vehicle = this.add.image(x, y, VEHICLE_ATLAS, frame).setDepth(4);
     const fx = this.sys.game.renderer.type === Phaser.WEBGL; // tint shadows and additive light need WebGL
-    const shadow = this.add.image(x, y, VEHICLE_ATLAS, frame).setDepth(4 - 0.01).setTint(0x000000);
+    const shadow = this.add
+      .image(x, y, VEHICLE_ATLAS, frame)
+      .setDepth(4 - 0.01)
+      .setTint(0x000000);
     // headlights after dusk (the intro drop happens at night), same look as the traffic
-    const beam = fx && this.textures.exists("light_beam")
-      ? this.add.image(x, y, "light_beam").setOrigin(0, 0.5).setDepth(51).setBlendMode(Phaser.BlendModes.ADD).setTint(0xfff1d0)
-      : null;
+    const beam =
+      fx && this.textures.exists("light_beam")
+        ? this.add
+            .image(x, y, "light_beam")
+            .setOrigin(0, 0.5)
+            .setDepth(51)
+            .setBlendMode(Phaser.BlendModes.ADD)
+            .setTint(0xfff1d0)
+        : null;
     const follow = (): void => {
       shadow
         .setPosition(vehicle.x + DROPOFF_SHADOW_DX, vehicle.y + DROPOFF_SHADOW_DY)
@@ -1572,16 +1593,27 @@ export class GameScene extends Phaser.Scene {
     return this.npcs.find((entry) => entry.cat.npcName === name)?.cat.disposition;
   }
 
-  /** False while a save would be wrong: game over (a final-life capture already cleared the save), cinematics, frozen beats, collapse. */
+  /** False while a save would be wrong: chapter narration still open, game over (a final-life capture already cleared the save), cinematics, frozen beats, collapse. */
   canAutoSaveNow(): boolean {
-    if (this.gameOverTriggered || this.cinematicActive || this.playerInputFrozen || this.stats.collapsed) return false;
+    if (
+      this.chapterNarrationActive ||
+      this.gameOverTriggered ||
+      this.cinematicActive ||
+      this.playerInputFrozen ||
+      this.stats.collapsed
+    ) {
+      return false;
+    }
     return this.registry.get(StoryKeys.GAME_OVER) !== true;
   }
 
   /** Page hidden on a touch device (app switch, lock screen). */
   private saveAndPauseOnHide(): void {
-    if (!this.canAutoSaveNow()) return;
-    this.autoSave();
+    if (this.canAutoSaveNow()) {
+      this.autoSave();
+    } else if (!this.chapterNarrationActive) {
+      return;
+    }
     if (!this.isPaused) this.togglePause();
   }
 
@@ -1641,7 +1673,7 @@ export class GameScene extends Phaser.Scene {
 
       const narration = this.chapters.consumeNarration();
       if (narration && narration.length > 0) {
-        this.dialogue.show(narration, () => {
+        this.showChapterNarration(narration, () => {
           this.autoSave();
         });
       }
@@ -1694,7 +1726,8 @@ export class GameScene extends Phaser.Scene {
     const steps = this.map.findObject("spawns", (o) => o.name === "poi_pyramid_steps");
     const inShops = zone
       ? pointInRect(this.player, zone)
-      : Boolean(steps) && Phaser.Math.Distance.Between(this.player.x, this.player.y, steps?.x ?? 0, steps?.y ?? 0) < 400;
+      : Boolean(steps) &&
+        Phaser.Math.Distance.Between(this.player.x, this.player.y, steps?.x ?? 0, steps?.y ?? 0) < 400;
     if (inShops) {
       this.registry.set("VISITED_ZONE_6", true);
     }
@@ -1828,7 +1861,7 @@ export class GameScene extends Phaser.Scene {
 
   private showChapter6Narration(): void {
     this.dialogue.dismiss(); // a dialogue already open would make show() a no-op and strand the black screen
-    this.dialogue.show(
+    this.showChapterNarration(
       [
         "A door opens. A room. Soft floor. A bed — a real bed, with a blanket.",
         "A bowl of water. Fresh. A plate of food. Just for you.",
@@ -1847,6 +1880,32 @@ export class GameScene extends Phaser.Scene {
     );
   }
 
+  /**
+   * Chapter narration modal. Autosave waits until the modal closes.
+   * The completion callback runs after the modal is inactive, so a save
+   * inside that callback still writes.
+   */
+  private showChapterNarration(lines: string[], onComplete: () => void, hooks?: DialogueHooks): void {
+    if (this.dialogue.isActive) return;
+    this.chapterNarrationActive = true;
+    const callerHide = hooks?.onHide;
+    this.dialogue.show(
+      lines,
+      () => {
+        this.chapterNarrationActive = false;
+        onComplete();
+      },
+      {
+        ...hooks,
+        onHide: () => {
+          this.chapterNarrationActive = false;
+          callerHide?.();
+        },
+      },
+    );
+    if (!this.dialogue.isActive) this.chapterNarrationActive = false;
+  }
+
   private startEpilogue(): void {
     this.scene.stop("HUDScene");
     this.scene.start("EpilogueScene");
@@ -1855,6 +1914,7 @@ export class GameScene extends Phaser.Scene {
   // ──────────── Save/Load ────────────
 
   autoSave(): void {
+    if (this.chapterNarrationActive) return;
     this.performSave();
   }
 
@@ -2073,7 +2133,13 @@ export class GameScene extends Phaser.Scene {
   private isWaterCell = (cx: number, cy: number): boolean => isWaterTile(this.groundLayer?.getTileAt(cx, cy));
 
   private startWaterTrips(): void {
-    const spots = drinkSpots(this.map.width, this.map.height, TILE_SIZE, this.isWaterCell, (cx, cy) => !this.isExplorationCellBlocked(cx, cy));
+    const spots = drinkSpots(
+      this.map.width,
+      this.map.height,
+      TILE_SIZE,
+      this.isWaterCell,
+      (cx, cy) => !this.isExplorationCellBlocked(cx, cy),
+    );
     this.waterTrips = new CatWaterTrips<NPCCat>({
       cats: () => this.npcs.map(({ cat }) => cat).filter((cat) => this.colony.goesForWater(cat)),
       spots,
@@ -2093,15 +2159,24 @@ export class GameScene extends Phaser.Scene {
     const { path } = routeHumanPath([from, to], grid);
     const end = path[path.length - 1];
     // The nav grid keeps a tile clear of obstacles, so the last few steps (to the water's edge) are walked straight.
-    const blockedAt = (x: number, y: number) => this.isExplorationCellBlocked(Math.floor(x / TILE_SIZE), Math.floor(y / TILE_SIZE));
-    const hop = end && Math.hypot(end.x - to.x, end.y - to.y) <= LAST_HOP_TILES * TILE_SIZE && hasLineOfSightTiles(end.x, end.y, to.x, to.y, TILE_SIZE, blockedAt);
+    const blockedAt = (x: number, y: number) =>
+      this.isExplorationCellBlocked(Math.floor(x / TILE_SIZE), Math.floor(y / TILE_SIZE));
+    const hop =
+      end &&
+      Math.hypot(end.x - to.x, end.y - to.y) <= LAST_HOP_TILES * TILE_SIZE &&
+      hasLineOfSightTiles(end.x, end.y, to.x, to.y, TILE_SIZE, blockedAt);
     return hop ? [...path, to] : null;
   }
 
   /** Someone (named humans, the crowd, guards) within `r` of (x, y). */
   personNear(x: number, y: number, r: number): { x: number; y: number } | null {
-    const near = (o: { x: number; y: number; active: boolean; visible: boolean }) => o.active && o.visible && Math.hypot(o.x - x, o.y - y) <= r;
-    return this.humans.humans.find(near) ?? this.crowd?.someoneNear(x, y, r) ?? (this.guard && near(this.guard) ? this.guard : null);
+    const near = (o: { x: number; y: number; active: boolean; visible: boolean }) =>
+      o.active && o.visible && Math.hypot(o.x - x, o.y - y) <= r;
+    return (
+      this.humans.humans.find(near) ??
+      this.crowd?.someoneNear(x, y, r) ??
+      (this.guard && near(this.guard) ? this.guard : null)
+    );
   }
 
   private foodSourceKey(source: { type: SourceType; x: number; y: number }): string {
@@ -2264,7 +2339,8 @@ export class GameScene extends Phaser.Scene {
     if (cat.state === "sleeping") {
       return "This cat is curled up tight, breathing softly.";
     }
-    if (this.colony.newcomers.has(cat)) return "This one isn't from here. Its eyes are huge, and it flinches at every sound.";
+    if (this.colony.newcomers.has(cat))
+      return "This one isn't from here. Its eyes are huge, and it flinches at every sound.";
     switch (effectiveDisposition) {
       case "friendly":
         return "This cat's tail is up. A good sign.";

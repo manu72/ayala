@@ -266,7 +266,14 @@ function makeFrozenUpdateScene() {
 
   Object.assign(scene, {
     camille: { trySpawnAmbientDawnVisit: vi.fn(), tick: vi.fn() },
-    catDialogue: { tickEngagement: vi.fn(), refreshLastPartner: vi.fn(), isSkippedPartner: vi.fn(() => false), lastPartnerName: null, show: vi.fn(), clearPartnerIfMatches: vi.fn() },
+    catDialogue: {
+      tickEngagement: vi.fn(),
+      refreshLastPartner: vi.fn(),
+      isSkippedPartner: vi.fn(() => false),
+      lastPartnerName: null,
+      show: vi.fn(),
+      clearPartnerIfMatches: vi.fn(),
+    },
     collapse: { tick: vi.fn(() => "continue") },
     humans: {
       updatePlayerStationaryAnchor: vi.fn(),
@@ -359,9 +366,7 @@ describe("touch input scene wiring", () => {
 
   it("removes JournalScene drag and wheel listeners on shutdown", () => {
     const scene = new JournalScene() as unknown as AnyScene;
-    scene.scene.get.mockImplementation((key: unknown) =>
-      key === "GameScene" ? makeJournalGameScene() : undefined,
-    );
+    scene.scene.get.mockImplementation((key: unknown) => (key === "GameScene" ? makeJournalGameScene() : undefined));
 
     scene.create();
     const surface = latestSurface();
@@ -727,12 +732,62 @@ describe("touch input scene wiring", () => {
     expect(scene.autoSave).toHaveBeenCalledOnce();
   });
 
+  it("defers autosave while chapter narration is open and saves once it closes", () => {
+    const scene = makeFrozenUpdateScene();
+    Object.assign(scene, {
+      playerInputFrozen: false,
+      cinematicActive: false,
+      gameOverTriggered: false,
+      isPaused: false,
+      togglePause: vi.fn(),
+    });
+    const performSave = vi.spyOn(scene as never, "performSave").mockImplementation(() => undefined);
+
+    const dialogue = {
+      isActive: false,
+      dismiss: vi.fn(),
+      advance: vi.fn(),
+      show: vi.fn(),
+    };
+    scene.scene.get.mockImplementation((key: unknown) => (key === "HUDScene" ? { dialogue } : undefined));
+
+    expect(scene.canAutoSaveNow()).toBe(true);
+    scene.autoSave();
+    expect(performSave).toHaveBeenCalledOnce();
+
+    let finished: (() => void) | undefined;
+    let hidden: (() => void) | undefined;
+    dialogue.show.mockImplementation((_lines: string[], onComplete?: () => void, hooks?: { onHide?: () => void }) => {
+      dialogue.isActive = true;
+      finished = onComplete;
+      hidden = hooks?.onHide;
+    });
+
+    scene["showChapterNarration"](["Morning."], () => {
+      scene.autoSave();
+    });
+
+    expect(scene.canAutoSaveNow()).toBe(false);
+    scene.autoSave();
+    scene["saveAndPauseOnHide"]();
+    expect(performSave).toHaveBeenCalledOnce();
+    expect(scene.togglePause).toHaveBeenCalledOnce();
+
+    dialogue.isActive = false;
+    hidden?.();
+    finished?.();
+    expect(performSave).toHaveBeenCalledTimes(2);
+    expect(scene.canAutoSaveNow()).toBe(true);
+  });
+
   it("a start chosen before the game assets have loaded runs once they have", () => {
     const hasSave = vi.spyOn(SaveSystem, "hasSave").mockReturnValue(false);
     try {
       const scene = new StartScene() as unknown as AnyScene;
       let ready = false;
-      scene.registry.get.mockImplementation((key: string) => (key === "ASSETS_READY" ? ready : key === "ASSET_PROGRESS" ? 0.5 : undefined));
+      scene.registry.get.mockImplementation((key: string) =>
+        key === "ASSETS_READY" ? ready : key === "ASSET_PROGRESS" ? 0.5 : undefined,
+      );
       scene.cameras.main.setBackgroundColor = vi.fn();
       scene.input.keyboard.on = vi.fn();
       const startFreshGame = vi.spyOn(scene as never, "startFreshGame").mockResolvedValue(undefined as never);
@@ -817,9 +872,7 @@ describe("touch input scene wiring", () => {
       show: vi.fn(),
       advance: vi.fn(),
     };
-    scene.scene.get.mockImplementation((key: unknown) =>
-      key === "HUDScene" ? { dialogue } : undefined,
-    );
+    scene.scene.get.mockImplementation((key: unknown) => (key === "HUDScene" ? { dialogue } : undefined));
     Object.assign(scene, {
       dialogueRequestInFlight: false,
       isPaused: false,
@@ -845,9 +898,7 @@ describe("touch input scene wiring", () => {
         dialogue.isActive = false;
       }),
     };
-    scene.scene.get.mockImplementation((key: unknown) =>
-      key === "HUDScene" ? { dialogue } : undefined,
-    );
+    scene.scene.get.mockImplementation((key: unknown) => (key === "HUDScene" ? { dialogue } : undefined));
     Object.assign(scene, {
       dialogueRequestInFlight: false,
       isPaused: false,
@@ -901,7 +952,11 @@ describe("touch input scene wiring", () => {
   it("clears GameScene touch queues and preserves touch run across stick updates", () => {
     const scene = new GameScene() as unknown as AnyScene;
     const setExternalMovementIntent = vi.fn();
-    scene["player"] = { cancelExternalCrouchPress: vi.fn(), clearExternalMovementIntent: vi.fn(), setExternalMovementIntent };
+    scene["player"] = {
+      cancelExternalCrouchPress: vi.fn(),
+      clearExternalMovementIntent: vi.fn(),
+      setExternalMovementIntent,
+    };
 
     scene.queueTouchInteract();
     scene.queueTouchPeek();

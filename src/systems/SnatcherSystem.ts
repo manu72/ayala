@@ -162,6 +162,11 @@ export class SnatcherSystem {
         continue;
       }
 
+      // Beat-5 pickup dialogue completes from onHide. Leave that modal up.
+      if (this.scene.camille.isBeat5PickupDialogueActive) {
+        continue;
+      }
+
       if (dist < detectionRadius) {
         const angle = Phaser.Math.Angle.Between(snatcher.x, snatcher.y, this.scene.player.x, this.scene.player.y);
         const chaseSpeed = 35;
@@ -319,10 +324,8 @@ export class SnatcherSystem {
    */
   private handleColonyCatSnatch(cat: NPCCat): void {
     const near =
-      Phaser.Math.Distance.Between(this.scene.player.x, this.scene.player.y, cat.x, cat.y) <=
-      GP.SNATCHER_WITNESS_DIST;
-    const los =
-      near && this.scene.hasLineOfSight(this.scene.player.x, this.scene.player.y, cat.x, cat.y);
+      Phaser.Math.Distance.Between(this.scene.player.x, this.scene.player.y, cat.x, cat.y) <= GP.SNATCHER_WITNESS_DIST;
+    const los = near && this.scene.hasLineOfSight(this.scene.player.x, this.scene.player.y, cat.x, cat.y);
 
     this.scene.removeColonyCat(cat);
 
@@ -347,6 +350,7 @@ export class SnatcherSystem {
    * restarts").
    */
   private handleSnatcherCapture(): void {
+    if (this.scene.camille.isBeat5PickupDialogueActive) return;
     this.capturing = true;
     const finalLife = this.scene.loseLife();
     this.scene.scoring.recordSnatch();
@@ -365,22 +369,30 @@ export class SnatcherSystem {
 
     this.scene.cameras.main.fade(100, 0, 0, 0, false, (_cam: Phaser.Cameras.Scene2D.Camera, progress: number) => {
       if (progress >= 1) {
+        if (this.scene.camille.isBeat5PickupDialogueActive) {
+          this.capturing = false;
+          return;
+        }
         this.scene.dialogue.dismiss(); // a dialogue already open would make show() a no-op and strand the black screen
-        this.scene.dialogue.show(["Hands. Darkness. You can't move. You can't breathe.", "..."], () => {
-          if (finalLife) {
-            this.scene.cameras.main.resetFX();
-            this.scene.triggerGameOver("snatched");
-            return;
-          }
-          const hasSave = SaveSystem.load() !== null;
-          if (hasSave) {
-            this.scene.cameras.main.resetFX();
-            this.scene.scene.restart({ loadSave: true, snatcherCapture: true });
-          } else {
-            this.scene.cameras.main.resetFX();
-            this.capturing = false;
-          }
-        }, { completeOnClose: true }); // faded to black: closing early must still restart or end the game
+        this.scene.dialogue.show(
+          ["Hands. Darkness. You can't move. You can't breathe.", "..."],
+          () => {
+            if (finalLife) {
+              this.scene.cameras.main.resetFX();
+              this.scene.triggerGameOver("snatched");
+              return;
+            }
+            const hasSave = SaveSystem.load() !== null;
+            if (hasSave) {
+              this.scene.cameras.main.resetFX();
+              this.scene.scene.restart({ loadSave: true, snatcherCapture: true });
+            } else {
+              this.scene.cameras.main.resetFX();
+              this.capturing = false;
+            }
+          },
+          { completeOnClose: true },
+        ); // faded to black: closing early must still restart or end the game
       }
     });
   }
