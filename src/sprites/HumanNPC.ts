@@ -143,6 +143,8 @@ export class HumanNPC extends BaseNPC {
   private currentWaypoint = 0;
   private activePhases: Set<TimeOfDay>;
   private isActive = false;
+  /** Kept out of sight for a while (strangers at the Colony Gathering). */
+  hushed = false;
   private lingerTimer = 0;
   private lingering = false;
   private readonly normalizedLingerIndex: number;
@@ -402,6 +404,25 @@ export class HumanNPC extends BaseNPC {
       }
       this.startExiting();
     }
+  }
+
+  /** Hide this person (and so their dog) while `hushed`; lifting it shows them again if they're out and about. */
+  setHushed(hushed: boolean): void {
+    if (this.hushed === hushed) return;
+    this.hushed = hushed;
+    const onStage = this.isActive && !this.loopPausing;
+    this.setVisible(!hushed && onStage);
+    this.feedingStationProp?.setVisible(!hushed);
+    const body = this.body as Phaser.Physics.Arcade.Body | undefined;
+    if (body) body.enable = !hushed && onStage;
+  }
+
+  /** Undo anything this frame's update did to show a hushed person. */
+  keepHushed(): void {
+    if (!this.hushed) return;
+    if (this.visible) this.setVisible(false);
+    const body = this.body as Phaser.Physics.Arcade.Body | undefined;
+    if (body?.enable) body.enable = false;
   }
 
   update(delta: number): void {

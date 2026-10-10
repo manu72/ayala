@@ -331,6 +331,8 @@ export class HumanPresenceSystem {
     for (const human of this.humansList) {
       human.setPhase(getEffectiveHumanPhase(human.humanType, scene.dayNight.currentPhase, scene.dayNight.dayCount));
       human.update(delta);
+      // a schedule change can't bring a hushed stranger back into view
+      if (human.hushed) human.keepHushed();
 
       if (!human.visible) continue;
 

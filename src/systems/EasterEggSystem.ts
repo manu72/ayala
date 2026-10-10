@@ -6,6 +6,7 @@ import { placeNamed, placesOfType, type Pt } from "../utils/mapPlaces";
 import { fringeStarts, gatheringSlots } from "../utils/gathering";
 import { mixSeed, seededRng } from "../utils/forage";
 import type { NPCCat } from "../sprites/NPCCat";
+import { StoryKeys } from "../registry/storyKeys";
 
 /**
  * The secrets in docs/Ayala_Easter_Eggs.md: the Hidden Letter and the Stuffed Cat (carried in her
@@ -30,6 +31,14 @@ const FRINGE_SPREAD_MS = 13_000;
 /** From the last cat setting off until the line: time to walk in and sit. */
 const GATHER_SETTLE_MS = 14_000;
 const GATHER_HOLD_MS = 7000;
+/**
+ * While they sit with her, strangers keep away: no crowd, joggers, guards, dog walkers or cats she
+ * doesn't know within this of the gathering (wider than the pulled-back camera's view).
+ */
+const HUSH_RADIUS_PX = 480;
+const HUSH_MS = 15 * 60_000;
+/** Who may stay: the people of the story. */
+const STORY_HUMANS: ReadonlySet<string> = new Set(["camille", "manu", "kish"]);
 const BIRTH_TRUST = 50;
 const BIRTH_CHANCE = 0.4;
 const REACH_PX = 30;
@@ -124,6 +133,8 @@ export class EasterEggSystem {
   private ghostOn = false;
   private restWasOn = false;
   private gatheringUntil = 0;
+  private hush: { x: number; y: number; r: number; until: number; guests: Set<NPCCat> } | null = null;
+  private readonly hiddenCats = new Set<NPCCat>();
   private storyWoke = false;
 
   constructor(private readonly scene: GameScene) {
@@ -236,6 +247,8 @@ export class EasterEggSystem {
       if (this.atPlace("egg_birth", 56) && this.scene.trust.global >= BIRTH_TRUST && Math.random() < BIRTH_CHANCE) this.birth();
     }
     this.restWasOn = player.isResting;
+
+    this.tickHush(time);
 
     // The Complete Colony Gathering: before the last encounter, if every named cat loves her
     if (!this.state.gathered && this.scene.camille.pendingEncounterNumber === 5 && phase === "evening") {
@@ -463,6 +476,8 @@ export class EasterEggSystem {
     const fringe = scene.npcs.map((e) => e.cat).filter((c) => c.active && !named.includes(c) && scene.colony.knowsCat(c));
     const rng = seededRng(mixSeed(scene.dayNight.dayCount, 5150));
     const slots = gatheringSlots(centre, named.length, fringe.length, rng);
+    this.hush = { ...centre, r: HUSH_RADIUS_PX, until: time + HUSH_MS, guests: new Set([...named, ...fringe]) };
+    scene.hushCrowd(this.hush);
     const lastNamedMs = (named.length - 1) * NAMED_GAP_MS;
     const fringeAt = fringeStarts(fringe.length, FRINGE_FIRST_MS, FRINGE_SPREAD_MS, rng);
     const settledMs = Math.max(lastNamedMs, fringeAt[fringeAt.length - 1] ?? 0) + GATHER_SETTLE_MS;
@@ -487,6 +502,37 @@ export class EasterEggSystem {
       this.narrate("They came. All of them. To say goodbye.");
       scene.time.delayedCall(GATHER_HOLD_MS, () => cam.zoomTo(zoom, 2000, "Sine.easeInOut", true));
     });
+  }
+
+  /**
+   * Strangers keep away from the gathering until it's over (the last encounter done, or the cats
+   * get up again): the crowd and guards (via the crowd system), anyone who isn't Camille, Manu or
+   * Kish, and any cat that isn't one of her guests.
+   */
+  private tickHush(time: number): void {
+    const h = this.hush;
+    if (!h) return;
+    const scene = this.scene;
+    const over = time > h.until || scene.registry.get(StoryKeys.ENCOUNTER_5_COMPLETE) === true;
+    const inside = (o: { x: number; y: number }) => !over && (o.x - h.x) ** 2 + (o.y - h.y) ** 2 < h.r * h.r;
+    for (const human of scene.humans.humans) human.setHushed(!STORY_HUMANS.has(human.humanType) && inside(human));
+    for (const { cat, indicator } of scene.npcs) {
+      if (h.guests.has(cat)) continue;
+      const hide = inside(cat);
+      if (hide && !this.hiddenCats.has(cat)) {
+        this.hiddenCats.add(cat);
+        cat.setVisible(false);
+        indicator.setHidden(true);
+      } else if (!hide && this.hiddenCats.has(cat)) {
+        this.hiddenCats.delete(cat);
+        cat.setVisible(true);
+        indicator.setHidden(false);
+      }
+    }
+    if (over) {
+      scene.hushCrowd(null);
+      this.hush = null;
+    }
   }
 
   /**

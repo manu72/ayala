@@ -2455,6 +2455,11 @@ export class GameScene extends Phaser.Scene {
     return Boolean(hud);
   }
 
+  /** Keep the park crowd and the guards out of `zone` (the Colony Gathering); null lifts it. */
+  hushCrowd(zone: { x: number; y: number; r: number } | null): void {
+    this.crowd?.setHush(zone);
+  }
+
   /** The calm security guards at their posts (friendly ones stop and look at her, and tell tales). */
   get ambientGuards(): readonly GuardNPC[] {
     return this.crowd?.extraGuards ?? [];
@@ -2527,6 +2532,7 @@ export class GameScene extends Phaser.Scene {
     let nearestRawEntry: NPCEntry | null = null;
     let nearestRawDist = Infinity;
     for (const entry of this.npcs) {
+      if (!entry.cat.visible) continue; // out of sight (kept away from the Colony Gathering)
       const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, entry.cat.x, entry.cat.y);
       if (dist < nearestRawDist) {
         nearestRawEntry = entry;
