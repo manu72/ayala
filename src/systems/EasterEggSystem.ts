@@ -318,7 +318,7 @@ export class EasterEggSystem {
     this.scene.dialogue.show(["Camille unfolds the paper. She reads it once, and laughs, and reads it again.", "\"nom noms\"", "She holds it to her chest for a long moment."], () => {
       this.scene.tweens.add({ targets: card, alpha: 0, duration: 500, onComplete: () => card.destroy() });
       this.scene.autoSave();
-    });
+    }, { completeOnClose: true }); // the card and its dim overlay only go away here
   }
 
   private givePlush(kish: HumanNPC): void {

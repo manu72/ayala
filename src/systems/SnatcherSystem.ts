@@ -48,6 +48,8 @@ export class SnatcherSystem {
   private readonly snatchersList: HumanNPC[] = [];
   private spawnChecked = false;
   private snatchedThisNightFlag = false;
+  /** A capture is playing out (fade + dialogue); without this every frame in range re-captures and drains all lives. */
+  private capturing = false;
 
   constructor(scene: GameScene) {
     this.scene = scene;
@@ -126,7 +128,7 @@ export class SnatcherSystem {
    *     named-cat snatches rare in practice.
    */
   checkDetection(): void {
-    if (this.snatchersList.length === 0) return;
+    if (this.snatchersList.length === 0 || this.capturing) return;
 
     const colonyVictims: NPCCat[] = [];
 
@@ -189,6 +191,7 @@ export class SnatcherSystem {
     this.despawnAll();
     this.spawnChecked = false;
     this.snatchedThisNightFlag = false;
+    this.capturing = false;
   }
 
   // ──────────── Internal ────────────
@@ -344,6 +347,7 @@ export class SnatcherSystem {
    * restarts").
    */
   private handleSnatcherCapture(): void {
+    this.capturing = true;
     const finalLife = this.scene.loseLife();
     this.scene.scoring.recordSnatch();
     this.snatchedThisNightFlag = true;
@@ -361,6 +365,7 @@ export class SnatcherSystem {
 
     this.scene.cameras.main.fade(100, 0, 0, 0, false, (_cam: Phaser.Cameras.Scene2D.Camera, progress: number) => {
       if (progress >= 1) {
+        this.scene.dialogue.dismiss(); // a dialogue already open would make show() a no-op and strand the black screen
         this.scene.dialogue.show(["Hands. Darkness. You can't move. You can't breathe.", "..."], () => {
           if (finalLife) {
             this.scene.cameras.main.resetFX();
@@ -373,8 +378,9 @@ export class SnatcherSystem {
             this.scene.scene.restart({ loadSave: true, snatcherCapture: true });
           } else {
             this.scene.cameras.main.resetFX();
+            this.capturing = false;
           }
-        });
+        }, { completeOnClose: true }); // faded to black: closing early must still restart or end the game
       }
     });
   }

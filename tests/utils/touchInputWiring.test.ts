@@ -49,6 +49,7 @@ function createGameObject() {
     setDepth: vi.fn(() => obj),
     setInteractive: vi.fn(() => obj),
     setOrigin: vi.fn(() => obj),
+    setPadding: vi.fn(() => obj),
     setPosition: vi.fn((x: number, y: number) => {
       obj.x = x;
       obj.y = y;
@@ -234,6 +235,8 @@ import { EMPTY_MOVEMENT_INTENT } from "../../src/input/playerIntent";
 import { GameScene } from "../../src/scenes/GameScene";
 import { HUDScene } from "../../src/scenes/HUDScene";
 import { JournalScene } from "../../src/scenes/JournalScene";
+import { StartScene } from "../../src/scenes/StartScene";
+import { SaveSystem } from "../../src/systems/SaveSystem";
 
 function latestSurface() {
   const surface = sceneSurfaces[sceneSurfaces.length - 1];
@@ -633,7 +636,7 @@ describe("touch input scene wiring", () => {
     expect(gameScene.setTouchRun).toHaveBeenCalledOnce();
     expect(gameScene.setTouchRun).toHaveBeenLastCalledWith(true);
 
-    runButtonBackground.emit("pointerupoutside", runPointer);
+    scene.input.emit("pointerupoutside", runPointer);
 
     expect(gameScene.setTouchRun).toHaveBeenNthCalledWith(1, true);
     expect(gameScene.setTouchRun).toHaveBeenNthCalledWith(2, false);
@@ -668,8 +671,66 @@ describe("touch input scene wiring", () => {
     expect(gameScene.setTouchRun).toHaveBeenCalledOnce();
     expect(gameScene.setTouchRun).toHaveBeenLastCalledWith(true);
 
-    runButtonBackground.emit("pointerupoutside", { id: 21 });
+    scene.input.emit("pointerupoutside", { id: 21 });
     expect(gameScene.setTouchRun).toHaveBeenNthCalledWith(2, false);
+  });
+
+  it("releases a held touch button when the thumb slides off and lifts elsewhere", () => {
+    const scene = new HUDScene() as unknown as AnyScene;
+    const gameScene = { clearTouchInputState: vi.fn(), setTouchRun: vi.fn() };
+    scene.scene.get.mockImplementation((key: unknown) => (key === "GameScene" ? gameScene : undefined));
+
+    scene["buildTouchControls"](816, 624);
+    const runButtonBackground = latestSurface().rectangles[1]!;
+
+    runButtonBackground.emit("pointerdown", { id: 5 }, 0, 0, { stopPropagation: vi.fn() });
+    scene.input.emit("pointerup", { id: 5 }, []);
+
+    expect(gameScene.setTouchRun).toHaveBeenNthCalledWith(1, true);
+    expect(gameScene.setTouchRun).toHaveBeenNthCalledWith(2, false);
+  });
+
+  it("saves and pauses when the page is hidden, but not after a final-life capture", () => {
+    const scene = makeFrozenUpdateScene();
+    Object.assign(scene, { autoSave: vi.fn(), isPaused: false, playerInputFrozen: false, togglePause: vi.fn() });
+
+    scene["saveAndPauseOnHide"]();
+    expect(scene.autoSave).toHaveBeenCalledOnce();
+    expect(scene.togglePause).toHaveBeenCalledOnce();
+
+    scene.registry.get.mockImplementation((key: string) => key === "GAME_OVER");
+    scene["saveAndPauseOnHide"]();
+    expect(scene.autoSave).toHaveBeenCalledOnce();
+  });
+
+  it("on touch, New Game only erases an existing save on a second tap; a mouse click is unchanged", () => {
+    const hasSave = vi.spyOn(SaveSystem, "hasSave").mockReturnValue(true);
+    const load = vi.spyOn(SaveSystem, "load").mockReturnValue(null);
+    const makeStart = () => {
+      const scene = new StartScene() as unknown as AnyScene;
+      scene.cameras.main.setBackgroundColor = vi.fn();
+      scene.input.keyboard.on = vi.fn();
+      const startFreshGame = vi.spyOn(scene as never, "startFreshGame").mockResolvedValue(undefined as never);
+      scene.create();
+      const newGame = latestSurface().texts.find((t) => t.text === "New Game")!;
+      return { newGame, startFreshGame };
+    };
+
+    try {
+      const touch = makeStart();
+      touch.newGame.emit("pointerdown", { wasTouch: true });
+      expect(touch.startFreshGame).not.toHaveBeenCalled();
+      expect(touch.newGame.text).toBe("Tap again to erase your save");
+      touch.newGame.emit("pointerdown", { wasTouch: true });
+      expect(touch.startFreshGame).toHaveBeenCalledOnce();
+
+      const mouse = makeStart();
+      mouse.newGame.emit("pointerdown", { wasTouch: false });
+      expect(mouse.startFreshGame).toHaveBeenCalledOnce();
+    } finally {
+      hasSave.mockRestore();
+      load.mockRestore();
+    }
   });
 
   it("uses queued touch Act to advance active dialogue like Space", () => {

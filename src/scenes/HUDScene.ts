@@ -260,6 +260,7 @@ export class HUDScene extends Phaser.Scene {
               TOUCH_ACTION_COLUMNS * TOUCH_BUTTON_SIZE_PX +
               (TOUCH_ACTION_COLUMNS - 1) * TOUCH_BUTTON_GAP_PX,
             horizontalGapPx: TOUCH_DIALOGUE_GAP_PX,
+            hideCloseButton: true,
           }
         : undefined,
     );
@@ -528,7 +529,15 @@ export class HUDScene extends Phaser.Scene {
       handlers.down?.();
     });
     bg.on("pointerup", releasePointer);
-    bg.on("pointerupoutside", releasePointer);
+    // A thumb that slides off before lifting releases elsewhere. Phaser only reports that
+    // at scene level (game objects never get "pointerupoutside"), so listen there too.
+    const releaseElsewhere = (pointer: Phaser.Input.Pointer) => releasePointer(pointer);
+    this.input.on("pointerup", releaseElsewhere);
+    this.input.on("pointerupoutside", releaseElsewhere);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.input.off("pointerup", releaseElsewhere);
+      this.input.off("pointerupoutside", releaseElsewhere);
+    });
 
     return button;
   }
@@ -572,7 +581,8 @@ export class HUDScene extends Phaser.Scene {
   // ──────────── Pause Menu ────────────
 
   private createPauseMenu(width: number, height: number): Phaser.GameObjects.Container {
-    const overlay = this.add.rectangle(0, 0, width, height, 0x000000, 0.6);
+    // interactive so taps that miss a menu item don't fall through to the dialogue behind
+    const overlay = this.add.rectangle(0, 0, width, height, 0x000000, 0.6).setInteractive();
 
     const title = this.add
       .text(0, -110, "PAUSED", {
@@ -625,6 +635,8 @@ export class HUDScene extends Phaser.Scene {
     const quitBtn = this.createMenuButton(0, 96, "Quit to Title", () => {
       const gameScene = this.scene.get("GameScene") as GameScene;
       this.pauseContainer.setVisible(false);
+      // on touch, Quit sits a thumb-width under Resume; don't let a mis-tap cost progress
+      if (this.shouldShowTouchControls() && gameScene.canAutoSaveNow()) gameScene.autoSave();
       gameScene.quitToTitle();
     });
 

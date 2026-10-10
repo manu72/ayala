@@ -37,6 +37,16 @@ export class StartScene extends Phaser.Scene {
     const hasSave = SaveSystem.hasSave();
     const save = hasSave ? SaveSystem.load() : null;
     const isCompleted = save?.variables?.GAME_COMPLETED === true;
+    const touch = this.sys.game.device.input.touch;
+
+    // New Game erases the save on one touch and sits a thumb-width under Continue,
+    // so on touch the first tap only arms it. Mouse and keyboard are unchanged.
+    const confirmErase = (btn: Phaser.GameObjects.Text, label: string, pointer: Phaser.Input.Pointer): boolean => {
+      if (!hasSave || !pointer.wasTouch || btn.text !== label) return true;
+      btn.setText("Tap again to erase your save");
+      this.time.delayedCall(3000, () => btn.setText(label));
+      return false;
+    };
 
     if (hasSave) {
       const continueBtn = this.add
@@ -47,6 +57,7 @@ export class StartScene extends Phaser.Scene {
         .setOrigin(0.5)
         .setInteractive({ useHandCursor: true });
 
+      if (touch) continueBtn.setPadding(24, 8);
       continueBtn.on("pointerover", () => continueBtn.setColor("#66FF66"));
       continueBtn.on("pointerout", () => continueBtn.setColor("#44DD44"));
       continueBtn.on("pointerdown", () => {
@@ -64,10 +75,11 @@ export class StartScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setInteractive({ useHandCursor: true });
 
+    if (touch) newBtn.setPadding(24, 8);
     newBtn.on("pointerover", () => newBtn.setColor("#cccccc"));
     newBtn.on("pointerout", () => newBtn.setColor("#ffffff"));
-    newBtn.on("pointerdown", () => {
-      void this.startFreshGame();
+    newBtn.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
+      if (confirmErase(newBtn, "New Game", pointer)) void this.startFreshGame();
     });
 
     nextY += 40;
@@ -84,9 +96,10 @@ export class StartScene extends Phaser.Scene {
 
       ngPlusBtn.on("pointerover", () => ngPlusBtn.setColor("#cceeFF"));
       ngPlusBtn.on("pointerout", () => ngPlusBtn.setColor("#aaddff"));
-      ngPlusBtn.on("pointerdown", () => {
-        void this.startFreshGame({ newGamePlus: true });
+      ngPlusBtn.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
+        if (confirmErase(ngPlusBtn, "New Game+ (Cozy Mode)", pointer)) void this.startFreshGame({ newGamePlus: true });
       });
+      if (touch) ngPlusBtn.setPadding(24, 8);
 
       nextY += 30;
     }

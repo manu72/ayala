@@ -716,6 +716,14 @@ export class GameScene extends Phaser.Scene {
       this.input.keyboard.addCapture("TAB");
     }
 
+    // iOS can kill a backgrounded tab without warning and saves are event-driven,
+    // so on touch devices save and pause whenever the page is hidden.
+    if (this.sys.game.device.input.touch) {
+      const onHidden = () => this.saveAndPauseOnHide();
+      this.game.events.on(Phaser.Core.Events.HIDDEN, onHidden);
+      this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.game.events.off(Phaser.Core.Events.HIDDEN, onHidden));
+    }
+
     this.cameras.main.setBounds(0, 0, this.map.widthInPixels, this.map.heightInPixels);
     this.physics.world.setBounds(0, 0, this.map.widthInPixels, this.map.heightInPixels);
     this.cameras.main.setZoom(DEFAULT_ZOOM);
@@ -1551,6 +1559,19 @@ export class GameScene extends Phaser.Scene {
     return this.npcs.find((entry) => entry.cat.npcName === name)?.cat.disposition;
   }
 
+  /** False while a save would be wrong: game over (a final-life capture already cleared the save), cinematics, frozen beats, collapse. */
+  canAutoSaveNow(): boolean {
+    if (this.gameOverTriggered || this.cinematicActive || this.playerInputFrozen || this.stats.collapsed) return false;
+    return this.registry.get(StoryKeys.GAME_OVER) !== true;
+  }
+
+  /** Page hidden on a touch device (app switch, lock screen). */
+  private saveAndPauseOnHide(): void {
+    if (!this.canAutoSaveNow()) return;
+    this.autoSave();
+    if (!this.isPaused) this.togglePause();
+  }
+
   quitToTitle(): void {
     this.isPaused = false;
     this.physics.resume();
@@ -1791,6 +1812,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private showChapter6Narration(): void {
+    this.dialogue.dismiss(); // a dialogue already open would make show() a no-op and strand the black screen
     this.dialogue.show(
       [
         "A door opens. A room. Soft floor. A bed — a real bed, with a blanket.",
@@ -1805,6 +1827,8 @@ export class GameScene extends Phaser.Scene {
         this.autoSave();
         this.startEpilogue();
       },
+      // the screen is already faded to black: closing early must still reach the epilogue
+      { completeOnClose: true },
     );
   }
 
