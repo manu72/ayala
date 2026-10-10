@@ -380,7 +380,8 @@ export class HumanPresenceSystem {
 
         if (!greeted) {
           for (const { cat } of scene.npcs) {
-            if (cat.state === "fleeing") continue;
+            // a cat hidden from the scene (the gathering's hush) isn't there to greet
+            if (cat.state === "fleeing" || !cat.visible) continue;
             const dist = Phaser.Math.Distance.Between(human.x, human.y, cat.x, cat.y);
             if (dist < GP.CAT_PERSON_GREET_DIST && !human.hasGreeted(cat)) {
               if (human.humanType === "manu" && human.shouldDeferManuGreet()) {
@@ -441,6 +442,7 @@ export class HumanPresenceSystem {
 
         if (!glanced) {
           for (const { cat } of scene.npcs) {
+            if (!cat.visible) continue;
             const dist = Phaser.Math.Distance.Between(human.x, human.y, cat.x, cat.y);
             if (dist < GP.GLANCE_DIST) {
               if (isJogger) {
