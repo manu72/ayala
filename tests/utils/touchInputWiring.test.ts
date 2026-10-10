@@ -706,6 +706,13 @@ describe("touch input scene wiring", () => {
     expect(gameScene.setTouchRun).toHaveBeenNthCalledWith(2, false);
   });
 
+  it("starts the ending fade only once per run (beat 5, chapter check and load recovery all ask)", () => {
+    const scene = makeFrozenUpdateScene();
+    scene.startChapter6Sequence();
+    scene.startChapter6Sequence();
+    expect(scene.cameras.main.fade).toHaveBeenCalledOnce();
+  });
+
   it("saves and pauses when the page is hidden, but not after a final-life capture", () => {
     const scene = makeFrozenUpdateScene();
     Object.assign(scene, { autoSave: vi.fn(), isPaused: false, playerInputFrozen: false, togglePause: vi.fn() });

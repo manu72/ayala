@@ -273,6 +273,8 @@ export class GameScene extends Phaser.Scene {
   private trustEventUnsubscribe: (() => void) | null = null;
   pendingGameOverReason: "collapse" | "snatched" | null = null;
   private gameOverTriggered = false;
+  /** The ending fade has begun this run; beat 5, the chapter check and load recovery can all ask for it. */
+  private chapter6Started = false;
 
   // Kish "slow down" flag + Camille personal lines moved into
   // `CamilleEncounterSystem`. Use `this.camille.getPersonalLineForNamedCat(name)`
@@ -481,6 +483,7 @@ export class GameScene extends Phaser.Scene {
     this.lives = MAX_LIVES;
     this.pendingGameOverReason = null;
     this.gameOverTriggered = false;
+    this.chapter6Started = false;
     this.emotes = new EmoteSystem();
     this.chapters = new ChapterSystem();
     this.audio = new AudioSystem();
@@ -845,6 +848,16 @@ export class GameScene extends Phaser.Scene {
       this.registry.get(StoryKeys.ENCOUNTER_5_COMPLETE) !== true
     ) {
       this.time.delayedCall(500, () => this.camille.startEncounter(5));
+    }
+
+    // Recovery: the app was closed during the ending (fade or home narration), so
+    // the save has encounter 5 done but never reached GAME_COMPLETED. Replay it.
+    if (
+      data?.loadSave &&
+      this.registry.get(StoryKeys.ENCOUNTER_5_COMPLETE) === true &&
+      this.registry.get(StoryKeys.GAME_COMPLETED) !== true
+    ) {
+      this.time.delayedCall(500, () => this.startChapter6Sequence());
     }
   }
 
@@ -1804,6 +1817,8 @@ export class GameScene extends Phaser.Scene {
    * Mamma Cat disappearing into Camille's carrier.
    */
   startChapter6Sequence(): void {
+    if (this.chapter6Started) return;
+    this.chapter6Started = true;
     this.cameras.main.fade(2000, 0, 0, 0, false, (_cam: Phaser.Cameras.Scene2D.Camera, progress: number) => {
       if (progress >= 1) {
         this.showChapter6Narration();
