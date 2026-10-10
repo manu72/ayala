@@ -322,6 +322,22 @@ describe("touch input scene wiring", () => {
     sceneSurfaces.length = 0;
   });
 
+  it("lays out JournalScene cats in two columns, left then right", () => {
+    const scene = new JournalScene() as unknown as AnyScene;
+    const gameScene = makeJournalGameScene();
+    scene.scene.get.mockImplementation((key: unknown) => (key === "GameScene" ? gameScene : undefined));
+    const cat = (name: string) => ({ name, description: "d", metOnDay: 1, trust: 0, disposition: "neutral" });
+    vi.spyOn(scene as never, "gatherEntries").mockReturnValue([cat("Tiger"), cat("Jayco"), cat("Fluffy")] as never);
+
+    scene.create();
+    const nameText = (name: string) => latestSurface().texts.find((t) => t.text.endsWith(` ${name}`))!;
+
+    expect(nameText("Tiger")).toMatchObject({ x: 0, y: 0 });
+    expect(nameText("Jayco")).toMatchObject({ x: 384, y: 0 });
+    expect(nameText("Fluffy").x).toBe(0);
+    expect(nameText("Fluffy").y).toBeGreaterThan(0);
+  });
+
   it("routes JournalScene drag and wheel scrolling through setScrollY", () => {
     const scene = new JournalScene() as unknown as AnyScene;
     const gameScene = makeJournalGameScene();
@@ -444,13 +460,13 @@ describe("touch input scene wiring", () => {
       surface.texts.slice(0, 7).map((label, index) => [label.text, surface.containers[index + 1]!]),
     );
 
-    expect(labelToButton.get("Run")).toMatchObject({ x: 688, y: 568 });
-    expect(labelToButton.get("Act")).toMatchObject({ x: 760, y: 568 });
-    expect(labelToButton.get("Rest")).toMatchObject({ x: 688, y: 496 });
-    expect(labelToButton.get("Crouch")).toMatchObject({ x: 688, y: 424 });
-    expect(labelToButton.get("Look")).toMatchObject({ x: 760, y: 496 });
-    expect(labelToButton.get("Journal")).toMatchObject({ x: 760, y: 424 });
-    expect(labelToButton.get("Pause")).toMatchObject({ x: 760, y: 352 });
+    expect(labelToButton.get("Run")).toMatchObject({ x: 664, y: 560 });
+    expect(labelToButton.get("Act")).toMatchObject({ x: 752, y: 560 });
+    expect(labelToButton.get("Rest")).toMatchObject({ x: 664, y: 472 });
+    expect(labelToButton.get("Crouch")).toMatchObject({ x: 664, y: 384 });
+    expect(labelToButton.get("Look")).toMatchObject({ x: 752, y: 472 });
+    expect(labelToButton.get("Journal")).toMatchObject({ x: 752, y: 384 });
+    expect(labelToButton.get("Pause")).toMatchObject({ x: 752, y: 296 });
   });
 
   it("keeps touch controls anchored when dialogue opens", () => {
