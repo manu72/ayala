@@ -717,6 +717,8 @@ ZOMBIES.forEach((p, n) => point(`zombie_${n + 1}`, 'zombie_home', nearestCell(p,
   at('street_food_bowl', 'colony_bowl', [255, -225], { source: 'feeding_station' })
   at('street_water_bowl', 'colony_bowl', [257, -225], { source: 'water_bowl' })
 }
+// the empty shop on restaurant row (OSM shop=vacant): where Mamma Cat stands at its glass
+point('vacant_shop_window', 'shop_window', nearestCell([266, -37], (x, y) => !blocked(idx(x, y))))
 
 // ─────────────────────────────────────────
 // GROUND ART — dual-grid autotiles baked into atg-ground.png (visual only)

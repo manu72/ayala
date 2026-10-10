@@ -256,6 +256,17 @@ export class CatDialogueController {
       return;
     }
 
+    // A rumour she hasn't heard takes this press (scripted, no trust); her usual conversation is the next one.
+    const rumour = scene.curiosity?.takeRumour(name);
+    if (rumour) {
+      scene.emotes.show(scene, cat, "curious");
+      scene.dialogue.show(rumour, () => {
+        this.lastDialoguePartner = cat;
+        this.lastDialoguePartnerAt = scene.time.now;
+      });
+      return;
+    }
+
     void this.requestDialogue(cat).catch(() => {
       // Errors are logged and cleaned up inside requestDialogue.
     });

@@ -113,6 +113,13 @@ export class GuardNPC extends BaseNPC {
     this.setVelocity(0);
   }
 
+  /** Friendly duty: stop and look at her for `ms` (while he tells her something). */
+  holdFor(ms: number): void {
+    if (this.disposition !== "friendly") return;
+    this.noticeMs = Math.max(this.noticeMs, ms);
+    this.setVelocity(0);
+  }
+
   update(delta: number): void {
     if (!this.target) return;
     if (this.disposition !== "hostile") {

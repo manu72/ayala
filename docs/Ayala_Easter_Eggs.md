@@ -3,11 +3,12 @@
 **Purpose:** Track easter eggs and secret content for the game. These are designed primarily for Camille (primary player) and Kish (secondary player).
 
 **Status key:**
+
 - 🎯 **Priority** — build in v1
 - 💭 **Idea** — parked for v2 or later
 - ✅ **Built** — implemented
 
-_Last updated: April 2026_
+_Last updated: October 2026_
 
 ---
 
@@ -29,7 +30,7 @@ If she brings it to Camille during an encounter, Camille "reads" it — the scre
 
 If Mamma Cat stands on a specific tile of the pyramid steps during the exact transition from evening to night (the 2-second crossover between day/night cycle phases), the camera pulls back briefly and shows a sunset silhouette of the Makati skyline.
 
-A single line of narration fades in: *"You will remember this."*
+A single line of narration fades in: _"You will remember this."_
 
 Auto-saves the moment. Plays exactly once per save file — feels like a rare moment of grace.
 
@@ -39,27 +40,27 @@ Auto-saves the moment. Plays exactly once per save file — feels like a rare mo
 
 ---
 
-### 🎯 The Complete Colony Gathering
+### 🎯🎯🎯 The Complete Colony Gathering ❤️❤️❤️ LOVE THIS!!
 
 If Camille reaches maximum trust (≥80) with EVERY named cat in the colony before the final Camille encounter, the adoption sequence changes.
 
 On Mamma Cat's last night in the gardens, before Encounter 5, every named cat she's befriended slowly appears near the pyramid steps — one by one, from their home zones. They sit around her in a loose circle. No dialogue. Just presence. The camera briefly pans around showing all of them.
 
-Narration: *"They came. All of them. To say goodbye."*
+Narration: _"They came. All of them. To say goodbye."_
 
 Then the final encounter with Camille proceeds as normal, but with the colony watching from a respectful distance as Mamma Cat enters the carrier.
 
 **Trigger:** ≥80 trust with all named cats + Chapter 5 Encounter 5 ready to fire.
 
-**Payoff:** Rewards the player who has truly earned the colony's love. Makes the ending even more emotional — Mamma Cat isn't just chosen, she's *blessed* by her community.
+**Payoff:** Rewards the player who has truly earned the colony's love. Makes the ending even more emotional — Mamma Cat isn't just chosen, she's _blessed_ by her community.
 
 ---
 
-### 💭 The Developer's Note
+### 🎯 The Developer's Note
 
 A specific obscure corner of the gardens where, if Mamma Cat sits still for 60+ seconds, a single line fades in:
 
-*"Made with love for Cam. For every cat we've ever fed. For Mamma Cat."*
+_"Made with love for Cam. For every cat we've ever fed. For Mamma Cat."_
 
 Plays once per save. Very subtle. Easy to miss.
 
@@ -69,11 +70,11 @@ Plays once per save. Very subtle. Easy to miss.
 
 ---
 
-### 💭 The Ghost of Mamma Cat's Past
+### 🎯 The Ghost of Mamma Cat's Past
 
 At the fountain in Exchange Plaza, at exactly midnight in-game, if Mamma Cat sits on a specific tile facing the water, the reflection shows her current self PLUS a small faded kitten beside her — who she was before she was dumped. A ghost of what was lost.
 
-Narration: *"You don't remember being that small. But something in you does."*
+Narration: _"You don't remember being that small. But something in you does."_
 
 **Trigger:** Midnight + specific tile + facing direction.
 
@@ -87,7 +88,7 @@ Narration: *"You don't remember being that small. But something in you does."*
 
 A child's lost balloon is caught in a tree branch somewhere in the central gardens. If Mamma Cat jumps or bats at it (requires being right beneath it, interact key), the balloon comes loose and drifts slowly upward out of the frame.
 
-If Kish is nearby (during Encounter 4 or 5), she exclaims: *"Oh! There's a balloon! Bye balloon!"*
+If Kish is nearby (during Encounter 4 or 5), she exclaims: _"Oh! There's a balloon! Bye balloon!"_
 
 **Trigger:** Mamma Cat interacts with the specific tree.
 
@@ -101,7 +102,7 @@ A tiny stuffed cat toy is hidden in the playground area (near the carabao or hor
 
 Mamma Cat can pick it up and carry it (sprite change showing her with the toy in her mouth).
 
-If she carries it to Kish during an encounter, Kish reacts with delight: *"OMG it's a TINY cat! Can we keep it?"* Camille gently reminds her it belongs to someone else.
+If she carries it to Kish during an encounter, Kish reacts with delight: _"OMG it's a TINY cat! Can we keep it?"_ Camille gently reminds her it belongs to someone else.
 
 The toy can be placed on the playground for another child to find, or carried back to Mamma Cat's territory as a memento.
 
@@ -111,9 +112,9 @@ The toy can be placed on the playground for another child to find, or carried ba
 
 ---
 
-### 💭 The Hidden Kittens
+### 🎯 The Hidden Kittens
 
-A few background kitten sprites (scaled-down cat sprites) are hidden in bushes and under benches throughout the gardens. Each one discovered adds a tiny entry to the colony journal: *"You found a kitten hiding here. They're still too small to know you."*
+A few background kitten sprites (scaled-down cat sprites) are hidden in bushes and under benches throughout the gardens. Each one discovered adds a tiny entry to the colony journal: _"You found a kitten hiding here. They're still too small to know you."_
 
 There are 5-7 to find in total. Kish would love the treasure hunt aspect.
 
@@ -125,7 +126,7 @@ There are 5-7 to find in total. Kish would love the treasure hunt aspect.
 
 ## COLONY-BASED
 
-### 💭 Blacky's Midnight Story
+### 🎯 Blacky's Midnight Story
 
 If Mamma Cat visits Blacky at exactly 3am in-game (in the quiet hours after night, before dawn), Blacky is awake when he'd normally be sleeping. He tells her a story about "the one who came before" — a cat he was close to who was snatched.
 
@@ -137,11 +138,11 @@ Narration sequence, no choices. Builds the colony lore.
 
 ---
 
-### 💭 The Pedigree Cat's Collar
+### 🎯 Pedigree Cat's Collar
 
 Buried near where Pedigree Cat lives (Blackbird area) is an old, worn collar with a faded name tag. If Mamma Cat digs at a specific spot and uncovers it, narration fires:
 
-*"The name on the tag is faded. But someone called her this, once. Before they left."*
+_"The name on the tag is faded. But someone called her this, once. Before they left."_
 
 Pedigree Cat's dialogue changes slightly afterwards — she thanks Mamma Cat for finding it.
 
@@ -151,13 +152,13 @@ Pedigree Cat's dialogue changes slightly afterwards — she thanks Mamma Cat for
 
 ---
 
-### 💭 The Kittens Are Coming
+### 🎯 The Kittens Are Coming
 
 Once per playthrough, at a certain trust threshold, if Mamma Cat rests in a specific hidden spot (behind a dense bush in the central gardens), she witnesses a colony cat giving birth to kittens.
 
 No dialogue. Just the visual sequence — a pregnant cat settles, time passes, small kittens appear beside her. Mamma Cat sits watch nearby.
 
-Narration: *"Life goes on here. Even now. Even with all this."*
+Narration: _"Life goes on here. Even now. Even with all this."_
 
 **Trigger:** Rest at a specific spot + trust threshold + random chance.
 
@@ -207,6 +208,28 @@ Six swarms of 5 or 6 zombies (green-tinted office workers) loiter on the city si
 
 ---
 
+## REAL-WORLD WEEKLY EVENTS
+
+### 🎯 The Sunday Market on Paseo (was Car-Free Sunday)
+
+On every real-world Sunday (the device's date, any hour), the in-game dawn closes Paseo de Roxas, the road along the park's north-west side, and it becomes a pedestrian street market, as Manu sees it on real Sundays: food stalls, music and a lively crowd. Ayala Ave and Makati Ave keep their traffic. Vendors, browsers, dogs on leads, a busker and that week's programme (yoga, Zumba, a pet-adoption booth, chalk art or a Sunday visitor cat) fill the street. Mamma Cat can sit in the middle of Paseo de Roxas, between the stalls, or run Blacky's Sunday errand, but she has to put up with busy feet, barking dogs, kids who want to pet her and a vendor who shoos her from the food. At 09:30 a whistle starts the pack-up; at 10:00 the barriers go and real traffic returns.
+
+**Trigger:** Play on a real Sunday. It runs at every in-game dawn that day, from in-game day 2.
+
+**Payoff:** A weekly reason to come back, Sunday Book entries, and the city as Camille knows it on Sunday mornings. Design: `Surprise_and_Rewards_Design.md` §12.3.
+
+---
+
+### 🎯 The Sunday Lights (Festival of Lights)
+
+On every real-world Sunday, and only on Sundays, all year, the in-game evening and early night (17:00–23:00) become "the Sunday Lights": wrapped rain trees, projections on the Exchange Plaza canopy and Tower One, two shows and a finale. Mamma Cat can chase light butterflies she can never catch, or make a wish at the fountain. From 10 Nov to 15 Jan it becomes the Christmas Festival of Lights, with parol stars over Ayala Ave.
+
+**Trigger:** Play on a real Sunday, from in-game day 2, in-game 17:00 to 23:00.
+
+**Payoff:** The park's most famous spectacle, every week. Design: `Surprise_and_Rewards_Design.md` §12.4.
+
+---
+
 ## META EASTER EGGS
 
 ### 💭 Title Screen Accumulation
@@ -231,12 +254,12 @@ Complete the game once to unlock a "gallery" option on the title screen that sho
 
 ### 💭 The Extended Credits
 
-Complete the game with 100% cat discovery (all named cats befriended + all hidden kittens found) and the credits sequence extends. Includes:
+Complete the game with 100% cat discovery (all named park cats befriended + all hidden kittens found) and the credits sequence extends. The street colony across Ayala Ave is not required, because befriending it would need a live-road crossing (Ayala Ave never closes, even on Sundays). Includes:
 
 - Dedications to real ATG cats
 - Tribute to CARA Welfare Philippines
 - Real photos of the colony
-- A final dedication: *"For Mamma Cat, and every cat who is still waiting."*
+- A final dedication: _"For Mamma Cat, and every cat who is still waiting."_
 
 **Trigger:** 100% discovery.
 
@@ -248,8 +271,6 @@ Complete the game with 100% cat discovery (all named cats befriended + all hidde
 
 - A cat who only appears during rain (requires weather system — future)
 - A special dialogue tree with Blacky that unlocks only if Mamma Cat brings him a specific item
-- Car-Free Sunday easter egg — if played on a real-world Sunday, the game mode changes (blocked roads, more people, car-free atmosphere)
-- Festival of Lights easter egg — if played between November and January (real-world), light displays appear in the gardens
 - Tagalog/Taglish hidden dialogue option — unlocks after finding a specific trigger
 - A cameo of other real ATG cats not in the named cast — @atgcats Instagram feed as reference
 
@@ -258,6 +279,7 @@ Complete the game with 100% cat discovery (all named cats befriended + all hidde
 ## PRINCIPLES FOR DESIGNING EASTER EGGS
 
 1. **Subtlety over spectacle.** Easter eggs should feel like discoveries, not achievements. No pop-up "ACHIEVEMENT UNLOCKED" banners.
+   - This applies to easter eggs. The core reward loop (forage, collections, requests) may use reveal juice and visible totals; see `Surprise_and_Rewards_Design.md` §10.2 and §11.
 2. **Personal > universal.** The best easter eggs in Ayala are the ones that only Camille and Kish will recognise as special.
 3. **Reward observation and patience.** Easter eggs should come from careful play, not walkthroughs.
 4. **Fit the tone.** Ayala is a gentle, melancholy, hopeful game. Easter eggs should match that tone — no jokes that break the fourth wall awkwardly.

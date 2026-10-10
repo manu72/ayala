@@ -11,7 +11,7 @@
  "type": "map",
  "version": "1.10",
  "nextlayerid": 9,
- "nextobjectid": 323,
+ "nextobjectid": 324,
  "properties": [
   {
    "name": "source",
@@ -7343,6 +7343,18 @@
      "point": true,
      "x": 4752,
      "y": 6800,
+     "width": 0,
+     "height": 0
+    },
+    {
+     "id": 323,
+     "name": "vacant_shop_window",
+     "type": "shop_window",
+     "rotation": 0,
+     "visible": true,
+     "point": true,
+     "x": 4944,
+     "y": 3824,
      "width": 0,
      "height": 0
     }

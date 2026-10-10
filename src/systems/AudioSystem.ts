@@ -40,6 +40,8 @@ const CAR_HORN_VOLUME = 0.45;
 const TYRE_SCREECH_COOLDOWN_MS = 700;
 const CAR_HORN_COOLDOWN_MS = 1200;
 const MIN_SFX_VOLUME = 0.02;
+/** The Sunday market / Sunday Lights music at full closeness. */
+const FESTIVAL_VOLUME = 0.5;
 
 const MUTE_STORAGE_KEY = "ayala.audio.muted";
 
@@ -64,6 +66,7 @@ export class AudioSystem {
   private scene: Phaser.Scene | null = null;
   private ayala: MusicSound | null = null;
   private snatcher: MusicSound | null = null;
+  private festival: MusicSound | null = null;
   private fadeTweens: Phaser.Tweens.Tween[] = [];
   private dangerActive = false;
   private muted: boolean;
@@ -144,6 +147,29 @@ export class AudioSystem {
     this.playTrafficSfx("sfx_car_horn", CAR_HORN_VOLUME, CAR_HORN_COOLDOWN_MS, volume);
   }
 
+  /**
+   * The Sunday music, 0..1 by how close she is to it (0 = silent). Ducks the ambient theme under it;
+   * the danger theme is left alone. Call every frame while a Sunday event is on.
+   */
+  setFestival(level: number): void {
+    if (!this.scene || !this.started) return;
+    const lvl = this.muted ? 0 : Math.max(0, Math.min(1, level));
+    if (!this.festival && lvl > 0 && this.scene.cache.audio.exists("sfx_sunday_lights")) {
+      this.festival = this.scene.sound.add("sfx_sunday_lights", { loop: true, volume: 0 }) as MusicSound;
+      this.festival.play();
+    }
+    this.festival?.setVolume(FESTIVAL_VOLUME * lvl);
+    if (this.ayala && !this.dangerActive && this.fadeTweens.length === 0) {
+      this.ayala.setVolume(this.currentTargets().ayala * (1 - 0.75 * lvl));
+    }
+  }
+
+  /** Tiny kitten mews (the kittens in the empty shop). */
+  playKitten(): void {
+    if (this.muted || !this.scene || !this.scene.cache.audio.exists("sfx_meow_kitten")) return;
+    this.scene.sound.play("sfx_meow_kitten", { volume: MEOW_VOLUME * 0.8 });
+  }
+
   isMuted(): boolean {
     return this.muted;
   }
@@ -165,6 +191,9 @@ export class AudioSystem {
     this.killFadeTweens();
     this.ayala?.stop();
     this.snatcher?.stop();
+    this.festival?.stop();
+    if (this.scene && this.festival) this.scene.sound.remove(this.festival as Phaser.Sound.BaseSound);
+    this.festival = null;
     if (this.scene) {
       this.scene.sound.remove(this.ayala as Phaser.Sound.BaseSound);
       this.scene.sound.remove(this.snatcher as Phaser.Sound.BaseSound);

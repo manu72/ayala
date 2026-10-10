@@ -89,6 +89,23 @@ const LENGTH_BY_FRAME = new Map(
 const lengthOf = (img: ImageMock) => LENGTH_BY_FRAME.get(img.frame) ?? Number.NaN;
 
 describe("TrafficSystem", () => {
+  it("closes a carriageway (the Sunday market): no new cars, off-screen ones gone, the rest drive out; reopens", () => {
+    // camera on the westbound road only, so every eastbound car is off-screen
+    const { scene } = makeScene({ x: 0, y: 500, width: 4000, height: 200 });
+    const traffic = new TrafficSystem(scene, places, { maxCars: 40, rng: seeded() });
+    for (let i = 0; i < 900; i++) traffic.update(1000 / 60, RUSH);
+    expect(traffic.carCount).toBeGreaterThan(10);
+    traffic.setClosedRoads(["traffic_east"]);
+    traffic.update(1000 / 60, RUSH);
+    expect(traffic.carsOnClosedRoads()).toBe(0);
+    for (let i = 0; i < 900; i++) traffic.update(1000 / 60, RUSH);
+    expect(traffic.carsOnClosedRoads()).toBe(0);
+    expect(traffic.carCount).toBeGreaterThan(5); // the other carriageway keeps its traffic
+    traffic.setClosedRoads([]);
+    for (let i = 0; i < 900; i++) traffic.update(1000 / 60, RUSH);
+    expect(traffic.carCount).toBeGreaterThan(15);
+  });
+
   it("builds one lane per lane of every traffic place and fills them by time of day", () => {
     const rush = makeScene();
     const traffic = new TrafficSystem(rush.scene, places, { maxCars: 40, rng: seeded() });

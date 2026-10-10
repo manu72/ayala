@@ -272,5 +272,61 @@ function carHorn() {
   return master(out)
 }
 
+/**
+ * The Sunday Lights show loop (placeholder until a licensed royalty-free track replaces
+ * `sunday_lights.wav`): a bright bell arpeggio over a soft fifth pad and a light shaker, 4 bars at
+ * 112 bpm, seamless when looped.
+ */
+function sundayLights() {
+  const rand = rng(0x5dae11)
+  const BPM = 112
+  const beat = 60 / BPM
+  const bars = 4
+  const n = Math.round(bars * 4 * beat * SR)
+  const out = new Float64Array(n)
+  const midi = (m) => 440 * 2 ** ((m - 69) / 12)
+  // I - vi - IV - V in C, eighth-note arpeggios up and back
+  const chords = [[60, 64, 67, 72], [57, 60, 64, 69], [53, 57, 60, 65], [55, 59, 62, 67]]
+  const pattern = [0, 1, 2, 3, 2, 1, 2, 3]
+  const bell = (start, f, amp, decay) => {
+    const i0 = Math.round(start * SR)
+    const len = Math.min(n, Math.round(decay * 5 * SR))
+    for (let k = 0; k < len; k++) {
+      const t = k / SR
+      const env = Math.min(1, t / 0.004) * Math.exp(-t / decay)
+      const v = amp * env * (Math.sin(TAU * f * t) + 0.35 * Math.sin(TAU * 2.76 * f * t) * Math.exp(-t / (decay * 0.3)) + 0.18 * Math.sin(TAU * 5.4 * f * t) * Math.exp(-t / (decay * 0.15)))
+      out[(i0 + k) % n] += v // wrap tails round so the loop is seamless
+    }
+  }
+  for (let bar = 0; bar < bars; bar++) {
+    const chord = chords[bar]
+    for (let e = 0; e < 8; e++) {
+      const t = (bar * 4 + e / 2) * beat
+      bell(t, midi(chord[pattern[e]] + 12), e % 2 === 0 ? 0.5 : 0.36, 0.35)
+    }
+    // pad: root and fifth, a slow swell per bar
+    for (let k = 0; k < Math.round(4 * beat * SR); k++) {
+      const t = k / SR
+      const env = Math.sin(Math.PI * Math.min(1, t / (4 * beat))) * 0.12
+      const i = Math.round(bar * 4 * beat * SR) + k
+      out[i % n] += env * (Math.sin(TAU * midi(chord[0] - 12) * t) + 0.6 * Math.sin(TAU * midi(chord[0] - 5) * t))
+    }
+  }
+  // shaker on the off-beats
+  const hp = bandpass()
+  for (let b = 0; b < bars * 8; b++) {
+    const i0 = Math.round((b + 0.5) * (beat / 2) * SR)
+    for (let k = 0; k < Math.round(0.05 * SR); k++) {
+      const t = k / SR
+      out[(i0 + k) % n] += 0.08 * Math.exp(-t / 0.012) * hp(white(rand), 7000, 1.2)
+    }
+  }
+  // master() fades the ends; keep the loop seamless by normalising without the edge fade
+  const peak = out.reduce((m, v) => Math.max(m, Math.abs(v)), 1e-9)
+  for (let i = 0; i < n; i++) out[i] *= (PEAK * 0.8) / peak
+  return out
+}
+
 writeWav('tyre_screech.wav', tyreScreech())
 writeWav('car_horn.wav', carHorn())
+writeWav('sunday_lights.wav', sundayLights())

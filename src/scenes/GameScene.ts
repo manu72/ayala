@@ -53,6 +53,9 @@ import type { DialogueHooks } from "../systems/DialogueSystem";
 import { AI_PERSONAS } from "../ai/personas";
 import { NPC_DIALOGUE_SCRIPTS } from "../data/npc-dialogue";
 import { AudioSystem } from "../systems/AudioSystem";
+import { FORAGE_KEY, ForageSystem } from "../systems/ForageSystem";
+import { SUNDAY_CLOSED_ROADS, SundaySystem } from "../systems/SundaySystem";
+import { CURIOSITY_KEY, CuriositySystem } from "../systems/CuriositySystem";
 import { CamilleEncounterSystem } from "../systems/CamilleEncounterSystem";
 import { hasLineOfSightTiles } from "../utils/lineOfSight";
 import { exposeFacesTowardRoads, isRoadTile } from "../utils/roadTiles";
@@ -226,6 +229,9 @@ export class GameScene extends Phaser.Scene {
    * one-shot SFX. Public so HUDScene can hook the mute toggle.
    */
   audio!: AudioSystem;
+  forage!: ForageSystem;
+  sunday!: SundaySystem;
+  curiosity!: CuriositySystem;
 
   /**
    * Owns the Camille Beat 1–5 narrative arc: ambient care-route spawns
@@ -333,6 +339,7 @@ export class GameScene extends Phaser.Scene {
     this.roadMarkings?.destroy();
     this.nightLights?.destroy();
     this.crowd?.destroy();
+    this.sunday?.destroy();
     this.zombies?.destroy();
     this.snatcher?.shutdown();
     this.colony?.shutdown();
@@ -550,6 +557,9 @@ export class GameScene extends Phaser.Scene {
       StoryKeys.COLONY_NAMED,
       StoryKeys.COLONY_LOST,
       StoryKeys.COLONY_NEWCOMERS,
+      "MANU_VISITED_FLUFFY_DAY",
+      FORAGE_KEY,
+      CURIOSITY_KEY,
     ]) {
       this.registry.remove(key);
     }
@@ -684,6 +694,12 @@ export class GameScene extends Phaser.Scene {
       const source = bowl.props.source;
       if (source === "feeding_station" || source === "water_bowl") this.foodSources.ensureSource(source, bowl.x, bowl.y);
     }
+    // after the food sources (tells keep clear of them) and the save's registry restore
+    this.forage = new ForageSystem(this);
+    this.forage.startDay(this.dayNight.dayCount);
+    this.sunday = new SundaySystem(this);
+    this.sunday.startDay();
+    this.curiosity = new CuriositySystem(this);
 
     if (this.input.keyboard) {
       this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
@@ -736,6 +752,8 @@ export class GameScene extends Phaser.Scene {
       const { clean } = consumeSnatchedThisNight(this.registry, this.snatcher.snatchedThisNight);
       this.scoring.recordNightSurvived({ clean });
       this.snatcher.onNewDay();
+      this.forage.startDay(this.dayNight.dayCount);
+      this.sunday.startDay();
     });
 
     // New Game+ setup: full trust, all cats known, territory claimed
@@ -1283,6 +1301,8 @@ export class GameScene extends Phaser.Scene {
     const deltaSec = delta / 1000;
     this.dayNight.update(delta);
     this.traffic.update(delta, this.dayNight);
+    this.sunday.update(time, delta);
+    this.curiosity.update(delta);
     this.nightLights?.setLevel(nightLevel(this.dayNight.currentPhase, this.dayNight.phaseProgress));
     this.camille.trySpawnAmbientDawnVisit();
 
@@ -1453,6 +1473,7 @@ export class GameScene extends Phaser.Scene {
     this.humans.updatePlayerStationaryAnchor();
 
     this.foodSources.update(this.dayNight.currentPhase, time);
+    this.forage.update(time);
     this.guard.update(delta);
     this.guardIndicator.update();
     this.crowd?.update(delta, this.dayNight.currentPhase, this.dayNight.phaseProgress);
@@ -2369,6 +2390,7 @@ export class GameScene extends Phaser.Scene {
     let best: DropoffPlan | null = null;
     let bestDist = Infinity;
     for (const name of ["traffic_makati_southbound", "traffic_paseo_eastbound", "traffic_ayala_westbound"]) {
+      if (this.sunday?.marketOpen && (SUNDAY_CLOSED_ROADS as readonly string[]).includes(name)) continue; // the market, not a road
       const lane = placeNamed(this.places, name);
       if (!lane?.polyline) continue;
       const dist = closestOnPolyline(lane.polyline, near).distance;
@@ -2415,16 +2437,27 @@ export class GameScene extends Phaser.Scene {
     line: string,
     source?: { x: number; y: number },
     radius: number = GP.NARRATION_WITNESS_DIST,
-  ): void {
+  ): boolean {
     const hud = this.scene.get("HUDScene") as HUDScene | undefined;
     if (!source) {
       hud?.showNarration(line);
-      return;
+      return Boolean(hud);
     }
     const d = Phaser.Math.Distance.Between(this.player.x, this.player.y, source.x, source.y);
-    if (d > radius) return;
-    if (!this.hasLineOfSight(this.player.x, this.player.y, source.x, source.y)) return;
+    if (d > radius) return false;
+    if (!this.hasLineOfSight(this.player.x, this.player.y, source.x, source.y)) return false;
     hud?.showNarration(line);
+    return Boolean(hud);
+  }
+
+  /** The calm security guards at their posts (friendly ones stop and look at her, and tell tales). */
+  get ambientGuards(): readonly GuardNPC[] {
+    return this.crowd?.extraGuards ?? [];
+  }
+
+  /** Where the feeding stations, bowls and scraps are (forage tells keep clear of them). */
+  foodSourcePositions(): Array<{ x: number; y: number }> {
+    return this.foodSources.getSourceStates();
   }
 
   isUnderCanopy(worldX: number, worldY: number): boolean {
@@ -2515,6 +2548,18 @@ export class GameScene extends Phaser.Scene {
       if ((this.crowd?.tryEatTreat(this.player.x, this.player.y, this.stats) ?? 0) > 0) {
         this.logInteractDiag("ate a crowd morsel", null, Infinity, nearestRawEntry, nearestRawDist);
         this.player.startConsuming();
+        return;
+      }
+      // Nobody to greet: Space paws a tell in reach, or sniffs the ground (ForageSystem). A
+      // human in greet range still wins, like a cat.
+      if (!this.humans.isHumanInGreetRange()) {
+        if (this.curiosity.tryWindow() || this.forage.tryPaw()) {
+          this.logInteractDiag("pawed a forage tell", null, Infinity, nearestRawEntry, nearestRawDist);
+          return;
+        }
+        this.player.startGreeting();
+        this.forage.sniff(this.time.now);
+        this.logInteractDiag("sniffed (no cat or human in range)", null, Infinity, nearestRawEntry, nearestRawDist);
         return;
       }
       // No cat in range — space becomes a free Mamma-Cat greeting action.

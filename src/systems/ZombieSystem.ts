@@ -184,13 +184,17 @@ export class ZombieSystem {
     if (z.mode !== "chase" && now >= z.calmUntil && this.notices(z, dist)) {
       this.wake(z, now);
       this.groan(z, GROANS[Math.floor(Math.random() * GROANS.length)]!);
-      if (!this.narrated) {
-        this.narrated = true;
-        this.scene.narrateIfPerceivable(
+      // once per save, and only once she really saw it (a narration that didn't show doesn't count)
+      if (!this.narrated && !this.scene.curiosity?.zombiesSeen) {
+        const shown = this.scene.narrateIfPerceivable(
           "That human moves wrong. Stiff and dragging, and it smells like the bins behind the mall at noon.",
           z,
           SEE_RUNNING_PX,
         );
+        if (shown) {
+          this.narrated = true;
+          this.scene.curiosity?.markZombiesSeen();
+        }
       }
     }
 
