@@ -133,6 +133,15 @@ export class CamilleEncounterSystem {
     return this.camilleNPC;
   }
 
+  get activeKishNPC(): HumanNPC | null {
+    return this.kishNPC;
+  }
+
+  /** The encounter waiting for Mamma Cat to reach Camille (0 = none). */
+  get pendingEncounterNumber(): number {
+    return this.pendingEncounter;
+  }
+
   /** Accessed by {@link GameScene.pickScriptedGreeting}; stays owned here. */
   getPersonalLineForNamedCat(catName: string): string | null {
     const lines = this.personalLines[catName];
@@ -287,6 +296,7 @@ export class CamilleEncounterSystem {
     const scene = this.scene;
     if (this.pendingEncounter === 0) return;
     if (scene.dayNight.currentPhase !== "evening") return;
+    if (scene.eggs?.holdingEncounter) return; // the colony is still gathering
     if (!this.camilleNPC?.visible) return;
     if (scene.dialogue.isActive) return;
 

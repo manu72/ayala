@@ -239,6 +239,18 @@ export class JournalScene extends Phaser.Scene {
       if (notes.sunday.length > 0) section("Sunday market finds", notes.sunday, notes.sundayTotal);
     }
 
+    const kittens = gameScene?.eggs?.kittenCount();
+    if (kittens && kittens.found > 0) {
+      this.container.add(
+        this.add.text(0, yOffset, `Hidden kittens: ${kittens.found}/${kittens.total}`, { fontFamily: FONT_FAMILY, fontSize: "14px", fontStyle: "bold", color: "#f0e8d0" }),
+      );
+      yOffset += LINE_HEIGHT + 4;
+      this.container.add(
+        this.add.text(12, yOffset, "You found kittens hiding. They're still too small to know you.", { fontFamily: FONT_FAMILY, fontSize: "11px", color: "#c8c0a8" }),
+      );
+      yOffset += LINE_HEIGHT + 8;
+    }
+
     if (gameScene?.scoring) {
       const breakdown = gameScene.scoring.getBreakdown();
       this.container.add(

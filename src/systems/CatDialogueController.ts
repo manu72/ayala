@@ -257,7 +257,7 @@ export class CatDialogueController {
     }
 
     // A rumour she hasn't heard takes this press (scripted, no trust); her usual conversation is the next one.
-    const rumour = scene.curiosity?.takeRumour(name);
+    const rumour = scene.eggs?.takeCatLines(name) ?? scene.curiosity?.takeRumour(name);
     if (rumour) {
       scene.emotes.show(scene, cat, "curious");
       scene.dialogue.show(rumour, () => {

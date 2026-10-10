@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calendarOverrides, daysUntilSunday, isFestiveSeason, isRealSunday } from "../../src/utils/realCalendar";
+import { calendarOverrides, daysUntilSunday, isFestiveSeason, isRealSunday, sundayProgramme } from "../../src/utils/realCalendar";
 
 describe("realCalendar", () => {
   it("knows Sundays and counts down to the next one", () => {
@@ -22,5 +22,16 @@ describe("realCalendar", () => {
     expect(calendarOverrides("?sunday=1&season=xmas")).toEqual({ sunday: true, festive: true });
     expect(calendarOverrides("?sunday=0")).toEqual({ sunday: false, festive: undefined });
     expect(calendarOverrides("")).toEqual({ sunday: undefined, festive: undefined });
+  });
+});
+
+describe("sundayProgramme", () => {
+  it("is the same all week and rotates through all five, one a week", () => {
+    const sun = new Date(2026, 9, 11);
+    const sat = new Date(2026, 9, 17);
+    expect(sundayProgramme(sat)).toBe(sundayProgramme(sun));
+    const weeks = Array.from({ length: 5 }, (_, i) => sundayProgramme(new Date(2026, 9, 11 + 7 * i)));
+    expect(new Set(weeks).size).toBe(5);
+    expect(sundayProgramme(new Date(2026, 9, 11 + 35))).toBe(weeks[0]);
   });
 });

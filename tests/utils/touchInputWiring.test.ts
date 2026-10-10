@@ -278,6 +278,7 @@ function makeFrozenUpdateScene() {
     forage: { update: vi.fn(), tryPaw: vi.fn(() => false), sniff: vi.fn() },
     sunday: { update: vi.fn() },
     curiosity: { update: vi.fn(), tryWindow: vi.fn(() => false) },
+    eggs: { update: vi.fn(), tryInteract: vi.fn(() => false) },
     guard: { update: vi.fn() },
     guardIndicator: { update: vi.fn() },
     traffic: { update: vi.fn() },

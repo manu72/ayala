@@ -5,7 +5,7 @@ import { CROWD_LOOKS, PIXEL_CROWD, type CrowdLookId, type Facing } from "../data
 import { DAY_NIGHT_PHASES } from "./DayNightCycle";
 import { hourOfDay } from "../utils/trafficLanes";
 import { placeNamed, placesOfType, type Pt } from "../utils/mapPlaces";
-import { calendarOverrides, isFestiveSeason, isRealSunday } from "../utils/realCalendar";
+import { calendarOverrides, isFestiveSeason, isRealSunday, sundayProgramme, type SundayProgramme } from "../utils/realCalendar";
 import { mixSeed, seededRng } from "../utils/forage";
 
 /** Manu: on Sundays only Paseo de Roxas closes, and its park side becomes a street market. */
@@ -66,6 +66,13 @@ interface Market {
   walkers: Walker[];
   busker: Phaser.GameObjects.Sprite;
   notesAt: number;
+  /** This week's programme on the closed westbound carriageway: its people (dancers bob to the music). */
+  crew: Phaser.GameObjects.Sprite[];
+  crewAt: Pt;
+  whistled: boolean;
+  kidDone: boolean;
+  stillMs: number;
+  programmeDone: boolean;
 }
 
 interface Lights {
@@ -88,6 +95,11 @@ interface Lights {
 export class SundaySystem {
   isSunday = false;
   festive = false;
+  programme: SundayProgramme = "yoga";
+  private wishDay = -1;
+  private butterflyDay = -1;
+  private lightsStillMs = 0;
+  private frameMs = 16;
   private market: Market | null = null;
   private lights: Lights | null = null;
   private seg: { a: Pt; b: Pt; len: number; angle: number } | null = null;
@@ -105,6 +117,7 @@ export class SundaySystem {
     const forced = typeof window !== "undefined" ? calendarOverrides(window.location.search) : {};
     this.isSunday = forced.sunday ?? isRealSunday(date);
     this.festive = forced.festive ?? isFestiveSeason(date);
+    this.programme = forced.programme ?? sundayProgramme(date);
   }
 
   /** In-game clock hour [0, 24). */
@@ -119,6 +132,7 @@ export class SundaySystem {
   }
 
   update(time: number, delta: number): void {
+    this.frameMs = delta;
     const h = this.hour();
     const wantMarket = this.isSunday && h >= MARKET_HOURS[0] && h < MARKET_HOURS[1];
     const wantLights = this.isSunday && h >= LIGHTS_HOURS[0] && h < LIGHTS_HOURS[1];
@@ -211,7 +225,9 @@ export class SundaySystem {
     const bp = this.at(seg.len / 2, 100);
     const busker = this.person("teen", bp.x, bp.y, "N");
 
-    this.market = { layer, stalls, walkers, busker, notesAt: 0 };
+    const crewAt = this.at(seg.len * 0.55, -150);
+    const crew = this.buildProgramme(g, seg.len * 0.55, -150, rng);
+    this.market = { layer, stalls, walkers, busker, notesAt: 0, crew, crewAt, whistled: false, kidDone: false, stillMs: 0, programmeDone: false };
     // a few seeded finds in the aisle, gone when the market packs up
     const aisle: Pt[] = [];
     for (let along = start; along <= end; along += 12) aisle.push(this.at(along, (Math.sin(along) * 0.5) * 24));
@@ -219,7 +235,14 @@ export class SundaySystem {
 
     if (this.narratedMarketDay !== scene.dayNight.dayCount) {
       this.narratedMarketDay = scene.dayNight.dayCount;
-      this.narrate("Sunday. Paseo de Roxas is closed to cars: a street market, music, and the smell of grilled corn.");
+      const extra: Record<SundayProgramme, string> = {
+        yoga: "On the far side of the road, people are doing yoga on mats.",
+        zumba: "Somewhere past the stalls, a Zumba class is shouting along to the music.",
+        adoption: "The volunteers have an adoption stall today.",
+        chalk: "Kids have chalked drawings all over the far side of the road.",
+        visitor: "Someone has brought their cat to the market. In a harness.",
+      };
+      this.narrate(`Sunday. Paseo de Roxas is closed to cars: a street market, music, and the smell of grilled corn. ${extra[this.programme]}`);
     }
   }
 
@@ -268,14 +291,147 @@ export class SundaySystem {
     if (time > m.notesAt) {
       m.notesAt = time + 900;
       this.floatNote(m.busker.x + 6, m.busker.y - 26);
+      if (this.programme === "zumba") this.floatNote(m.crewAt.x, m.crewAt.y - 40);
     }
+    // Zumba: everyone bounces, turning on the beat
+    if (this.programme === "zumba") {
+      const beat = Math.floor(time / 470);
+      m.crew.forEach((p, i) => {
+        p.setY((p.getData("y") as number) - (beat % 2 === i % 2 ? 3 : 0));
+        if (i > 0) p.setFlipX(beat % 4 < 2);
+      });
+    }
+    this.marketMoments(m, delta);
+    // 09:30: the marshal's whistle and the pack-up
+    const h = this.hour();
+    if (h >= 9.5 && !m.whistled) {
+      m.whistled = true;
+      this.bubble(m.busker.x, m.busker.y - 40, "Tweeeet! Pack up na po, ten minutes!");
+    }
+    if (h >= 9.5) m.layer.setAlpha(Phaser.Math.Clamp((10 - h) / 0.5, 0.25, 1));
     const d = Phaser.Math.Distance.Between(player.x, player.y, m.busker.x, m.busker.y);
     return Math.max(0, 1 - d / MUSIC_RANGE_PX);
+  }
+
+  /** Her small Sunday moments: a kid who wants to pet her, and this week's programme up close. */
+  private marketMoments(m: Market, delta: number): void {
+    const { player } = this.scene;
+    const body = player.body as Phaser.Physics.Arcade.Body | null;
+    const still = (body?.velocity.length() ?? 1) < 1;
+    const seg = this.seg!;
+    const inAisle = this.onMarket(player.x, player.y, 70);
+    m.stillMs = still && inAisle ? m.stillMs + delta : 0;
+    if (!m.kidDone && m.stillMs > 2500) {
+      m.kidDone = true;
+      const a = Phaser.Math.Angle.Between(seg.a.x, seg.a.y, seg.b.x, seg.b.y);
+      const from = { x: player.x + Math.cos(a) * 110, y: player.y + Math.sin(a) * 110 };
+      const kid = this.person("student", from.x, from.y, "W").setScale(CROWD_LOOKS.student.scale * 0.8);
+      this.scene.tweens.add({
+        targets: kid,
+        x: player.x + 26,
+        y: player.y,
+        duration: 1600,
+        onComplete: () => {
+          this.bubble(kid.x, kid.y - 34, "Ay, ang cute! Kitty, kitty!");
+          this.scene.emotes.show(this.scene, player, "heart");
+          this.scene.time.delayedCall(1800, () => this.bubble(kid.x + 10, kid.y - 50, "Gently, anak. Let her come to you."));
+          this.scene.time.delayedCall(4200, () =>
+            this.scene.tweens.add({ targets: kid, x: from.x, y: from.y, alpha: 0, duration: 1800, onComplete: () => kid.destroy() }),
+          );
+        },
+      });
+    }
+    if (!m.programmeDone && Phaser.Math.Distance.Between(player.x, player.y, m.crewAt.x, m.crewAt.y) < 70) {
+      m.programmeDone = true;
+      const lines: Record<SundayProgramme, string> = {
+        yoga: "Someone says \"cat pose\". You were already doing it.",
+        zumba: "Forty people jump at once. You do not jump. You judge.",
+        adoption: "Kittens in crates, a sign that says ADOPT, DON'T SHOP, and a volunteer telling every passer-by their names.",
+        chalk: "A chalk cat, bigger than you. You sit on it. Now there are two cats.",
+        visitor: "The visitor cat stares at you from its harness. \"Say hi, Mochi!\" Mochi does not say hi.",
+      };
+      this.bubble(player.x, player.y - 36, lines[this.programme]);
+    }
+  }
+
+  /** On the closed road, within `pad` px of the market's middle line. */
+  private onMarket(x: number, y: number, pad: number): boolean {
+    const seg = this.seg;
+    if (!seg) return false;
+    const c = Math.cos(seg.angle);
+    const n = Math.sin(seg.angle);
+    const along = (x - seg.a.x) * c + (y - seg.a.y) * n;
+    const lat = -(x - seg.a.x) * n + (y - seg.a.y) * c;
+    return along > 0 && along < seg.len && Math.abs(lat) < pad;
+  }
+
+  /** This week's programme, drawn at (along, lat) of the market stretch; returns its people. */
+  private buildProgramme(g: Phaser.GameObjects.Graphics, along: number, lat: number, rng: () => number): Phaser.GameObjects.Sprite[] {
+    const people: Phaser.GameObjects.Sprite[] = [];
+    const add = (dx: number, dy: number, facing: Facing, look = LOOKS[Math.floor(rng() * LOOKS.length)]!) => {
+      const p = this.at(along + dx, lat + dy);
+      const s = this.person(look, p.x, p.y, facing).setData("y", p.y);
+      people.push(s);
+      return s;
+    };
+    switch (this.programme) {
+      case "yoga":
+        for (let i = 0; i < 8; i++) {
+          const dx = (i % 4) * 34 - 51;
+          const dy = Math.floor(i / 4) * 30 - 15;
+          g.fillStyle([0x7fb3d5, 0xc39bd3, 0x76d7c4, 0xf7dc6f][i % 4]!).fillRect(along + dx - 9, lat + dy - 6, 18, 26);
+          add(dx, dy + 10, "N");
+        }
+        add(0, -48, "S", "youngPro");
+        break;
+      case "zumba":
+        add(0, -46, "S", "youngPro");
+        for (let i = 0; i < 9; i++) add((i % 3) * 30 - 30, Math.floor(i / 3) * 26 - 4, "N");
+        break;
+      case "adoption": {
+        g.fillStyle(0xf2f2f2).fillRect(along - 40, lat - 26, 80, 14);
+        for (let i = 0; i < 3; i++) {
+          g.fillStyle(0x6b4a2b).fillRect(along - 36 + i * 26, lat - 8, 20, 16);
+          g.lineStyle(1, 0xdddddd).strokeRect(along - 36 + i * 26, lat - 8, 20, 16);
+        }
+        add(-50, 14, "S", "lola");
+        const sign = this.at(along, lat - 19);
+        people.push(
+          this.scene.add.text(sign.x, sign.y, "ADOPT, DON'T SHOP ♥", { fontSize: "6px", color: "#c0392b", fontStyle: "bold", resolution: 3 }).setOrigin(0.5).setDepth(AWNING_DEPTH + 0.5) as unknown as Phaser.GameObjects.Sprite,
+        );
+        for (let i = 0; i < 3; i++) {
+          const p = this.at(along - 26 + i * 26, lat);
+          people.push(this.scene.add.sprite(p.x, p.y, ["fluffy", "tiger", "jayco"][i]!, 0).setScale(0.45).setDepth(AWNING_DEPTH + 0.4));
+        }
+        break;
+      }
+      case "chalk": {
+        const colors = [0xffb3ba, 0xbaffc9, 0xbae1ff, 0xffffba, 0xe0bbff];
+        for (let i = 0; i < 14; i++) {
+          g.lineStyle(2, colors[i % colors.length]!, 0.8);
+          g.strokeCircle(along - 80 + rng() * 160, lat - 30 + rng() * 60, 4 + rng() * 8);
+        }
+        // the big chalk cat
+        g.lineStyle(2, 0xffffff, 0.9).strokeCircle(along, lat, 16).strokeCircle(along, lat - 22, 10);
+        g.strokeTriangle(along - 9, lat - 28, along - 4, lat - 31, along - 9, lat - 37).strokeTriangle(along + 9, lat - 28, along + 4, lat - 31, along + 9, lat - 37);
+        for (let i = 0; i < 5; i++) g.strokeRect(along + 40 + i * 14, lat - 6, 12, 12);
+        add(-60, 30, "N", "teen");
+        break;
+      }
+      case "visitor": {
+        add(0, 0, "S", "expat");
+        const p = this.at(along + 16, lat + 8);
+        people.push(this.scene.add.sprite(p.x, p.y, "fluffy", 0).setScale(0.75).setTint(0xfff4e0).setDepth(3 + p.y / 100000));
+        break;
+      }
+    }
+    return people;
   }
 
   private closeMarket(): void {
     const m = this.market!;
     m.layer.destroy();
+    for (const p of m.crew) p.destroy();
     for (const s of m.stalls) s.vendor.destroy();
     for (const w of m.walkers) w.sprite.destroy();
     m.busker.destroy();
@@ -372,13 +528,29 @@ export class SundaySystem {
       tree.img.setAlpha(level * tree.base * (show ? 0.35 + 0.65 * wave : 0.55 + 0.25 * wave));
     }
     L.parols?.setAlpha(level * (0.75 + 0.25 * Math.sin(t * 2)));
-    // projected butterflies drift round the fountain during the shows
+    // projected butterflies drift round the fountain during the shows; she can't catch light
+    const { player } = this.scene;
+    const day = this.scene.dayNight.dayCount;
     for (const b of L.butterflies) {
       b.a += b.s * 0.016 * (show ? 2 : 1);
       b.img.setPosition(L.sx + Math.cos(b.a) * b.r, L.sy + Math.sin(b.a * 1.3) * b.r * 0.6).setAlpha(show ? 0.9 * level : 0);
+      if (show && Phaser.Math.Distance.Between(player.x, player.y, b.img.x, b.img.y) < 16) {
+        b.a += 0.9; // darts away
+        if (this.butterflyDay !== day) {
+          this.butterflyDay = day;
+          this.bubble(player.x, player.y - 36, "You pounce. Your paws close on nothing. Light can't be caught.");
+        }
+      }
+    }
+    // a wish at the fountain: sit still by the lit water
+    const body = player.body as Phaser.Physics.Arcade.Body | null;
+    const nearFountain = Phaser.Math.Distance.Between(player.x, player.y, L.sx, L.sy) < 150;
+    this.lightsStillMs = nearFountain && (body?.velocity.length() ?? 1) < 1 ? this.lightsStillMs + this.frameMs : 0;
+    if (this.wishDay !== day && this.lightsStillMs > 3000 && level > 0.5) {
+      this.wishDay = day;
+      this.narrate("The lights shiver in the fountain. If cats made wishes, this is where they'd make them. You make one anyway.");
     }
     for (const p of L.crowd) p.setVisible(hour < 22);
-    const { player } = this.scene;
     const near = Math.max(0, 1 - Phaser.Math.Distance.Between(player.x, player.y, L.sx, L.sy) / MUSIC_RANGE_PX);
     return level * near * (show ? 1 : 0.25);
   }

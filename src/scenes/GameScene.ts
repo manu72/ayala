@@ -56,6 +56,7 @@ import { AudioSystem } from "../systems/AudioSystem";
 import { FORAGE_KEY, ForageSystem } from "../systems/ForageSystem";
 import { SUNDAY_CLOSED_ROADS, SundaySystem } from "../systems/SundaySystem";
 import { CURIOSITY_KEY, CuriositySystem } from "../systems/CuriositySystem";
+import { EGGS_KEY, EasterEggSystem } from "../systems/EasterEggSystem";
 import { CamilleEncounterSystem } from "../systems/CamilleEncounterSystem";
 import { hasLineOfSightTiles } from "../utils/lineOfSight";
 import { exposeFacesTowardRoads, isRoadTile } from "../utils/roadTiles";
@@ -232,6 +233,7 @@ export class GameScene extends Phaser.Scene {
   forage!: ForageSystem;
   sunday!: SundaySystem;
   curiosity!: CuriositySystem;
+  eggs!: EasterEggSystem;
 
   /**
    * Owns the Camille Beat 1–5 narrative arc: ambient care-route spawns
@@ -560,6 +562,7 @@ export class GameScene extends Phaser.Scene {
       "MANU_VISITED_FLUFFY_DAY",
       FORAGE_KEY,
       CURIOSITY_KEY,
+      EGGS_KEY,
     ]) {
       this.registry.remove(key);
     }
@@ -700,6 +703,7 @@ export class GameScene extends Phaser.Scene {
     this.sunday = new SundaySystem(this);
     this.sunday.startDay();
     this.curiosity = new CuriositySystem(this);
+    this.eggs = new EasterEggSystem(this);
 
     if (this.input.keyboard) {
       this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
@@ -1303,6 +1307,7 @@ export class GameScene extends Phaser.Scene {
     this.traffic.update(delta, this.dayNight);
     this.sunday.update(time, delta);
     this.curiosity.update(delta);
+    this.eggs.update(time, delta);
     this.nightLights?.setLevel(nightLevel(this.dayNight.currentPhase, this.dayNight.phaseProgress));
     this.camille.trySpawnAmbientDawnVisit();
 
@@ -2455,6 +2460,11 @@ export class GameScene extends Phaser.Scene {
     return this.crowd?.extraGuards ?? [];
   }
 
+  /** True where the (hidden) ground layer is water, by tile. */
+  isWaterAt(tileX: number, tileY: number): boolean {
+    return this.isWaterCell(tileX, tileY);
+  }
+
   /** Where the feeding stations, bowls and scraps are (forage tells keep clear of them). */
   foodSourcePositions(): Array<{ x: number; y: number }> {
     return this.foodSources.getSourceStates();
@@ -2548,6 +2558,11 @@ export class GameScene extends Phaser.Scene {
       if ((this.crowd?.tryEatTreat(this.player.x, this.player.y, this.stats) ?? 0) > 0) {
         this.logInteractDiag("ate a crowd morsel", null, Infinity, nearestRawEntry, nearestRawDist);
         this.player.startConsuming();
+        return;
+      }
+      // The easter eggs: give the letter / plushie, pick them up, dig the collar, bat the balloon, set down.
+      if (this.eggs.tryInteract()) {
+        this.logInteractDiag("easter egg", null, Infinity, nearestRawEntry, nearestRawDist);
         return;
       }
       // Nobody to greet: Space paws a tell in reach, or sniffs the ground (ForageSystem). A
