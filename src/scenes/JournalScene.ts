@@ -316,12 +316,14 @@ export class JournalScene extends Phaser.Scene {
     if (gameScene?.sunday) {
       const days = daysUntilSunday(new Date());
       const label = gameScene.sunday.isSunday
-        ? `Today is Sunday: the Paseo market (06:00–10:00) and the ${gameScene.sunday.festive ? "Festival of Lights" : "Sunday Lights"} (17:00–23:00)`
+        ? `Sunday market: ${gameScene.sunday.marketStatus}. Dawn through Evening (06:00–21:00 in-game); ${gameScene.sunday.festive ? "Festival of Lights" : "Sunday Lights"} 17:00–23:00 in-game`
         : `Sunday market & lights: ${days === 0 ? "from the next dawn" : days === 1 ? "tomorrow" : `in ${days} days`}`;
-      this.container.add(
-        this.add.text(0, yOffset, label, { fontFamily: FONT_FAMILY, fontSize: "12px", color: "#ffd34d" }),
-      );
-      yOffset += LINE_HEIGHT;
+      const schedule = this.add.text(0, yOffset, label, {
+        fontFamily: FONT_FAMILY, fontSize: "12px", color: "#ffd34d",
+        wordWrap: { width: width - PANEL_PADDING * 2 },
+      });
+      this.container.add(schedule);
+      yOffset += Math.max(LINE_HEIGHT, schedule.height + 4);
     }
 
     // Territory status

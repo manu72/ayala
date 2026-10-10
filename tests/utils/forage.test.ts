@@ -65,3 +65,11 @@ describe("forage hunger cap", () => {
     expect(forageHungerAllowed(18, 10)).toBe(2);
   });
 });
+
+describe("Sunday market finds", () => {
+  it("keeps market scraps and treasures available through Evening, ending at Night", () => {
+    const market = FORAGE_ITEMS.filter((i) => i.habitats.includes("market"));
+    expect(market.length).toBeGreaterThan(0);
+    for (const item of market) expect(item.phases).toEqual(["dawn", "day", "evening"]);
+  });
+});

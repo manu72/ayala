@@ -4,7 +4,7 @@
  */
 import type { TimeOfDay } from "../systems/DayNightCycle";
 
-/** `market`: the Paseo de Roxas Sunday market aisle (Sunday mornings only, never in the daily slots). */
+/** `market`: the Paseo de Roxas Sunday market aisle (dawn through evening, never in the daily slots). */
 export type Habitat = "shrub" | "shade" | "table" | "lamp" | "lawn" | "market";
 export type Tier = "common" | "uncommon" | "rare";
 
@@ -62,10 +62,10 @@ export const FORAGE_ITEMS: readonly ForageItem[] = [
   { id: "old_peso", name: "Old 1-peso coin", emoji: "🪙", tier: "uncommon", habitats: ["shade", "lawn", "shrub"], phases: ANY, treasure: true, verdict: "Rizal, looking serious. Older than you." },
   { id: "earring", name: "Lost earring", emoji: "💎", tier: "rare", habitats: ["shade", "lawn", "shrub"], phases: ANY, treasure: true, verdict: "Sparkly! Somebody looked everywhere for this." },
   // the Sunday market on Paseo de Roxas
-  { id: "fish_flake", name: "Steamed fish flake", emoji: "🐟", tier: "common", habitats: ["market"], phases: ["dawn"], hunger: 4, verdict: "Plain fish! The vendor didn't see. Or pretended not to." },
-  { id: "skewer", name: "Fishball skewer", emoji: "🍢", tier: "common", habitats: ["market"], phases: ["dawn"], hazard: true, verdict: "Sharp stick. Sweet sauce. No.", realCats: "Cats swallow skewers for the meat smell on them; vets remove them every week." },
-  { id: "ribbon", name: "Balloon ribbon", emoji: "🎈", tier: "uncommon", habitats: ["market"], phases: ["dawn"], hazard: true, verdict: "Curly, tempting, wrong. Leave it.", realCats: "Swallowed string or ribbon can bunch up a cat's gut. It's an emergency." },
-  { id: "charm", name: "Bracelet charm", emoji: "🧿", tier: "rare", habitats: ["market"], phases: ["dawn"], treasure: true, verdict: "A tiny charm, dropped from somebody's bracelet. Lucky!" },
+  { id: "fish_flake", name: "Steamed fish flake", emoji: "🐟", tier: "common", habitats: ["market"], phases: LIGHT, hunger: 4, verdict: "Plain fish! The vendor didn't see. Or pretended not to." },
+  { id: "skewer", name: "Fishball skewer", emoji: "🍢", tier: "common", habitats: ["market"], phases: LIGHT, hazard: true, verdict: "Sharp stick. Sweet sauce. No.", realCats: "Cats swallow skewers for the meat smell on them; vets remove them every week." },
+  { id: "ribbon", name: "Balloon ribbon", emoji: "🎈", tier: "uncommon", habitats: ["market"], phases: LIGHT, hazard: true, verdict: "Curly, tempting, wrong. Leave it.", realCats: "Swallowed string or ribbon can bunch up a cat's gut. It's an emergency." },
+  { id: "charm", name: "Bracelet charm", emoji: "🧿", tier: "rare", habitats: ["market"], phases: LIGHT, treasure: true, verdict: "A tiny charm, dropped from somebody's bracelet. Lucky!" },
   { id: "fish_keychain", name: "Golden fish keychain", emoji: "🐟", tier: "rare", habitats: ["shade", "lawn", "shrub"], phases: ANY, treasure: true, verdict: "A golden fish! Not edible. Still the best day ever." },
 ];
 
