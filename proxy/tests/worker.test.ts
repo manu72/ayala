@@ -178,6 +178,35 @@ describe("handleRequest", () => {
     expect(res.headers.get("Access-Control-Allow-Origin")).toBe("http://localhost:5173");
     expect(await res.json()).toEqual({ error: "body too large" });
   });
+
+  it("stops reading a chunked body with no Content-Length as soon as it passes the cap", async () => {
+    const chunk = new Uint8Array(16_384).fill(0x20);
+    let sent = 0;
+    let cancelled = false;
+    const endless = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        sent += chunk.byteLength;
+        controller.enqueue(chunk);
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const req = new Request("https://example.com/api/ai/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: "http://localhost:5173" },
+      body: endless,
+      duplex: "half",
+    } as RequestInit);
+    expect(req.headers.get("Content-Length")).toBeNull();
+
+    const res = await handleRequest(req, {});
+
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ error: "body too large" });
+    await vi.waitFor(() => expect(cancelled).toBe(true));
+    expect(sent).toBeLessThan(65_536 + 4 * chunk.byteLength);
+  });
 });
 
 describe("CORS", () => {

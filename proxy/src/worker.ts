@@ -280,6 +280,37 @@ export function rateLimitKey(ip: string | null): string {
   return `ip6:${groups.slice(0, 4).map((g) => g.padStart(4, "0")).join(":")}::/64`;
 }
 
+/**
+ * Body bytes, or null as soon as they pass `max`. Reads chunk by chunk and
+ * cancels the stream there: a chunked upload has no Content-Length, and
+ * `arrayBuffer()` would buffer all of it before any size check.
+ */
+async function readBodyCapped(request: Request, max: number): Promise<Uint8Array | null> {
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  if (request.body) {
+    const reader = request.body.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk: Uint8Array = value;
+      total += chunk.byteLength;
+      if (total > max) {
+        reader.cancel().catch(() => {});
+        return null;
+      }
+      chunks.push(chunk);
+    }
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
+}
+
 let warnedMissingLimiter = false;
 
 /** 429 Response when the caller is over a limit, else null. Fails open when bindings are absent or throw. */
@@ -381,8 +412,8 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   }
   let parsed: unknown;
   try {
-    const raw = await request.arrayBuffer();
-    if (raw.byteLength > MAX_BODY_BYTES) {
+    const raw = await readBodyCapped(request, MAX_BODY_BYTES);
+    if (!raw) {
       return jsonResponse({ error: "body too large" }, 413, cors);
     }
     parsed = JSON.parse(new TextDecoder().decode(raw));

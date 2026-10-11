@@ -18,7 +18,7 @@ export const StoryKeys = {
    * attached to Manu — he is her human (see `src/ai/personas/fluffy.md`) —
    * and she notices him on every close pass. Surfaced into Fluffy's AI
    * prompt via `recentEvents` by
-   * {@link CatDialogueController.buildRecentDialogueEvents} so Fluffy
+   * {@link buildNpcStoryFacts} so Fluffy
    * stops asking after Manu when he has just visited. Default `undefined` /
    * 0 → message omitted (existing saves and pre-Chapter-5 runs).
    */

@@ -26,14 +26,14 @@ function cat(name: string, x = 0): NPCCat {
   return { npcName: name, x, y: 0, active: true, state: "idle", engageDialogue: vi.fn(), disengageDialogue: vi.fn() } as unknown as NPCCat;
 }
 
-/** DialogueSystem's contract: onHide on every hide; onComplete past the last line, or on an early close with completeOnClose. */
+/** DialogueSystem's contract: onHide(completed) on every hide, true only past the last line; onComplete past the last line, or on an early close with completeOnClose. */
 function fakeDialogue() {
   let open: { lines: string[]; line: number; onComplete?: () => void; hooks?: DialogueHooks } | null = null;
-  const hide = () => {
+  const hide = (completed: boolean) => {
     const hooks = open?.hooks;
     open = null;
     dialogue.isActive = false;
-    hooks?.onHide?.();
+    hooks?.onHide?.(completed);
   };
   const dialogue = {
     isActive: false,
@@ -48,16 +48,16 @@ function fakeDialogue() {
       if (!current) return;
       current.line++;
       if (current.line < current.lines.length) return current.hooks?.onLineShown?.(current.line);
-      hide();
+      hide(true);
       current.onComplete?.();
     },
     /** Click outside the box / the x. */
     closeEarly() {
       const done = open?.hooks?.completeOnClose ? open.onComplete : undefined;
-      if (open) hide();
+      if (open) hide(false);
       done?.();
     },
-    dismiss: vi.fn(() => { if (open) hide(); }),
+    dismiss: vi.fn(() => { if (open) hide(false); }),
   };
   return dialogue;
 }
