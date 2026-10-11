@@ -4,8 +4,11 @@
  * so the gesture feels the same at any camera zoom.
  */
 export const PAW_FLICK = {
-  /** The touch must land this close to Mamma Cat's centre. */
-  START_RADIUS: 70,
+  /**
+   * The touch must land this close to Mamma Cat's centre. Generous on purpose: no other
+   * gesture in the game is a swipe, and the stick / buttons keep their own touches.
+   */
+  START_RADIUS: 100,
   /** ...then travel this far... */
   MIN_DISTANCE: 28,
   /** ...within this long of touching down, or it is just a slow drag. */
