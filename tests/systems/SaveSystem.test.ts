@@ -316,6 +316,18 @@ describe('SaveSystem.save / load / hasSave / clear', () => {
     expect(SaveSystem.load()?.variables[StoryKeys.MANU_VISITED_FLUFFY_DAY]).toBe(6)
   })
 
+  it.each([
+    { Blacky: { departedAt: { timestamp: 1_000, gameDay: 1 } } },
+    { Blacky: { departedAt: { timestamp: 1_000, gameDay: 1 }, returnedAt: { timestamp: 2_000, gameDay: 1 } } },
+    {}, // acknowledgement already consumed
+  ])('round-trips cat encounter state alongside the game clock', (separations) => {
+    const registry = stubRegistry({ [StoryKeys.CAT_DIALOGUE_SEPARATIONS]: separations })
+    expect(SaveSystem.save(1, 2, { hunger: 70, thirst: 70, energy: 90 }, 'day', 120_000, registry)).toBe(true)
+    const loaded = SaveSystem.load()
+    expect(loaded?.gameTimeMs).toBe(120_000)
+    expect(loaded?.variables[StoryKeys.CAT_DIALOGUE_SEPARATIONS]).toEqual(separations)
+  })
+
   it('round-trips core fields and tracked variables', () => {
     const stats = { hunger: 70, thirst: 65, energy: 80 }
     const registry = stubRegistry({ CHAPTER: 3, MET_BLACKY: true })

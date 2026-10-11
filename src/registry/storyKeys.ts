@@ -22,6 +22,8 @@ export const StoryKeys = {
    * 0 → message omitted (existing saves and pre-Chapter-5 runs).
    */
   MANU_VISITED_FLUFFY_DAY: "MANU_VISITED_FLUFFY_DAY",
+  /** Per named cat: observed game-time departure/reunion, consumed on the first displayed exchange of a visit. */
+  CAT_DIALOGUE_SEPARATIONS: "CAT_DIALOGUE_SEPARATIONS",
   DUMPING_EVENTS_SEEN: "DUMPING_EVENTS_SEEN",
   ENCOUNTER_5_COMPLETE: "ENCOUNTER_5_COMPLETE",
   NEW_GAME_PLUS: "NEW_GAME_PLUS",

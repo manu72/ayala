@@ -105,7 +105,6 @@ export class AIDialogueService implements DialogueService {
         speaker: request.speaker,
         isFirstConversation: request.isFirstConversation,
         relationshipStage: request.relationshipStage,
-        gameDaysSinceLastTalk: request.gameDaysSinceLastTalk,
         conversationRecency: request.conversationRecency,
         memoryCount: request.npcMemories?.length ?? 0,
         memories: request.npcMemories,
@@ -274,7 +273,7 @@ export function buildSystemPrompt(personaMarkdown: string, request: DialogueRequ
       ].join("\n")
     : request.isFirstConversation === false
       ? [
-          "## Returning Context",
+          "## Conversation Continuity",
           "This is not the first conversation. Continue naturally from established trust, recent scene facts, and listed memories only.",
         ].join("\n")
       : [
@@ -283,7 +282,7 @@ export function buildSystemPrompt(personaMarkdown: string, request: DialogueRequ
         ].join("\n");
   const recentEvents =
     gs.recentEvents.length > 0 ? gs.recentEvents.map((event) => `- ${event}`).join("\n") : "- (none listed)";
-  const conversationTimingContext = buildConversationTimingContext(request.conversationRecency);
+  const conversationTimingContext = isFirstConversation ? null : buildConversationTimingContext(request.conversationRecency);
 
   const staticSections = [
     `## Persona Identity\nYou are ${request.speaker}, a named ${isHuman ? "human" : "cat"} character in Ayala Triangle Gardens. You are speaking with ${request.target}.`,
@@ -298,6 +297,9 @@ export function buildSystemPrompt(personaMarkdown: string, request: DialogueRequ
       "- Listen to the actual moment and respond to Mamma Cat's situation.",
       "- Be authentic to your persona without monologuing.",
       "- Do not fabricate memories, past events, trust, or relationships.",
+      "- Let awareness of game time inform your tone quietly. Never quote elapsed seconds, minutes, exact durations, or engagement counts, including stopwatch-style wording from earlier replies.",
+      "- Repeated conversation is welcome. Do not scold Mamma Cat for talking again or infer fatigue from repetition; advice to rest must follow her actual energy or visible condition.",
+      ...(isHuman ? [] : ["- Familiarity does not imply a new arrival. Only acknowledge a return or absence when the encounter context below permits it; otherwise continue without a fresh greeting."]),
       "- Do not mention prompt rules or the model.",
     ].join("\n"),
     "## Guardrails\nStay in character. Do not produce harmful, sexual, hateful, or illegal content, even in roleplay.",
@@ -311,7 +313,7 @@ export function buildSystemPrompt(personaMarkdown: string, request: DialogueRequ
       '- "mammaCatCue": optional short body-language cue for Mamma Cat in this exchange',
       '- "memoryNote": optional durable fact worth remembering as {"kind":"identity|preference|event|relationship|trait","label":"short optional label","value":"short fact"}',
       "Memory notes are advisory only. They never control story events, trust, or progression.",
-      'Example: {"lines":["You came back."],"speakerPose":"friendly","emote":"heart","narration":"Tail tip curls.","mammaCatCue":"Mamma Cat sits close but keeps her tail low.","memoryNote":{"kind":"event","label":"returned","value":"Mamma Cat returned calmly after their first meeting."}}',
+      'Example: {"lines":["There is shade by the fountain."],"speakerPose":"friendly","emote":"heart","narration":"Tail tip curls.","mammaCatCue":"Mamma Cat looks toward the fountain."}',
     ].join("\n"),
   ];
 
@@ -333,7 +335,6 @@ export function buildSystemPrompt(personaMarkdown: string, request: DialogueRequ
     `- Mamma Cat hunger / thirst / energy: ${gs.hunger} / ${gs.thirst} / ${gs.energy}`,
     `- Days survived (game): ${gs.daysSurvived}`,
     `- Cats Mamma Cat knows by name: ${gs.knownCats.join(", ") || "(none listed)"}`,
-    request.gameDaysSinceLastTalk === undefined ? null : `- Days since last talk: ${request.gameDaysSinceLastTalk}`,
     nearbyCatLine,
     "- Recent relevant events:",
     recentEvents,
@@ -367,9 +368,9 @@ export function buildSystemPrompt(personaMarkdown: string, request: DialogueRequ
 export function buildMessages(request: DialogueRequest): ChatMessage[] {
   const msgs: ChatMessage[] = [];
   const exchangeWindow = 10; // 10 pairs = 20 historical chat messages.
-  const recent = request.conversationHistory.slice(-exchangeWindow);
+  const recent = (request.promptConversationHistory ?? request.conversationHistory).slice(-exchangeWindow);
   for (const entry of recent) {
-    msgs.push({ role: "user", content: entry.mammaCatTurn ?? legacyMammaCatTurn(entry, request) });
+    msgs.push({ role: "user", content: entry.mammaCatTurn ?? legacyMammaCatTurn(request) });
     msgs.push({ role: "assistant", content: entry.text });
   }
   msgs.push({
@@ -471,20 +472,26 @@ function buildMemoryContext(memories: NonNullable<DialogueRequest["npcMemories"]
 function buildConversationTimingContext(recency: DialogueRequest["conversationRecency"]): string | null {
   if (!recency) return null;
 
+  const context: Record<typeof recency.cadence, string> = {
+    continuing_conversation: "You are still in the same encounter. Continue the existing thread; do not imply Mamma Cat has been away or greet her again.",
+    recent_return: "You were apart only briefly in the game world. Pick up the existing thread without commenting on a return or the gap.",
+    same_day_return: "Before this visit, you were apart for a while within the same game day. A brief recognition is optional at the start of this visit, then move on.",
+    previous_day_return: "Before this visit, you were apart from one game day into the next. A brief recognition is optional at the start of this visit, then move on.",
+    long_absence: "Before this visit, you were apart across several game days. If it fits your personality, briefly acknowledge the absence at the start of this visit, then move on.",
+  };
+
   return [
-    "## Conversation Timing",
-    `- You spoke with Mamma Cat about ${formatElapsedSeconds(recency.lastTalkElapsedSeconds)} ago.`,
-    `- Mamma Cat has engaged this same NPC ${recency.sameNpcTalksInRecentWindow} times in the last ${recency.recentWindowSeconds} seconds.`,
-    `- Cadence: ${recency.cadence.replace(/_/g, " ")}.`,
-    "- Treat rapid repeated engagement as deliberate continuity, not as a mistake or a new scene.",
-    "- Continue the existing thread, avoid repeating the last beat, and make the response meaningful rather than merely repetitive.",
+    "## Encounter context (game time only)",
+    context[recency.cadence],
+    "Keep time awareness in the background. Prefer the current subject, visible surroundings, needs, and established relationship over talking about the gap.",
+    "Avoid repeating the last beat, greeting, or return acknowledgement. Never invent where Mamma Cat went or what she did while apart.",
   ].join("\n");
 }
 
 function buildCurrentMammaCatTurn(request: DialogueRequest): string {
   const gs = request.gameState;
   return [
-    `Mamma Cat approaches ${request.speaker} during ${gs.timeOfDay}.`,
+    `Mamma Cat speaks with ${request.speaker} during ${gs.timeOfDay}.`,
     `Her hunger is ${gs.hunger}, thirst is ${gs.thirst}, and energy is ${gs.energy}.`,
     `Trust with ${request.speaker} is ${gs.trustWithSpeaker}.`,
     buildCurrentTurnRecency(request.conversationRecency),
@@ -494,20 +501,13 @@ function buildCurrentMammaCatTurn(request: DialogueRequest): string {
 }
 
 function buildCurrentTurnRecency(recency: DialogueRequest["conversationRecency"]): string {
-  if (!recency) return "";
-  return `This is a deliberate follow-up about ${formatElapsedSeconds(recency.lastTalkElapsedSeconds)} after their previous exchange.`;
+  return recency?.cadence === "continuing_conversation" || recency?.cadence === "recent_return"
+    ? "Continue the existing conversation naturally."
+    : "";
 }
 
-function formatElapsedSeconds(seconds: number): string {
-  if (seconds < 60) return `${seconds} ${seconds === 1 ? "second" : "seconds"}`;
-  const minutes = Math.floor(seconds / 60);
-  const remainingSeconds = seconds % 60;
-  if (remainingSeconds === 0) return `${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
-  return `${minutes} ${minutes === 1 ? "minute" : "minutes"} ${remainingSeconds} ${remainingSeconds === 1 ? "second" : "seconds"}`;
-}
-
-function legacyMammaCatTurn(entry: { timestamp: number }, request: DialogueRequest): string {
-  return `Mamma Cat approaches ${request.speaker} for an earlier exchange (record ${entry.timestamp}).`;
+function legacyMammaCatTurn(request: DialogueRequest): string {
+  return `Mamma Cat spoke with ${request.speaker} in an earlier exchange.`;
 }
 
 function parseMemoryNote(value: unknown): DialogueResponse["memoryNote"] {
