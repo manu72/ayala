@@ -650,9 +650,8 @@ export class HUDScene extends Phaser.Scene {
       this.pauseContainer.setVisible(false);
       const gameScene = this.scene.get("GameScene") as GameScene;
       if (!this.scene.isActive("JournalScene")) {
-        gameScene.isPaused = true;
+        gameScene.pauseWorld(true);
         gameScene.journalOpenedFromPause = true;
-        gameScene.physics.pause();
         this.scene.launch("JournalScene", { fromPauseMenu: true });
       }
     });

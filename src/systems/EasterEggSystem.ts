@@ -133,7 +133,7 @@ export class EasterEggSystem {
   private prevPhase: string;
   private ghostOn = false;
   private restWasOn = false;
-  private gatheringUntil = 0;
+  private gatheringHold: Phaser.Time.TimerEvent | null = null;
   private hush: { x: number; y: number; r: number; until: number; guests: Set<NPCCat> } | null = null;
   private readonly hiddenCats = new Set<NPCCat>();
   private storyWoke = false;
@@ -145,9 +145,9 @@ export class EasterEggSystem {
     this.persist();
   }
 
-  /** Camille's last encounter waits while the colony gathers. */
+  /** Camille's last encounter waits while the colony gathers (on the scene clock, which stops behind the pause menu). */
   get holdingEncounter(): boolean {
-    return this.scene.time.now < this.gatheringUntil;
+    return this.gatheringHold !== null;
   }
 
   // ──────────── Space ────────────
@@ -631,7 +631,9 @@ export class EasterEggSystem {
     const lastNamedMs = (named.length - 1) * NAMED_GAP_MS;
     const fringeAt = fringeStarts(fringe.length, FRINGE_FIRST_MS, FRINGE_SPREAD_MS, rng);
     const settledMs = Math.max(lastNamedMs, fringeAt[fringeAt.length - 1] ?? 0) + GATHER_SETTLE_MS;
-    this.gatheringUntil = time + settledMs + GATHER_HOLD_MS;
+    this.gatheringHold = scene.time.delayedCall(settledMs + GATHER_HOLD_MS, () => {
+      this.gatheringHold = null;
+    });
 
     // no names, no moods over anyone: just the cats
     for (const e of scene.npcs) if (named.includes(e.cat) || fringe.includes(e.cat)) e.indicator.setHidden(true);

@@ -779,6 +779,43 @@ describe("touch input scene wiring", () => {
     expect(scene.autoSave).toHaveBeenCalledOnce();
   });
 
+  it("freezes the scene clock behind the pause menu and journal, so story timers can't run out", () => {
+    const scene = makeFrozenUpdateScene();
+    scene.time.paused = false;
+    scene.tweens.paused = false;
+    const state = () => [scene.isPaused, scene.time.paused && scene.tweens.paused];
+
+    scene.togglePause();
+    expect(state()).toEqual([true, true]);
+    scene.resumeGame();
+    expect(state()).toEqual([false, false]);
+
+    scene["openJournal"]();
+    expect(state()).toEqual([true, true]);
+    scene.togglePause();
+    expect(state()).toEqual([false, false]);
+    expect(scene.physics.pause).toHaveBeenCalledTimes(2);
+    expect(scene.physics.resume).toHaveBeenCalledTimes(2);
+  });
+
+  it("the pause menu's Colony Journal keeps the world paused through GameScene.pauseWorld", () => {
+    const scene = new HUDScene() as unknown as AnyScene;
+    const gameScene = { pauseWorld: vi.fn(), journalOpenedFromPause: false };
+    scene.scene.get.mockImplementation((key: unknown) => (key === "GameScene" ? gameScene : undefined));
+    const buttons = new Map<string, () => void>();
+    vi.spyOn(scene as never, "createMenuButton").mockImplementation(((_x: number, _y: number, label: string, cb: () => void) => {
+      buttons.set(label, cb);
+      return createGameObject();
+    }) as never);
+
+    scene.pauseContainer = scene["createPauseMenu"](816, 624);
+    buttons.get("Colony Journal")?.();
+
+    expect(gameScene.pauseWorld).toHaveBeenCalledWith(true);
+    expect(gameScene.journalOpenedFromPause).toBe(true);
+    expect(scene.scene.launch).toHaveBeenCalledWith("JournalScene", { fromPauseMenu: true });
+  });
+
   it("defers autosave while chapter narration is open and saves once it closes", () => {
     const scene = makeFrozenUpdateScene();
     Object.assign(scene, {

@@ -424,6 +424,7 @@ export class GameScene extends Phaser.Scene {
     this.lastPeekTapAt = Number.NEGATIVE_INFINITY;
     this.lastInteractTapAt = Number.NEGATIVE_INFINITY;
     this.isPaused = false;
+    this.time.paused = false; // Phaser keeps the clock's paused flag across restarts
     this.collapse = new CollapseSystem(this);
     this.collapse.resetTransient();
 
@@ -1609,21 +1610,34 @@ export class GameScene extends Phaser.Scene {
 
   // ──────────── Pause ────────────
 
+  /**
+   * Pause menu / journal: stop the world, scene timers and tweens included,
+   * so story delays (Camille's beat delay, the beat-5 decision window) can't
+   * run out behind a menu and paired tween+timer moments stay in step.
+   * `time.now` keeps advancing, so a deadline paired with timers must be a
+   * timer itself (see EasterEggSystem.holdingEncounter). Camera effects
+   * (zoomTo) still run.
+   */
+  pauseWorld(paused: boolean): void {
+    this.isPaused = paused;
+    this.time.paused = paused;
+    this.tweens.paused = paused;
+    if (paused) this.physics.pause();
+    else this.physics.resume();
+  }
+
   togglePause(): void {
-    this.isPaused = !this.isPaused;
+    this.pauseWorld(!this.isPaused);
     const hud = this.scene.get("HUDScene") as HUDScene | undefined;
     if (this.isPaused) {
-      this.physics.pause();
       hud?.showPauseMenu?.();
     } else {
-      this.physics.resume();
       hud?.hidePauseMenu?.();
     }
   }
 
   resumeGame(): void {
-    this.isPaused = false;
-    this.physics.resume();
+    this.pauseWorld(false);
     const hud = this.scene.get("HUDScene") as HUDScene | undefined;
     hud?.hidePauseMenu?.();
   }
@@ -1657,8 +1671,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   quitToTitle(): void {
-    this.isPaused = false;
-    this.physics.resume();
+    this.pauseWorld(false);
     this.scene.stop("HUDScene");
     this.scene.start("StartScene");
   }
@@ -1666,8 +1679,7 @@ export class GameScene extends Phaser.Scene {
   // ──────────── Journal ────────────
 
   private openJournal(): void {
-    this.isPaused = true;
-    this.physics.pause();
+    this.pauseWorld(true);
     if (!this.scene.isActive("JournalScene")) {
       this.scene.launch("JournalScene");
     }

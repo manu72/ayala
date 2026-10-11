@@ -213,6 +213,33 @@ describe("EasterEggSystem", () => {
     expect((reg.get(EGGS_KEY) as { gathered?: boolean }).gathered).toBeUndefined();
   });
 
+  it("the gathering holds the last encounter on the scene clock, so a long pause can't cut it short", () => {
+    const { scene } = makeScene();
+    scene.dayNight.currentPhase = "evening";
+    (scene.camille as { pendingEncounterNumber: number }).pendingEncounterNumber = 5;
+    scene.trust.getCatTrust = () => 100;
+    const blacky = { npcName: "Blacky", active: true, x: 50, y: 50 };
+    (scene as { npcs: unknown[] }).npcs = [{ cat: blacky, indicator: { setHidden: vi.fn() } }];
+    Object.assign(scene, { hushCrowd: vi.fn(), colony: { knowsCat: () => false } });
+    const timers: Array<{ delay: number; fire: () => void }> = [];
+    scene.time.delayedCall = vi.fn((delay: number, fire: () => void) => {
+      timers.push({ delay, fire });
+      return { remove: vi.fn() };
+    }) as never;
+    const eggs = new EasterEggSystem(scene);
+
+    eggs.update(0, 16);
+    expect(eggs.holdingEncounter).toBe(true);
+
+    // paused behind a menu: time.now runs on, the scene's timers don't
+    scene.time.now = 10 * 60_000;
+    expect(eggs.holdingEncounter).toBe(true);
+
+    const hold = timers.reduce((a, b) => (b.delay > a.delay ? b : a));
+    hold.fire();
+    expect(eggs.holdingEncounter).toBe(false);
+  });
+
   it("finds each hidden kitten once, when she comes close", () => {
     const { scene, reg } = makeScene();
     const eggs = new EasterEggSystem(scene);
