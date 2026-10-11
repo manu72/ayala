@@ -73,6 +73,8 @@ export class BootScene extends Phaser.Scene {
       ["mc_greet_w", "mammacat_greeting_west"],
       ["mc_drink_e", "mammacat_drinking_east"],
       ["mc_drink_w", "mammacat_drinking_west"],
+      ["mc_swipe_e", "mammacat_paw_swipe_east"],
+      ["mc_swipe_w", "mammacat_paw_swipe_west"],
     ];
     for (const [key, file] of mcSheets) {
       this.load.spritesheet(key, `assets/sprites/${file}.png`, {
@@ -283,6 +285,7 @@ export class BootScene extends Phaser.Scene {
     this.load.audio("sfx_meow_happy", "assets/sounds/meow_happy.mp3");
     this.load.audio("sfx_meow_kitten", "assets/sounds/meow_kitten.mp3");
     this.load.audio("sfx_cat_growl_warning", "assets/sounds/cat_growl_warning.mp3");
+    this.load.audio("sfx_paw_slap", "assets/sounds/paw_slap.wav");
     // Traffic reactions to Mamma Cat on the road (synthesised by scripts/generate-sfx.mjs).
     this.load.audio("sfx_tyre_screech", "assets/sounds/tyre_screech.wav");
     this.load.audio("sfx_car_horn", "assets/sounds/car_horn.wav");

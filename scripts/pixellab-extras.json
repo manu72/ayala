@@ -144,5 +144,17 @@
     "row_8": "cols 0-3 stand rotations S/E/N/W",
     "frame_index": "row*8+col (walk S 0-7, E 8-15, N 16-23, W 24-31, run E 32-39, run W 40-47, sit S/E/N/W 48-51, idle S 52-55, sleep 56-63, stand S/E/N/W 64-67)",
     "alignment": "each cell entry (strip) gets one vertical offset so its lowest opaque row = the character's feet row (feet_from rotation's lowest opaque row); canvas centred horizontally; never rescaled"
+  },
+  "mammacat": {
+    "_about": "Provenance only (not packed by build-pixellab-extras.py): Mamma Cat's paw swipe for the secret slap (ATG-008).",
+    "id": "5baf7943-be4c-442e-8e52-6412190d1877",
+    "swipe_anim": "paw-swipe",
+    "swipe_group_id": "30f14ac1-499c-4c6f-a64b-eec388a1a4be",
+    "swipe_prompt": "standing cat quickly raises one front paw and swats it forward, playfully batting at something in front, then puts the paw back down",
+    "swipe_mode": "v3, 6 frames + reference frame",
+    "outputs": {
+      "mammacat_paw_swipe_west.png": "336x48, 7 frames of 48x48: the 52x52 PixelLab west frames centre-cropped (offset 2,2)",
+      "mammacat_paw_swipe_east.png": "each west frame mirrored (the generated east read as a stretch, not a swat; her other E/W sheets are exact mirrors too)"
+    }
   }
 }
