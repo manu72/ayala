@@ -1061,6 +1061,8 @@ Session length has no ceiling. The only time-based limit is C5.
 
 ## 12. The weekly rhythm: the Paseo Sunday market and the Sunday Lights
 
+**Implementation update — 11 October 2026 (Manu's revised ATG-001 requirements):** The market now runs from in-game Dawn through Evening, **06:00–21:00**, from Day 2. Guards begin at 03:00, let the last cars drain, place barriers from 04:00, and vendors progressively set up from 04:30 to Dawn. Traffic clearance takes priority if a car is still held up. Pack-up starts at 20:30; people and finds leave at 21:00, guards remove barriers, and Paseo reopens at 21:30. Market finds, browsers, greetings and visiting cats last all day; the Sunday Lights keep their 17:00–23:00 window. This replaces this proposal's older Dawn-only market, 09:30 whistle and 10:00 reopening references. The built behavior is documented in README and tested in `tests/systems/SundaySystem.test.ts`.
+
 Manu's request (revision 2): Car-Free Sunday in the morning, and the Festival of Lights every real-world Sunday night. Revision 3 follows his answers to the open questions: on a real Sunday only Paseo de Roxas closes, and it becomes a street market. This section is that design. Together with the morning gift and visits (§4.6), it is the only part of the game that reads the real calendar.
 
 ### 12.1 What it is, and how honest it is

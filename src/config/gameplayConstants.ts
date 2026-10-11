@@ -51,6 +51,22 @@ export const GP = {
   HUMAN_STUCK_SKIP_WAYPOINT_AFTER_FAILURES: 3,
 } as const;
 
+/** Sunday market hours use the game clock; eligibility uses the device's local date. */
+export const SUNDAY_MARKET = {
+  MIN_DAY: 2,
+  PREPARE_HOUR: 3,
+  BARRIERS_HOUR: 4,
+  SETUP_HOUR: 4.5,
+  OPEN_HOUR: 6,
+  PACK_HOUR: 20.5,
+  CLOSE_HOUR: 21,
+  REOPEN_HOUR: 21.5,
+  GREET_COOLDOWN_MS: 6000,
+} as const;
+
+/** guard.png's ~51 px figure matches the other humans' ~37 px at this scale. */
+export const GUARD_SCALE = 0.72;
+
 /**
  * Camille-era care route: default pause at each waypoint (crouch / refill /
  * greet window). Pyramid stops use {@link CAMILLE_CARE_ROUTE_PYRAMID_PAUSE_MS}.

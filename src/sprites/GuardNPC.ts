@@ -3,6 +3,8 @@ import type { MammaCat } from "./MammaCat";
 import { BaseNPC, type CardinalDirection } from "./BaseNPC";
 import { GUARD_PROFILE, createSpriteProfileAnimations } from "./SpriteProfiles";
 import type { EmoteSystem } from "../systems/EmoteSystem";
+import { GUARD_SCALE } from "../config/gameplayConstants";
+export { GUARD_SCALE } from "../config/gameplayConstants";
 
 const SPRITE_KEY = "guard";
 const PATROL_SPEED = 30;
@@ -16,8 +18,6 @@ const GUARD_FRAME_SIZE = 64;
 /** World-px feet box, the same as when the guard was drawn at scale 1. */
 const GUARD_BODY_WIDTH = 18;
 const GUARD_BODY_HEIGHT = 16;
-/** guard.png draws a ~51 px figure; this brings it to the other humans' ~37 px (Camille, Ben, Kish). */
-export const GUARD_SCALE = 0.72;
 /** Frame row of the top of the guard's head (feet are on the frame's bottom edge). */
 const GUARD_HEAD_ROW = 13;
 /**

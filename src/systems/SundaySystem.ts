@@ -3,8 +3,10 @@ import type { GameScene } from "../scenes/GameScene";
 import type { HUDScene } from "../scenes/HUDScene";
 import { CROWD_LOOKS, PIXEL_CROWD, type CrowdLookId, type Facing } from "../data/ambient-roles";
 import { DAY_NIGHT_PHASES } from "./DayNightCycle";
+import { GP, GUARD_SCALE, SUNDAY_MARKET } from "../config/gameplayConstants";
+import { LANE_WIDTH_PX } from "../utils/kerbsideDropoff";
 import { hourOfDay } from "../utils/trafficLanes";
-import { placeNamed, placesOfType, type Pt } from "../utils/mapPlaces";
+import { closestOnPolyline, placeNamed, placesOfType, type Pt } from "../utils/mapPlaces";
 import { calendarOverrides, isFestiveSeason, isRealSunday, sundayProgramme, type SundayProgramme } from "../utils/realCalendar";
 import { mixSeed, seededRng } from "../utils/forage";
 
@@ -17,7 +19,6 @@ const MARKET_END_CLEAR_PX = 140;
 const STALL_SPACING_PX = 78;
 /** Stall rows either side of the aisle, from the carriageway's centre line (+ = park side). */
 const STALL_LAT_PX = [-46, 46] as const;
-const MARKET_HOURS: readonly [number, number] = [6, 10];
 const LIGHTS_HOURS: readonly [number, number] = [17, 23];
 /** Shows at 18:00, 19:00, and the 20:00 finale (longer). In-game hours. */
 const SHOWS: ReadonlyArray<readonly [number, number]> = [
@@ -48,6 +49,10 @@ interface Stall {
   dwellMs: number;
   shooAt: number;
   vendor: Phaser.GameObjects.Sprite;
+  awning: Phaser.GameObjects.Graphics;
+  along: number;
+  side: number;
+  look: CrowdLookId;
 }
 
 interface Walker {
@@ -58,10 +63,34 @@ interface Walker {
   dir: 1 | -1;
   speed: number;
   pauseMs: number;
+  greeted: boolean;
+}
+
+interface MarketCat {
+  sprite: Phaser.GameObjects.Sprite;
+  texture: string;
+  home: number;
+  along: number;
+  lat: number;
+  dir: 1 | -1;
+  greeted: boolean;
+  pauseMs: number;
+}
+
+interface RoadClosure {
+  day: number;
+  barriers: Phaser.GameObjects.Graphics;
+  guards: Array<{ sprite: Phaser.GameObjects.Sprite; along: number; parkEdge: number; cityEdge: number }>;
+  clear: boolean;
+  blocked: boolean;
+  greetedAt: number;
+  drawnProgress: number;
 }
 
 interface Market {
+  open: boolean;
   layer: Phaser.GameObjects.Container;
+  programmeArt: Phaser.GameObjects.Graphics;
   stalls: Stall[];
   walkers: Walker[];
   busker: Phaser.GameObjects.Sprite;
@@ -73,6 +102,9 @@ interface Market {
   kidDone: boolean;
   stillMs: number;
   programmeDone: boolean;
+  cats: MarketCat[];
+  guests: Set<Phaser.GameObjects.Sprite>;
+  greetAt: number;
 }
 
 interface Lights {
@@ -86,8 +118,9 @@ interface Lights {
 }
 
 /**
- * Real-world Sundays (device date, locked at each in-game dawn): the in-game morning closes Paseo de
- * Roxas and its park side becomes a street market (stalls, browsers, a busker, vendors who shoo cats
+ * Real-world Sundays (device date, locked at each in-game dawn): guards close Paseo before dawn,
+ * vendors set up, and its park side is a street market from dawn through evening (stalls, browsers,
+ * visiting cats, a busker, vendors who shoo cats
  * off the fish); the in-game evening lights the trees round the Exchange Plaza fountain for the
  * Sunday Lights, with shows at 18:00, 19:00 and an 20:00 finale. 10 Nov – 15 Jan it is the Christmas
  * Festival of Lights.
@@ -101,6 +134,7 @@ export class SundaySystem {
   private lightsStillMs = 0;
   private frameMs = 16;
   private market: Market | null = null;
+  private closure: RoadClosure | null = null;
   private lights: Lights | null = null;
   private seg: { a: Pt; b: Pt; len: number; angle: number } | null = null;
   private narratedMarketDay = -1;
@@ -118,6 +152,15 @@ export class SundaySystem {
     this.isSunday = forced.sunday ?? isRealSunday(date);
     this.festive = forced.festive ?? isFestiveSeason(date);
     this.programme = forced.programme ?? sundayProgramme(date);
+    if (this.closure && this.closure.day !== this.scene.dayNight.dayCount) {
+      if (this.market) this.closeMarket();
+      this.endClosure();
+    }
+    // Close before TrafficSystem's first update/prewarm when continuing a daylight save.
+    const h = this.hour();
+    if (this.isSunday && this.scene.dayNight.dayCount >= SUNDAY_MARKET.MIN_DAY && h >= SUNDAY_MARKET.OPEN_HOUR && h < SUNDAY_MARKET.CLOSE_HOUR) {
+      this.beginClosure(this.scene.dayNight.dayCount);
+    }
   }
 
   /** In-game clock hour [0, 24). */
@@ -128,28 +171,66 @@ export class SundaySystem {
   }
 
   get marketOpen(): boolean {
-    return this.market !== null;
+    return this.market?.open === true;
+  }
+
+  get marketStatus(): string {
+    if (this.marketOpen) return this.hour() >= SUNDAY_MARKET.PACK_HOUR ? "Packing up at nightfall" : "Open now";
+    if (this.market) return "Stallholders are setting up";
+    if (this.closure) {
+      if (this.closure.day === this.scene.dayNight.dayCount && this.hour() >= SUNDAY_MARKET.CLOSE_HOUR) return "Guards are reopening Paseo";
+      return this.closure.clear ? "Guards are placing barriers" : "Guards are clearing Paseo";
+    }
+    if (this.scene.dayNight.dayCount < SUNDAY_MARKET.MIN_DAY) return "First market: Day 2";
+    return "Returns next Dawn";
   }
 
   update(time: number, delta: number): void {
     this.frameMs = delta;
     const h = this.hour();
-    const wantMarket = this.isSunday && h >= MARKET_HOURS[0] && h < MARKET_HOURS[1];
+    const day = this.scene.dayNight.dayCount;
+    const wantMarket = this.isSunday && day >= SUNDAY_MARKET.MIN_DAY && h >= SUNDAY_MARKET.OPEN_HOUR && h < SUNDAY_MARKET.CLOSE_HOUR;
+    // The upcoming dawn uses the real local date, including a session crossing local midnight.
+    const preparing = h >= SUNDAY_MARKET.PREPARE_HOUR && h < SUNDAY_MARKET.OPEN_HOUR && day + 1 >= SUNDAY_MARKET.MIN_DAY && this.upcomingSunday();
     const wantLights = this.isSunday && h >= LIGHTS_HOURS[0] && h < LIGHTS_HOURS[1];
-    if (wantMarket && !this.market) this.openMarket();
-    if (!wantMarket && this.market) this.closeMarket();
+    if (wantMarket || preparing) {
+      this.beginClosure(preparing ? day + 1 : day);
+      this.tickClosure(h, time);
+      if (this.closure?.blocked && (wantMarket || h >= SUNDAY_MARKET.SETUP_HOUR)) {
+        if (!this.market) this.buildMarket();
+        if (this.market) {
+          this.setupStalls(wantMarket ? 1 : (h - SUNDAY_MARKET.SETUP_HOUR) / (SUNDAY_MARKET.OPEN_HOUR - SUNDAY_MARKET.SETUP_HOUR));
+          if (wantMarket && !this.market.open) this.openMarket();
+        }
+      }
+    } else {
+      if (this.market) this.closeMarket();
+      if (this.closure) {
+        if (this.isSunday && this.closure.day === day && h >= SUNDAY_MARKET.CLOSE_HOUR && h < SUNDAY_MARKET.REOPEN_HOUR) this.tickClosure(h, time, true);
+        else this.endClosure();
+      }
+    }
     if (wantLights && !this.lights) this.lightUp();
     if (!wantLights && this.lights) this.lightsOff();
 
     let music = 0;
-    if (this.market) music = Math.max(music, this.tickMarket(time, delta) * 0.6);
+    if (this.marketOpen) music = Math.max(music, this.tickMarket(time, delta) * 0.6);
     if (this.lights) music = Math.max(music, this.tickLights(time, h));
     this.scene.audio?.setFestival(music);
   }
 
   destroy(): void {
     if (this.market) this.closeMarket();
+    this.endClosure();
     if (this.lights) this.lightsOff();
+  }
+
+  private upcomingSunday(): boolean {
+    const forced = typeof window !== "undefined" ? calendarOverrides(window.location.search) : {};
+    const date = this.now();
+    const sunday = forced.sunday ?? isRealSunday(date);
+    if (sunday) this.programme = forced.programme ?? sundayProgramme(date);
+    return sunday;
   }
 
   // ──────────── the market ────────────
@@ -172,31 +253,111 @@ export class SundaySystem {
     return { x: s.a.x + c * along - n * lat, y: s.a.y + n * along + c * lat };
   }
 
-  private openMarket(): void {
+  /** Both carriageways' outer edges, measured across the market's centre line. */
+  private roadEdges(along: number): [number, number] {
+    const point = this.at(along, 0);
+    const seg = this.seg!;
+    let lo = 0;
+    let hi = 0;
+    for (const name of SUNDAY_CLOSED_ROADS) {
+      const road = placeNamed(this.scene.places, name);
+      if (!road?.polyline) continue;
+      const near = closestOnPolyline(road.polyline, point);
+      const lat = -(near.x - point.x) * Math.sin(seg.angle) + (near.y - point.y) * Math.cos(seg.angle);
+      const half = Math.max(1, Number(road.props.lanes) || 1) * LANE_WIDTH_PX / 2;
+      lo = Math.min(lo, lat - half);
+      hi = Math.max(hi, lat + half);
+    }
+    return [lo, hi];
+  }
+
+  private beginClosure(day: number): void {
+    if (this.closure) return;
+    const seg = this.segment();
+    if (!seg) return;
+    this.scene.traffic.setClosedRoads(SUNDAY_CLOSED_ROADS);
+    const barriers = this.scene.add.graphics().setPosition(seg.a.x, seg.a.y).setRotation(seg.angle).setDepth(AWNING_DEPTH - 1);
+    const guards = [MARKET_END_CLEAR_PX - 40, seg.len - MARKET_END_CLEAR_PX + 40].map((along) => {
+      const [cityEdge, parkEdge] = this.roadEdges(along);
+      const p = this.at(along, parkEdge + 24);
+      const sprite = this.scene.add.sprite(p.x, p.y, "guard", 4).setScale(GUARD_SCALE).setOrigin(0.5, 1).setDepth(3 + p.y / 100000);
+      return { sprite, along, parkEdge: parkEdge + 24, cityEdge: cityEdge - 16 };
+    });
+    this.closure = { day, barriers, guards, clear: false, blocked: false, greetedAt: -Infinity, drawnProgress: -1 };
+  }
+
+  private tickClosure(hour: number, time: number, releasing = false): void {
+    const c = this.closure;
+    if (!c) return;
+    c.clear = this.scene.traffic.carsOnClosedRoads() === 0;
+    const progress = releasing
+      ? 1 - Phaser.Math.Clamp((hour - SUNDAY_MARKET.CLOSE_HOUR) / (SUNDAY_MARKET.REOPEN_HOUR - SUNDAY_MARKET.CLOSE_HOUR), 0, 1)
+      : hour >= SUNDAY_MARKET.OPEN_HOUR ? 1 : Phaser.Math.Clamp((hour - SUNDAY_MARKET.BARRIERS_HOUR) / (SUNDAY_MARKET.SETUP_HOUR - SUNDAY_MARKET.BARRIERS_HOUR), 0, 1);
+    c.blocked = c.clear && progress === 1;
+    const draw = c.drawnProgress !== (c.clear ? progress : 0);
+    if (draw) {
+      c.barriers.clear();
+      c.drawnProgress = c.clear ? progress : 0;
+    }
+    for (const guard of c.guards) {
+      // Guards wait on the kerb while cars drain; only sweep the asphalt once it is empty.
+      const sweep = c.clear && !releasing && hour < SUNDAY_MARKET.SETUP_HOUR && this.scene.registry.get("MOTION_REDUCED") !== true
+        ? Math.sin(Phaser.Math.Clamp((hour - SUNDAY_MARKET.PREPARE_HOUR) / (SUNDAY_MARKET.SETUP_HOUR - SUNDAY_MARKET.PREPARE_HOUR), 0, 1) * Math.PI)
+        : 0;
+      const p = this.at(guard.along, guard.parkEdge + (guard.cityEdge - guard.parkEdge) * sweep);
+      this.moveGuard(guard.sprite, p);
+      if (c.clear && draw) {
+        const [lo, hi] = this.roadEdges(guard.along);
+        for (let lat = lo; lat <= lo + (hi - lo) * progress && progress > 0; lat += 22) {
+          c.barriers.fillStyle(0xf07c2a).fillRect(guard.along - 5, lat - 7, 10, 14);
+          c.barriers.fillStyle(0xffffff).fillRect(guard.along - 5, lat - 3, 10, 3);
+        }
+      }
+      if (!this.marketOpen && time >= c.greetedAt && !this.scene.playerInputFrozen && !this.scene.dialogue.isActive && Phaser.Math.Distance.Between(p.x, p.y, this.scene.player.x, this.scene.player.y) < GP.NARRATION_WITNESS_DIST) {
+        c.greetedAt = time + SUNDAY_MARKET.GREET_COOLDOWN_MS;
+        this.bubble(p.x, p.y - 40, releasing ? "All packed away. Open Paseo, please!" : c.clear ? "Barriers first, then the stalls. Ready for dawn!" : "Last cars through, please. Sunday market setting up!");
+      }
+    }
+  }
+
+  private moveGuard(sprite: Phaser.GameObjects.Sprite, p: Pt): void {
+    const dx = p.x - sprite.x;
+    const dy = p.y - sprite.y;
+    const dir = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? "right" : "left") : dy > 0 ? "down" : "up";
+    if (Math.hypot(dx, dy) > 0.05 && this.scene.anims.exists(`guard-walk-${dir}`)) sprite.play(`guard-walk-${dir}`, true);
+    else {
+      sprite.anims.stop();
+      sprite.setTexture("guard", 4);
+    }
+    sprite.setPosition(p.x, p.y).setDepth(3 + p.y / 100000);
+  }
+
+  private endClosure(): void {
+    if (!this.closure) return;
+    this.closure.barriers.destroy();
+    for (const g of this.closure.guards) g.sprite.destroy();
+    this.closure = null;
+    this.scene.traffic.setClosedRoads([]);
+  }
+
+  private buildMarket(): void {
     const seg = this.segment();
     if (!seg) return;
     const scene = this.scene;
-    scene.traffic.setClosedRoads(SUNDAY_CLOSED_ROADS);
-    const rng = seededRng(mixSeed(scene.dayNight.dayCount, 7));
+    const rng = seededRng(mixSeed(this.closure?.day ?? scene.dayNight.dayCount, 7));
     const layer = scene.add.container(seg.a.x, seg.a.y).setRotation(seg.angle).setDepth(AWNING_DEPTH);
     const g = scene.add.graphics();
     layer.add(g);
     const start = MARKET_END_CLEAR_PX;
     const end = seg.len - MARKET_END_CLEAR_PX;
 
-    // barriers across the whole road at both ends of the market
-    for (const along of [start - 40, end + 40]) {
-      for (let lat = -150; lat <= 70; lat += 22) {
-        g.fillStyle(0xf07c2a).fillTriangle(along - 5, lat + 5, along + 5, lat + 5, along, lat - 7);
-        g.fillStyle(0xffffff).fillRect(along - 3, lat - 1, 6, 2);
-      }
-    }
-
     const stalls: Stall[] = [];
     for (const side of STALL_LAT_PX) {
       for (let along = start; along <= end; along += STALL_SPACING_PX) {
         const kind = STALL_KINDS[Math.floor(rng() * STALL_KINDS.length)]!;
         const color = AWNINGS[Math.floor(rng() * AWNINGS.length)]!;
+        const g = scene.add.graphics();
+        layer.add(g);
         const away = Math.sign(side) * 14; // the awning sits back from the aisle
         g.fillStyle(0x000000, 0.18).fillRect(along - 24, side + away - 12, 50, 28);
         g.fillStyle(color).fillRect(along - 26, side + away - 14, 52, 26);
@@ -210,7 +371,7 @@ export class SundaySystem {
         const look = LOOKS[Math.floor(rng() * LOOKS.length)]!;
         const vendor = this.person(look, vp.x, vp.y, side > 0 ? "N" : "S"); // facing the aisle
         const front = this.at(along, side - Math.sign(side) * 16);
-        stalls.push({ x: front.x, y: front.y, kind, dwellMs: 0, shooAt: -Infinity, vendor });
+        stalls.push({ x: front.x, y: front.y, kind, dwellMs: 0, shooAt: -Infinity, vendor, awning: g, along, side, look });
       }
     }
 
@@ -220,17 +381,56 @@ export class SundaySystem {
       const along = start + rng() * (end - start);
       const lat = (rng() - 0.5) * 34;
       const p = this.at(along, lat);
-      walkers.push({ sprite: this.person(look, p.x, p.y, "E"), look, along, lat, dir: rng() < 0.5 ? 1 : -1, speed: 16 + rng() * 14, pauseMs: rng() * 3000 });
+      walkers.push({ sprite: this.person(look, p.x, p.y, "E"), look, along, lat, dir: rng() < 0.5 ? 1 : -1, speed: 16 + rng() * 14, pauseMs: rng() * 3000, greeted: false });
     }
     const bp = this.at(seg.len / 2, 100);
     const busker = this.person("teen", bp.x, bp.y, "N");
 
     const crewAt = this.at(seg.len * 0.55, -150);
     const crew = this.buildProgramme(g, seg.len * 0.55, -150, rng);
-    this.market = { layer, stalls, walkers, busker, notesAt: 0, crew, crewAt, whistled: false, kidDone: false, stillMs: 0, programmeDone: false };
+    const cats: MarketCat[] = ["fluffy", "tiger"].map((texture, i) => {
+      const home = seg.len * (0.35 + i * 0.3);
+      const lat = i === 0 ? 12 : -12;
+      const p = this.at(home, lat);
+      const sprite = scene.add.sprite(p.x, p.y, texture, 0).setScale(0.7).setDepth(3 + p.y / 100000);
+      return { sprite, texture, home, along: home, lat, dir: i === 0 ? 1 : -1, greeted: false, pauseMs: 1000 + rng() * 3000 };
+    });
+    this.market = { open: false, layer, programmeArt: g, stalls, walkers, busker, notesAt: 0, crew, crewAt, whistled: false, kidDone: false, stillMs: 0, programmeDone: false, cats, guests: new Set(), greetAt: 0 };
+    for (const s of [...crew, ...walkers.map((w) => w.sprite), ...cats.map((c) => c.sprite), busker]) s.setVisible(false);
+    g.setVisible(false);
+  }
+
+  /** Vendors walk their tables into place; awnings go up one by one before dawn. */
+  private setupStalls(progress: number): void {
+    const m = this.market;
+    if (!m || m.open) return;
+    m.stalls.forEach((s, i) => {
+      const p = progress >= 1 ? 1 : Phaser.Math.Clamp((progress - i / Math.max(1, m.stalls.length - 1) * 0.8) / 0.2, 0, 1);
+      const walk = this.scene.registry.get("MOTION_REDUCED") === true ? 1 : p;
+      const at = this.at(s.along + (1 - walk) * 36, 120 + (s.side + Math.sign(s.side) * 22 - 120) * walk);
+      s.awning.setAlpha(p);
+      s.vendor.setVisible(p > 0).setPosition(at.x, at.y).setDepth(3 + at.y / 100000);
+      if (p > 0 && p < 1) {
+        const key = CROWD_LOOKS[s.look].walk?.up;
+        if (key && this.scene.anims.exists(key)) s.vendor.play(key, true);
+      } else if (p === 1) {
+        s.vendor.anims.stop();
+        this.face(s.vendor, s.look, s.side > 0 ? "N" : "S");
+      }
+    });
+  }
+
+  private openMarket(): void {
+    const m = this.market;
+    if (!m) return;
+    const scene = this.scene;
+    const seg = this.seg!;
+    m.open = true;
+    m.programmeArt.setVisible(true);
+    for (const s of [...m.crew, ...m.walkers.map((w) => w.sprite), ...m.cats.map((c) => c.sprite), m.busker]) s.setVisible(true);
     // a few seeded finds in the aisle, gone when the market packs up
     const aisle: Pt[] = [];
-    for (let along = start; along <= end; along += 12) aisle.push(this.at(along, (Math.sin(along) * 0.5) * 24));
+    for (let along = MARKET_END_CLEAR_PX; along <= seg.len - MARKET_END_CLEAR_PX; along += 12) aisle.push(this.at(along, (Math.sin(along) * 0.5) * 24));
     scene.forage?.setMarketSpots(aisle);
 
     if (this.narratedMarketDay !== scene.dayNight.dayCount) {
@@ -302,20 +502,64 @@ export class SundaySystem {
       });
     }
     this.marketMoments(m, delta);
-    // 09:30: the marshal's whistle and the pack-up
+    this.tickVisitors(m, time, delta);
+    // Pack up at the end of Evening; clear people before the guards lift the barriers.
     const h = this.hour();
-    if (h >= 9.5 && !m.whistled) {
+    if (h >= SUNDAY_MARKET.PACK_HOUR && !m.whistled) {
       m.whistled = true;
-      this.bubble(m.busker.x, m.busker.y - 40, "Tweeeet! Pack up na po, ten minutes!");
+      this.bubble(m.busker.x, m.busker.y - 40, "Tweeeet! Packing up at nightfall, everyone!");
     }
-    if (h >= 9.5) m.layer.setAlpha(Phaser.Math.Clamp((10 - h) / 0.5, 0.25, 1));
+    if (h >= SUNDAY_MARKET.PACK_HOUR) m.layer.setAlpha(Phaser.Math.Clamp((SUNDAY_MARKET.CLOSE_HOUR - h) / (SUNDAY_MARKET.CLOSE_HOUR - SUNDAY_MARKET.PACK_HOUR), 0.25, 1));
     const d = Phaser.Math.Distance.Between(player.x, player.y, m.busker.x, m.busker.y);
     return Math.max(0, 1 - d / MUSIC_RANGE_PX);
+  }
+
+  /** Two visiting cats and occasional greetings, without changing colony or story state. */
+  private tickVisitors(m: Market, time: number, delta: number): void {
+    const { player } = this.scene;
+    const canGreet = !player.isResting && !this.scene.playerInputFrozen && !this.scene.dialogue.isActive && time >= m.greetAt;
+    for (const c of m.cats) {
+      if (c.pauseMs > 0) c.pauseMs -= delta;
+      else {
+        c.along += c.dir * delta * 0.012;
+        if (Math.abs(c.along - c.home) >= 90) {
+          c.along = Phaser.Math.Clamp(c.along, c.home - 90, c.home + 90);
+          c.dir = c.dir === 1 ? -1 : 1;
+          c.pauseMs = 2000;
+        }
+      }
+      const p = this.at(c.along, c.lat);
+      c.sprite.setPosition(p.x, p.y).setDepth(3 + p.y / 100000).setFlipX(c.dir < 0);
+      const key = `${c.texture}-${c.pauseMs > 0 ? "sit-down" : "walk"}`;
+      if (this.scene.anims.exists(key)) c.sprite.play(key, true);
+      if (canGreet && time >= m.greetAt && !c.greeted && Phaser.Math.Distance.Between(p.x, p.y, player.x, player.y) < GP.INTERACTION_DIST) {
+        c.greeted = true;
+        c.pauseMs = 3000;
+        m.greetAt = time + SUNDAY_MARKET.GREET_COOLDOWN_MS;
+        this.bubble(p.x, p.y - 24, c.texture === "fluffy" ? "New smells? The plain fish is the best bit." : "Breakfast, lunch AND supper. I like Sundays.");
+        this.scene.emotes.show(this.scene, c.sprite, "heart");
+      }
+    }
+    if (canGreet && time >= m.greetAt) {
+      const w = m.walkers.find((w) => !w.greeted && Phaser.Math.Distance.Between(w.sprite.x, w.sprite.y, player.x, player.y) < GP.CAT_PERSON_GREET_DIST);
+      if (w) {
+        w.greeted = true;
+        w.pauseMs = 2500;
+        w.sprite.anims.stop();
+        this.face(w.sprite, w.look, player.y > w.sprite.y ? "S" : "N");
+        m.greetAt = time + SUNDAY_MARKET.GREET_COOLDOWN_MS;
+        this.bubble(w.sprite.x, w.sprite.y - 34, "Hello, little market cat! Just looking? Me too.");
+      }
+    }
   }
 
   /** Her small Sunday moments: a kid who wants to pet her, and this week's programme up close. */
   private marketMoments(m: Market, delta: number): void {
     const { player } = this.scene;
+    if (player.isResting || this.scene.playerInputFrozen || this.scene.dialogue.isActive) {
+      m.stillMs = 0;
+      return;
+    }
     const body = player.body as Phaser.Physics.Arcade.Body | null;
     const still = (body?.velocity.length() ?? 1) < 1;
     const seg = this.seg!;
@@ -326,18 +570,23 @@ export class SundaySystem {
       const a = Phaser.Math.Angle.Between(seg.a.x, seg.a.y, seg.b.x, seg.b.y);
       const from = { x: player.x + Math.cos(a) * 110, y: player.y + Math.sin(a) * 110 };
       const kid = this.person("student", from.x, from.y, "W").setScale(CROWD_LOOKS.student.scale * 0.8);
+      m.guests.add(kid);
       this.scene.tweens.add({
         targets: kid,
         x: player.x + 26,
         y: player.y,
         duration: 1600,
         onComplete: () => {
+          if (this.market !== m || !m.open) return;
           this.bubble(kid.x, kid.y - 34, "Ay, ang cute! Kitty, kitty!");
           this.scene.emotes.show(this.scene, player, "heart");
-          this.scene.time.delayedCall(1800, () => this.bubble(kid.x + 10, kid.y - 50, "Gently, anak. Let her come to you."));
-          this.scene.time.delayedCall(4200, () =>
-            this.scene.tweens.add({ targets: kid, x: from.x, y: from.y, alpha: 0, duration: 1800, onComplete: () => kid.destroy() }),
-          );
+          this.scene.time.delayedCall(1800, () => {
+            if (this.market === m && m.open) this.bubble(kid.x + 10, kid.y - 50, "Gently, anak. Let her come to you.");
+          });
+          this.scene.time.delayedCall(4200, () => {
+            if (this.market !== m || !m.open) return;
+            this.scene.tweens.add({ targets: kid, x: from.x, y: from.y, alpha: 0, duration: 1800, onComplete: () => { m.guests.delete(kid); kid.destroy(); } });
+          });
         },
       });
     }
@@ -430,14 +679,19 @@ export class SundaySystem {
 
   private closeMarket(): void {
     const m = this.market!;
+    m.open = false;
     m.layer.destroy();
     for (const p of m.crew) p.destroy();
     for (const s of m.stalls) s.vendor.destroy();
     for (const w of m.walkers) w.sprite.destroy();
+    for (const c of m.cats) c.sprite.destroy();
+    for (const kid of m.guests) {
+      this.scene.tweens.killTweensOf(kid);
+      kid.destroy();
+    }
     m.busker.destroy();
     this.market = null;
     this.scene.forage?.setMarketSpots(null);
-    this.scene.traffic.setClosedRoads([]);
   }
 
   // ──────────── the lights ────────────
