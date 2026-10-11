@@ -4,26 +4,26 @@ import type { GameScene } from "../scenes/GameScene";
 import type { HUDScene } from "../scenes/HUDScene";
 import type {
   DialogueResponse,
-  ConversationEntry,
   SpeakerPose,
 } from "../services/DialogueService";
 import type { EmoteType } from "./EmoteSystem";
 import { calculateRelationshipStage } from "../services/DialogueRelationship";
-import { buildDialogueRecencyContext, getDialogueHistoryAtTime, readDialogueSeparation, type DialogueSeparation } from "../utils/dialogueRecency";
+import { buildDialogueRecencyContext, readDialogueSeparation, type DialogueSeparation } from "../utils/dialogueRecency";
 import { colonyIntroLine, getRandomColonyLine, newcomerLine } from "../data/cat-dialogue";
 import { NEWCOMER_NAME_COMFORT } from "../utils/newcomerCat";
 import { FallbackDialogueService } from "../services/FallbackDialogueService";
+import { storeConversation, addNpcMemory, recordKind } from "../services/ConversationStore";
 import {
-  storeConversation,
-  getRecentConversations,
-  getConversationCount,
-  getNpcMemories,
-  addNpcMemory,
-  type ConversationRecord,
-} from "../services/ConversationStore";
+  buildConversationRecord,
+  loadNpcContext,
+  milestoneMemory,
+  talkMammaCatTurn,
+  toConversationEntry,
+  type NpcSceneSnapshot,
+} from "../services/NpcContext";
 import { GP } from "../config/gameplayConstants";
 import { StoryKeys } from "../registry/storyKeys";
-import { buildManuVisitedFluffyMessage } from "../utils/manuVisitMessage";
+import { buildNpcStoryFacts } from "../utils/npcStoryFacts";
 
 const DIALOGUE_BREAK_DISTANCE = GP.DIALOGUE_BREAK_DIST;
 const INTERACTION_DISTANCE = GP.INTERACTION_DIST;
@@ -61,24 +61,8 @@ const POSE_TO_EMOTE: Record<SpeakerPose, EmoteType> = {
  */
 const POSITIVE_EMOTES: ReadonlySet<EmoteType> = new Set(["heart"]);
 
-/**
- * Frozen copy of the world state at the moment a cat dialogue is requested.
- * Forwarded to {@link storeConversation} and {@link addNpcMemory} so the
- * persisted record reflects conditions at dialogue-open, not at
- * dialogue-close (the close fires from a user-driven Space press that may
- * be many seconds later and on a different in-game day).
- */
-interface CatDialoguePersistenceSnapshot {
-  timestamp: number;
-  realTimestamp: number;
-  gameDay: number;
-  chapter: number;
-  timeOfDay: string;
-  hunger: number;
-  thirst: number;
-  energy: number;
-  trustBefore: number;
-}
+/** What Mamma Cat did while a cat told her a rumour or an egg story. */
+const LISTENED_TURN = "Mamma Cat came over and listened.";
 
 /**
  * Owns the full cat-dialogue lifecycle: engagement gating, AI request
@@ -86,10 +70,9 @@ interface CatDialoguePersistenceSnapshot {
  * post-close side effects (trust awards, registry flags, indicator
  * reveals, conversation + memory persistence, autosave on first meet).
  *
- * Polling model (WORKING_MEMORY): the scene calls
- * {@link tickEngagement} each frame to release the engaged NPC when
- * dialogue closes, the player walks out of range, or the NPC flees/
- * disappears. No Phaser event emitters, no listener lifecycle.
+ * Engagement ends with the cat's own modal (its `onHide` hook); the scene
+ * also calls {@link tickEngagement} each frame to break it off when the
+ * player walks out of range or the NPC flees/disappears.
  *
  * Invariants preserved from pre-refactor:
  *  - `lastDialoguePartner` skip in {@link GameScene.tryInteract} prevents
@@ -121,6 +104,8 @@ export class CatDialogueController {
    * race against post-reset state.
    */
   private requestAbort: AbortController | null = null;
+  /** Completion of the engaged cat's open modal; a no-op until its last line has been shown. */
+  private engagedDialogueDone: (() => void) | null = null;
 
   constructor(scene: GameScene) {
     this.scene = scene;
@@ -137,6 +122,7 @@ export class CatDialogueController {
       this.engagedDialogueNPC.disengageDialogue();
       this.engagedDialogueNPC = null;
     }
+    this.engagedDialogueDone = null;
     this.lastDialoguePartner = null;
     this.lastDialoguePartnerAt = 0;
     this.aiThinkingTimer?.remove(false);
@@ -158,30 +144,23 @@ export class CatDialogueController {
   }
 
   /**
-   * Poll the engagement state once per frame. Releases the engaged NPC
-   * when the dialogue box closes, or breaks engagement when the player
-   * walks out of range / the NPC flees / the NPC sprite is destroyed.
+   * Poll the engagement state once per frame. Breaks engagement when the
+   * player walks out of range / the NPC flees / the NPC sprite is destroyed;
+   * the cat's modal closing releases it through its own `onHide`. Walking
+   * off after the last line still completes the exchange.
    *
    * The input chaining guard and per-cat separation tracking are maintained
    * separately by {@link refreshLastPartner}.
    */
   tickEngagement(): void {
     const scene = this.scene;
-    if (this.engagedDialogueNPC && !scene.dialogue.isActive) {
-      this.engagedDialogueNPC.disengageDialogue();
-      this.engagedDialogueNPC = null;
-      return;
-    }
-    if (this.engagedDialogueNPC && scene.dialogue.isActive) {
-      const cat = this.engagedDialogueNPC;
-      const dist = Phaser.Math.Distance.Between(scene.player.x, scene.player.y, cat.x, cat.y);
-      const broken = dist > DIALOGUE_BREAK_DISTANCE || cat.state === "fleeing" || !cat.active;
-      if (broken) {
-        scene.dialogue.dismiss();
-        cat.disengageDialogue();
-        this.engagedDialogueNPC = null;
-      }
-    }
+    const cat = this.engagedDialogueNPC;
+    if (!cat) return;
+    const dist = Phaser.Math.Distance.Between(scene.player.x, scene.player.y, cat.x, cat.y);
+    if (dist <= DIALOGUE_BREAK_DISTANCE && cat.state !== "fleeing" && cat.active) return;
+    const done = this.engagedDialogueDone;
+    scene.dialogue.dismiss();
+    if (cat.active) done?.();
   }
 
   /**
@@ -291,22 +270,20 @@ export class CatDialogueController {
       return;
     }
 
-    // A rumour she hasn't heard takes this press (scripted, no trust); her usual conversation is the next one.
-    const rumour = scene.eggs?.takeCatLines(name) ?? scene.curiosity?.takeRumour(name);
-    if (rumour) {
+    // A story or rumour she hasn't heard takes this press (scripted, no trust); her usual conversation is the next one.
+    const story = scene.eggs?.catStory(name) ?? scene.curiosity?.rumour(name);
+    if (story) {
       this.setSeparation(cat);
       // engaged like the AI path: the cat stays put, and tickEngagement breaks it off if she walks away
       cat.engageDialogue(scene.player.x, scene.player.y, "curious");
       scene.player.faceToward(cat.x, cat.y);
       this.engagedDialogueNPC = cat;
       scene.emotes.show(scene, cat, "curious");
-      scene.dialogue.show(rumour, () => {
-        if (this.engagedDialogueNPC === cat) {
-          cat.disengageDialogue();
-          this.engagedDialogueNPC = null;
-        }
-        this.lastDialoguePartner = cat;
-        this.lastDialoguePartnerAt = scene.time.now;
+      const snapshot = this.sceneSnapshot();
+      // Heard out, it is told for good and remembered together; closed early, it plays again next press.
+      this.showEngaged(cat, story.lines, () => {
+        story.heard();
+        this.storeStoryLines(name, story.lines, LISTENED_TURN, snapshot);
       });
       return;
     }
@@ -339,70 +316,49 @@ export class CatDialogueController {
     try {
       const name = cat.npcName;
       const trustBefore = scene.trust.getCatTrust(name);
-      const persistenceSnapshot: CatDialoguePersistenceSnapshot = {
-        timestamp: scene.dayNight.totalGameTimeMs,
-        realTimestamp: Date.now(),
-        gameDay: scene.dayNight.dayCount,
-        chapter: scene.chapters.chapter,
-        timeOfDay: scene.dayNight.currentPhase,
-        hunger: scene.stats.hunger,
-        thirst: scene.stats.thirst,
-        energy: scene.stats.energy,
-        trustBefore,
-      };
+      // Persisted records reflect dialogue-open, not dialogue-close (the
+      // close may come many seconds later, on a different in-game day).
+      const snapshot: NpcSceneSnapshot = { ...this.sceneSnapshot(), trustBefore };
 
-      const [storedHistory, conversationCount, npcMemories] = await Promise.all([
-        getRecentConversations(name, 10),
-        getConversationCount(name),
-        getNpcMemories(name, 20),
-      ]);
+      const context = await loadNpcContext(name, snapshot);
       if (abort.signal.aborted) return;
-      const history = getDialogueHistoryAtTime(storedHistory, persistenceSnapshot.timestamp, persistenceSnapshot.gameDay);
-      const toEntry = (r: ConversationRecord): ConversationEntry => ({
-        timestamp: r.timestamp,
-        speaker: r.speaker,
-        mammaCatTurn: r.mammaCatTurn,
-        text: r.lines.join(" "),
-      });
-      // Scripted branches use the existing full history; filtering it could
-      // replay a first meeting or warmup after a save rollback.
-      const conversationHistory = storedHistory.map(toEntry);
-      const promptConversationHistory = history.map(toEntry);
-      const conversationRecency = buildDialogueRecencyContext({
-        history,
-        nowGameTimestamp: persistenceSnapshot.timestamp,
-        currentGameDay: persistenceSnapshot.gameDay,
-        separation: this.getSeparation(cat),
-      });
-      const isFirstConversation = conversationCount === 0;
+      // Scripted branches see every engaged talk, unfiltered: filtering by the
+      // clock could replay a first meeting or warmup after a save rollback.
+      const talks = context.records.filter((r) => recordKind(r) === "talk");
+      const isFirstConversation = talks.length === 0;
 
       const request = {
         speaker: name,
         speakerType: "cat" as const,
         target: "Mamma Cat",
+        interaction: "talk" as const,
         gameState: {
-          chapter: persistenceSnapshot.chapter,
-          timeOfDay: persistenceSnapshot.timeOfDay,
-          trustGlobal: scene.trust.global,
-          trustWithSpeaker: persistenceSnapshot.trustBefore,
-          hunger: persistenceSnapshot.hunger,
-          thirst: persistenceSnapshot.thirst,
-          energy: persistenceSnapshot.energy,
-          daysSurvived: persistenceSnapshot.gameDay,
+          chapter: snapshot.chapter,
+          timeOfDay: snapshot.timeOfDay,
+          trustWithSpeaker: trustBefore,
+          hunger: snapshot.hunger,
+          thirst: snapshot.thirst,
+          energy: snapshot.energy,
+          daysSurvived: snapshot.gameDay,
           knownCats: Array.from(scene.knownCats),
-          recentEvents: this.buildRecentDialogueEvents(name),
+          recentEvents: buildNpcStoryFacts(name, "cat", scene.registry, snapshot.gameDay),
         },
-        conversationHistory,
-        promptConversationHistory,
+        conversationHistory: talks.map(toConversationEntry),
+        promptConversationHistory: context.promptRecords.map(toConversationEntry),
         isFirstConversation,
         relationshipStage: calculateRelationshipStage({
           isFirstConversation,
-          conversationCount,
+          conversationCount: talks.length,
           trustWithSpeaker: trustBefore,
-          memories: npcMemories,
+          memories: context.memories,
         }),
-        npcMemories,
-        conversationRecency,
+        npcMemories: context.memories,
+        conversationRecency: buildDialogueRecencyContext({
+          history: context.promptRecords,
+          nowGameTimestamp: snapshot.timestamp,
+          currentGameDay: snapshot.gameDay,
+          separation: this.getSeparation(cat),
+        }),
       };
 
       // Pass the abort signal through when the concrete service supports
@@ -419,8 +375,9 @@ export class CatDialogueController {
       // another dialogue opened, the player may have walked out of range,
       // or line-of-sight may have been lost (e.g. they slipped behind an
       // obstacle). Failing any of these checks means engaging would feel
-      // teleport-y, so we bail quietly.
-      if (abort.signal.aborted) return;
+      // teleport-y, so we bail quietly. A story moment that froze input
+      // (the beat-5 walk home, the Chapter-6 fade) also drops the reply.
+      if (abort.signal.aborted || scene.playerInputFrozen) return;
       if (scene.dialogue.isActive || cat.state === "fleeing" || !cat.active) return;
       const distToCat = Phaser.Math.Distance.Between(scene.player.x, scene.player.y, cat.x, cat.y);
       if (distToCat > DIALOGUE_BREAK_DISTANCE) return;
@@ -458,13 +415,7 @@ export class CatDialogueController {
         scene.narrateIfPerceivable(response.narration, { x: cat.x, y: cat.y });
       }
 
-      scene.dialogue.show(response.lines, () => {
-        cat.disengageDialogue();
-        this.engagedDialogueNPC = null;
-        this.lastDialoguePartner = cat;
-        this.lastDialoguePartnerAt = scene.time.now;
-        this.processResponse(cat, name, persistenceSnapshot, response);
-      });
+      this.showEngaged(cat, response.lines, () => this.processResponse(cat, name, snapshot, response));
     } catch (err) {
       // Caller-initiated aborts (our `resetTransient` fired during scene
       // shutdown or a reset) rethrow as AbortError from
@@ -518,7 +469,7 @@ export class CatDialogueController {
   private processResponse(
     cat: NPCCat,
     catName: string,
-    snapshot: CatDialoguePersistenceSnapshot,
+    snapshot: NpcSceneSnapshot,
     response: DialogueResponse,
   ): void {
     const scene = this.scene;
@@ -576,27 +527,16 @@ export class CatDialogueController {
       }
     }
 
-    // Persist after trust awards so trustAfter matches gameplay state.
-    const mammaCatTurn = this.buildMammaCatTurnForMemory(catName, snapshot, response.mammaCatCue);
-    void storeConversation({
-      speaker: catName,
-      timestamp: snapshot.timestamp,
-      realTimestamp: snapshot.realTimestamp,
-      gameDay: snapshot.gameDay,
-      mammaCatTurn,
-      lines: response.lines,
-      trustBefore: snapshot.trustBefore,
-      trustAfter: scene.trust.getCatTrust(catName),
-      chapter: snapshot.chapter,
-      gameStateSnapshot: {
-        trustWithSpeaker: scene.trust.getCatTrust(catName),
-        trustGlobal: scene.trust.global,
-        timeOfDay: snapshot.timeOfDay,
-        hunger: snapshot.hunger,
-        thirst: snapshot.thirst,
-        energy: snapshot.energy,
-      },
-    });
+    // Persist after trust awards so trustAfter matches gameplay state. A
+    // placeholder is a stand-in for words the cat never said: not stored.
+    if (!response.placeholder) {
+      void storeConversation(
+        buildConversationRecord(
+          { ...snapshot, trustAfter: scene.trust.getCatTrust(catName) },
+          { speaker: catName, kind: "talk", lines: response.lines, mammaCatTurn: talkMammaCatTurn(snapshot) },
+        ),
+      );
+    }
     if (response.memoryNote) {
       void addNpcMemory(catName, {
         kind: response.memoryNote.kind,
@@ -604,69 +544,71 @@ export class CatDialogueController {
         value: response.memoryNote.value,
         source: "ai",
         gameDay: snapshot.gameDay,
+        timestamp: snapshot.timestamp,
       });
     }
-    if (event) {
-      void addNpcMemory(catName, {
-        kind: "event",
-        label: isFirst ? "first_meeting" : event,
-        value: isFirst
-          ? `Met Mamma Cat on day ${snapshot.gameDay} at ${snapshot.timeOfDay}.`
-          : `Shared a ${event.replace(/_/g, " ")} exchange on day ${snapshot.gameDay}.`,
-        source: "scripted",
-        gameDay: snapshot.gameDay,
-      });
-    }
+    const milestone = milestoneMemory(event, snapshot);
+    if (milestone) void addNpcMemory(catName, milestone);
 
     if (isFirst) {
       scene.autoSave();
     }
   }
 
-  private buildRecentDialogueEvents(speakerName: string): string[] {
-    const events: string[] = [];
+  /**
+   * Store a named cat's authored story lines (a rumour, an egg story, Jayco's
+   * steps) once Mamma Cat has heard them. Story records feed the cat's prompt
+   * history but never count as talks, so they can't move her scripts on.
+   */
+  storeStoryLines(speaker: string, lines: string[], mammaCatTurn: string, at = this.sceneSnapshot()): void {
+    void storeConversation(buildConversationRecord(at, { speaker, kind: "story", lines, mammaCatTurn }));
+  }
 
-    // Speaker-specific awareness facts derived from the live registry.
-    // Currently only Fluffy → Manu, because Fluffy's persona has her
-    // attached to Manu and otherwise asks Mamma Cat after "her human"
-    // even on days he has just walked past her on the Camille care
-    // route (HumanPresenceSystem records that visit). Surfacing the
-    // last-visit day here lets the LLM speak truthfully about whether
-    // Manu was just here, was here yesterday, or has been gone for a
-    // while. Other named cats fall through unchanged.
-    const manuVisitEvent = this.buildManuVisitedFluffyEvent(speakerName);
-    if (manuVisitEvent) events.push(manuVisitEvent);
-
-    return events;
+  /** The scene now, for a persisted record (no trust: callers add the cat's). */
+  private sceneSnapshot(): NpcSceneSnapshot {
+    const scene = this.scene;
+    return {
+      timestamp: scene.dayNight.totalGameTimeMs,
+      realTimestamp: Date.now(),
+      gameDay: scene.dayNight.dayCount,
+      chapter: scene.chapters.chapter,
+      timeOfDay: scene.dayNight.currentPhase,
+      hunger: scene.stats.hunger,
+      thirst: scene.stats.thirst,
+      energy: scene.stats.energy,
+    };
   }
 
   /**
-   * Render Fluffy's "Manu was here…" awareness line from the registry
-   * day stamp written by {@link HumanPresenceSystem.tryRecordManuVisitToFluffy}.
-   * Returns `null` when the speaker is not Fluffy, or when the day
-   * stamp is missing / invalid / 0 (existing saves and pre-Chapter-5
-   * runs), so the prompt stays silent rather than asserting false
-   * history. The day-arithmetic itself lives in
-   * {@link buildManuVisitedFluffyMessage} so it is unit-testable
-   * without spinning up a scene.
+   * Show an engaged cat's lines. Engagement ends with this modal, never with
+   * another system's. Reading the last line finishes the exchange (awards,
+   * persistence) even if the player then closes the box or walks off; closing
+   * before it leaves nothing behind. Programmatic dismissals (scene teardown,
+   * story cut-ins) never finish it.
    */
-  private buildManuVisitedFluffyEvent(speakerName: string): string | null {
-    if (speakerName !== "Fluffy") return null;
-    const raw = this.scene.registry.get(StoryKeys.MANU_VISITED_FLUFFY_DAY);
-    return buildManuVisitedFluffyMessage(raw, this.scene.dayNight.dayCount);
-  }
-
-  private buildMammaCatTurnForMemory(
-    catName: string,
-    snapshot: CatDialoguePersistenceSnapshot,
-    mammaCatCue?: string,
-  ): string {
-    const base = [
-      `Mamma Cat speaks with ${catName} during ${snapshot.timeOfDay}.`,
-      `Her hunger is ${snapshot.hunger}, thirst is ${snapshot.thirst}, and energy is ${snapshot.energy}.`,
-      `Trust with ${catName} before this exchange is ${snapshot.trustBefore}.`,
-    ].join(" ");
-    return mammaCatCue ? `${base} ${mammaCatCue}` : base;
+  private showEngaged(cat: NPCCat, lines: string[], onDone: () => void): void {
+    const scene = this.scene;
+    let lastShown = -1;
+    const done = (): void => {
+      if (lastShown < lines.length - 1) return;
+      this.lastDialoguePartner = cat;
+      this.lastDialoguePartnerAt = scene.time.now;
+      onDone();
+    };
+    this.engagedDialogueDone = done;
+    scene.dialogue.show(lines, done, {
+      completeOnClose: true,
+      onLineShown: (index) => {
+        lastShown = index;
+      },
+      onHide: () => {
+        if (this.engagedDialogueNPC === cat) {
+          cat.disengageDialogue();
+          this.engagedDialogueNPC = null;
+        }
+        this.engagedDialogueDone = null;
+      },
+    });
   }
 
   private awardFirstConversation(catName: string): void {

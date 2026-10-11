@@ -10,14 +10,30 @@ export interface Env {
   OPENAI_MODEL?: string;
   /** Comma-separated origins allowed in the Origin header (browser requests). */
   ALLOWED_ORIGINS?: string;
+  /**
+   * Workers Rate Limiting bindings ([[ratelimits]] in wrangler.toml). Optional so
+   * unit tests and a deploy without the bindings still work (fail-open, logged once).
+   */
+  AI_RATE_LIMIT_BURST?: RateLimit;
+  AI_RATE_LIMIT_MINUTE?: RateLimit;
+  /** Kill switch: "1" → every chat POST gets 503 ai_disabled, no upstream spend. */
+  AI_DISABLED?: string;
 }
 
-const MAX_MESSAGES_CHARS = 12_000;
-const MAX_TOKENS_CAP = 300;
+/** Client trims history to ~28k (PROMPT_CHAR_BUDGET in AIDialogueService). */
+const MAX_MESSAGES_CHARS = 32_000;
+/** 1 system + 2 × 100 stored exchanges (ConversationStore prune cap) + 1 current turn. */
+const MAX_MESSAGES = 202;
+/** Raw body ceiling, checked before JSON.parse. */
+const MAX_BODY_BYTES = 65_536;
+/** Client sends 220; output tokens are the pricier side. */
+const MAX_TOKENS_CAP = 256;
 const MAX_TEMP = 1.5;
 const UPSTREAM_TIMEOUT_MS = 15_000;
+const RATE_LIMITED_RETRY_AFTER_SECONDS = 30;
+const AI_DISABLED_RETRY_AFTER_SECONDS = 300;
 
-const DEFAULT_DEEPSEEK_MODEL = "deepseek-chat";
+const DEFAULT_DEEPSEEK_MODEL = "deepseek-flash";
 const DEFAULT_OPENAI_MODEL = "gpt-4.1-mini";
 
 const DEEPSEEK_BASE = "https://api.deepseek.com/v1/chat/completions";
@@ -123,6 +139,9 @@ export function validateChatBody(body: unknown):
   if (!Array.isArray(messages) || messages.length === 0) {
     return { ok: false, error: "messages must be a non-empty array", status: 400 };
   }
+  if (messages.length > MAX_MESSAGES) {
+    return { ok: false, error: "too many messages", status: 400 };
+  }
   const out: ChatMessage[] = [];
   let totalChars = 0;
   for (const m of messages) {
@@ -138,8 +157,16 @@ export function validateChatBody(body: unknown):
     if (typeof content !== "string") {
       return { ok: false, error: "message content must be a string", status: 400 };
     }
+    // Game shape (AIDialogueService): exactly one system message, and it is first.
+    if ((role === "system") !== (out.length === 0)) {
+      return { ok: false, error: "unexpected message order", status: 400 };
+    }
     totalChars += content.length;
     out.push({ role, content });
+  }
+  // ...and the current turn is a user message.
+  if (out[out.length - 1]?.role !== "user") {
+    return { ok: false, error: "unexpected message order", status: 400 };
   }
   if (totalChars > MAX_MESSAGES_CHARS) {
     return { ok: false, error: "messages exceed size limit", status: 400 };
@@ -203,6 +230,9 @@ async function forwardChat(
         temperature: data.temperature,
         max_tokens: data.max_tokens,
         response_format: { type: "json_object" },
+        // deepseek-flash thinks by default: reasoning would eat max_tokens and
+        // ignore temperature. OpenAI rejects unknown params, so DeepSeek only.
+        ...(provider === "deepseek" ? { thinking: { type: "disabled" } } : {}),
       }),
       signal: controller.signal,
     });
@@ -230,6 +260,60 @@ async function forwardChat(
   } finally {
     clearTimeout(timeoutId);
   }
+}
+
+/**
+ * Rate-limit key for the caller. CF-Connecting-IP is set by Cloudflare's edge
+ * (only the IP is unforgeable without accounts). IPv6 is bucketed by /64 since
+ * one subscriber usually controls a whole /64 and could rotate addresses.
+ */
+export function rateLimitKey(ip: string | null): string {
+  if (!ip) return "ip:unknown";
+  if (!ip.includes(":")) return `ip4:${ip}`;
+  // IPv4-mapped / embedded (::ffff:a.b.c.d): bucket by the IPv4 address.
+  if (ip.includes(".")) return `ip4:${ip.slice(ip.lastIndexOf(":") + 1)}`;
+  const [head = "", tail = ""] = ip.toLowerCase().split("::");
+  const headParts = head ? head.split(":") : [];
+  const tailParts = tail ? tail.split(":") : [];
+  const fill = Math.max(0, 8 - headParts.length - tailParts.length);
+  const groups = [...headParts, ...Array<string>(fill).fill("0"), ...tailParts];
+  return `ip6:${groups.slice(0, 4).map((g) => g.padStart(4, "0")).join(":")}::/64`;
+}
+
+let warnedMissingLimiter = false;
+
+/** 429 Response when the caller is over a limit, else null. Fails open when bindings are absent or throw. */
+async function enforceRateLimit(
+  request: Request,
+  env: Env,
+  cors: Record<string, string>,
+): Promise<Response | null> {
+  const limiters = [env.AI_RATE_LIMIT_BURST, env.AI_RATE_LIMIT_MINUTE].filter(
+    (l): l is RateLimit => l !== undefined,
+  );
+  if (limiters.length === 0) {
+    if (!warnedMissingLimiter) {
+      warnedMissingLimiter = true;
+      console.warn("[ayala-ai-proxy] no rate-limit binding configured; requests are not rate limited");
+    }
+    return null;
+  }
+  const key = rateLimitKey(request.headers.get("CF-Connecting-IP"));
+  try {
+    for (const limiter of limiters) {
+      if (!(await limiter.limit({ key })).success) {
+        return jsonResponse(
+          { error: "rate_limited", retryAfterSeconds: RATE_LIMITED_RETRY_AFTER_SECONDS },
+          429,
+          cors,
+          { "Retry-After": String(RATE_LIMITED_RETRY_AFTER_SECONDS) },
+        );
+      }
+    }
+  } catch (e) {
+    console.error("[ayala-ai-proxy] rate limiter error; failing open", e);
+  }
+  return null;
 }
 
 export async function handleRequest(request: Request, env: Env): Promise<Response> {
@@ -274,10 +358,34 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     });
   }
 
-  // 5) JSON body.
+  // 5) Kill switch — before the limiter, so it consumes no tokens either.
+  //    Proxy-originated refusals carry a STRING `error` (upstream errors are
+  //    forwarded with an object `error`); the client keys throttling on that.
+  if (env.AI_DISABLED === "1") {
+    return jsonResponse(
+      { error: "ai_disabled", retryAfterSeconds: AI_DISABLED_RETRY_AFTER_SECONDS },
+      503,
+      cors,
+      { "Retry-After": String(AI_DISABLED_RETRY_AFTER_SECONDS) },
+    );
+  }
+
+  // 6) Per-caller rate limit, before any body work. Origin is spoofable
+  //    outside browsers, so this is the real per-caller gate.
+  const limited = await enforceRateLimit(request, env, cors);
+  if (limited) return limited;
+
+  // 7) Bounded JSON body.
+  if (Number(request.headers.get("Content-Length") ?? "0") > MAX_BODY_BYTES) {
+    return jsonResponse({ error: "body too large" }, 413, cors);
+  }
   let parsed: unknown;
   try {
-    parsed = await request.json();
+    const raw = await request.arrayBuffer();
+    if (raw.byteLength > MAX_BODY_BYTES) {
+      return jsonResponse({ error: "body too large" }, 413, cors);
+    }
+    parsed = JSON.parse(new TextDecoder().decode(raw));
   } catch {
     return jsonResponse({ error: "invalid JSON" }, 400, cors);
   }

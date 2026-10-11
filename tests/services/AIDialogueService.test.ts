@@ -1,14 +1,16 @@
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import {
   AIDialogueService,
   AIParseError,
+  AIProxyThrottledError,
+  PROMPT_CHAR_BUDGET,
   buildMessages,
   buildSystemPrompt,
   matchScriptedResponse,
   parseAIJson,
 } from "../../src/services/AIDialogueService";
 import { FallbackDialogueService } from "../../src/services/FallbackDialogueService";
-import { ScriptedDialogueService, type DialogueRequest } from "../../src/services/DialogueService";
+import { ScriptedDialogueService, type DialogueRequest, type DialogueService } from "../../src/services/DialogueService";
 
 const baseReq = (): DialogueRequest => ({
   speaker: "Blacky",
@@ -17,7 +19,7 @@ const baseReq = (): DialogueRequest => ({
   gameState: {
     chapter: 2,
     timeOfDay: "day",
-    trustGlobal: 10,
+   
     trustWithSpeaker: 5,
     hunger: 40,
     thirst: 40,
@@ -62,85 +64,150 @@ describe("parseAIJson", () => {
     expect(p.speakerPose).toBeUndefined();
   });
 
-  it("accepts safe optional mammaCatCue and memoryNote fields", () => {
+  it("accepts an impression memoryNote and ignores any mammaCatCue", () => {
     const p = parseAIJson(JSON.stringify({
       lines: ["You came back."],
-      mammaCatCue: "Mamma Cat sits close but keeps her tail low.",
+      mammaCatCue: "Mamma Cat says she missed me.",
       memoryNote: {
-        kind: "event",
-        label: "returned",
-        value: "Mamma Cat returned calmly after their first meeting.",
+        kind: "preference",
+        label: "space",
+        value: "Mamma Cat settles when given room.",
       },
     }));
-    expect(p.mammaCatCue).toBe("Mamma Cat sits close but keeps her tail low.");
+    expect(p).not.toHaveProperty("mammaCatCue");
     expect(p.memoryNote).toEqual({
-      kind: "event",
-      label: "returned",
-      value: "Mamma Cat returned calmly after their first meeting.",
+      kind: "preference",
+      label: "space",
+      value: "Mamma Cat settles when given room.",
     });
+  });
+
+  it("rejects an AI memoryNote of kind event (events are the game's record)", () => {
+    const p = parseAIJson(JSON.stringify({
+      lines: ["Still here."],
+      memoryNote: { kind: "event", label: "returned", value: "Mamma Cat told me she was lost." },
+    }));
+    expect(p.lines).toEqual(["Still here."]);
+    expect(p.memoryNote).toBeUndefined();
   });
 
   it("drops malformed optional fields without rejecting the dialogue", () => {
     const p = parseAIJson(JSON.stringify({
       lines: ["Still here."],
-      mammaCatCue: "",
       memoryNote: {
-        kind: "event",
+        kind: "trait",
         label: "x".repeat(80),
         value: "Unsafe\u0000memory",
       },
     }));
     expect(p.lines).toEqual(["Still here."]);
-    expect(p.mammaCatCue).toBeUndefined();
     expect(p.memoryNote).toBeUndefined();
+  });
+
+  it("rejects any line longer than 160 characters", () => {
+    expect(parseAIJson(JSON.stringify({ lines: ["a".repeat(160)] })).lines[0]).toHaveLength(160);
+    expect(() => parseAIJson(JSON.stringify({ lines: ["Short.", "b".repeat(161)] }))).toThrow(AIParseError);
   });
 });
 
+const last = <T>(items: T[]): T => items[items.length - 1]!;
+
+/** The final user message: the per-turn scene (system prompt excluded). */
+const currentTurn = (req: DialogueRequest): string => last(buildMessages(req)).content;
+
 describe("buildSystemPrompt", () => {
-  it("includes sectioned persona, scene facts, and human-like guidance for cats", () => {
+  it("keeps per-turn scene facts out of the system prompt and puts them in the final user message", () => {
     const req = baseReq();
     req.relationshipStage = 2;
     req.isFirstConversation = false;
     req.conversationRecency = { cadence: "long_absence" };
     req.gameState.recentEvents = ["Shared shade near the fountain."];
-    const p = buildSystemPrompt("# Blacky\nCat.", req);
-    expect(p).toContain("Blacky");
-    expect(p).toContain("Chapter: 2");
-    expect(p).toContain("Tiger");
-    expect(p).toContain("Speaker species: cat");
-    expect(p).toContain("## Your Persona");
-    expect(p).toContain("## Relationship Context");
-    expect(p).toContain("human-like English");
-    expect(p).not.toContain("Cats use short cat-speak");
-    expect(p).toContain("apart across several game days");
-    expect(p).not.toContain("Days since last talk:");
-    expect(p).toContain("Shared shade near the fountain.");
+    const system = buildSystemPrompt("# Blacky\nCat.", req);
+    expect(system).toContain("## Your Persona");
+    expect(system).toContain("## Relationship Context");
+    expect(system).not.toContain("## Current scene");
+    expect(system).not.toContain("Chapter: 2");
+    expect(system).not.toContain("Shared shade near the fountain.");
+    expect(system).not.toContain("apart across several game days");
+
+    const messages = buildMessages(req, system);
+    const final = last(messages);
+    expect(final.role).toBe("user");
+    expect(final.content).toContain("## Current scene (facts — follow these)");
+    expect(final.content).toContain("Speaker species: cat");
+    expect(final.content).toContain("Chapter: 2");
+    expect(final.content).toContain("Game day: 3");
+    expect(final.content).toContain("Cats Mamma Cat knows by name: Tiger");
+    expect(final.content).toContain("Story so far:\n  - Shared shade near the fountain.");
+    expect(final.content).toContain("apart across several game days");
+    expect(final.content).toContain("[Day 3, day] Mamma Cat comes over to you.");
+    expect(final.content).toMatch(/Respond in JSON as specified in the system message\.$/);
   });
 
-  it("uses unified plain-speech guidance and example for humans", () => {
+  it("gives cats plain-English, Mamma-Cat-never-speaks guidance and their trust, in words not stat numbers", () => {
+    const req = baseReq();
+    const system = buildSystemPrompt("# Blacky\nCat.", req);
+    expect(system).toContain("natural, plain English");
+    expect(system).toContain("under about 90 characters");
+    expect(system).toContain("she never speaks words");
+    expect(system).toContain("Never claim she told you anything");
+    expect(system).not.toContain("Cats use short cat-speak");
+    // a silent cat (Ginger B) may answer with an action rather than being told to speak
+    expect(system).toContain("a line may be a wordless action in *asterisks* instead of speech");
+    expect(`${system}\n${currentTurn(req)}`).not.toMatch(/\bSpeak (?:in|to Mamma Cat)\b/);
+
+    const final = currentTurn(req);
+    expect(final).toContain("Trust toward Mamma Cat: 5 (0–100)");
+    expect(final).not.toContain("colony trust");
+    expect(final).toContain("Mamma Cat's condition: She is a little hungry and a little thirsty.");
+    expect(final).not.toMatch(/\b(?:hunger|thirst|energy)\b|\b(?:40|70)\b/i);
+  });
+
+  it("gives humans speech-to-a-cat guidance, a human example and no trust lines at all", () => {
     const req = baseReq();
     req.speaker = "Camille";
     req.speakerType = "human";
-    const p = buildSystemPrompt("# Camille\nHuman.", req);
-    expect(p).toContain("Speaker species: human");
-    expect(p).toContain("speak in natural, human-like English");
-    expect(p).not.toContain('"Meow to you mamma cat');
-    expect(p).toContain('"mammaCatCue"');
-    expect(p).toContain('"memoryNote"');
+    const system = buildSystemPrompt("# Camille\nHuman.", req);
+    expect(system).toContain("speaking aloud to a cat who can't answer in words");
+    expect(system).toContain("under about 60 characters");
+    expect(system).toContain("don't introduce yourself again");
+    expect(system).toContain("unless the story beat says so");
+    expect(system).toContain('Example: {"lines":["Hey there. Taking it easy?"]');
+    expect(system).not.toContain("There is shade by the fountain.");
+    expect(system).not.toContain("Familiarity does not imply a new arrival");
+
+    const final = currentTurn(req);
+    expect(final).toContain("Speaker species: human");
+    expect(`${system}\n${final}`).not.toMatch(/trust toward|colony trust/i);
   });
 
-  it("does not emit returning-context instructions for an inferred human first conversation", () => {
-    const req = baseReq();
-    req.speaker = "Camille";
-    req.speakerType = "human";
-    req.gameState.trustWithSpeaker = 0;
-    req.conversationHistory = [];
+  it("asks for impression-only memory notes and never for a Mamma Cat cue", () => {
+    const system = buildSystemPrompt("# Blacky\nCat.", baseReq());
+    expect(system).not.toContain("mammaCatCue");
+    expect(system).toContain('"kind":"identity|preference|trait|relationship"');
+    expect(system).toContain("never note things Mamma Cat \"said\"");
+    expect(system).toContain("Only reference events in the conversation history, the story-so-far facts and the memory lists");
+  });
 
-    const p = buildSystemPrompt("# Camille\nHuman.", req);
+  it("only gives the first-conversation block when the caller says so, and never for an encounter beat", () => {
+    const inferred = baseReq();
+    inferred.speaker = "Camille";
+    inferred.speakerType = "human";
+    inferred.gameState.trustWithSpeaker = 0;
+    const inferredPrompt = buildSystemPrompt("# Camille\nHuman.", inferred);
+    expect(inferredPrompt).toContain("RELATIONSHIP STAGE 1");
+    expect(inferredPrompt).not.toContain("FIRST CONVERSATION");
 
-    expect(p).toContain("RELATIONSHIP STAGE 1");
-    expect(p).toContain("FIRST CONVERSATION");
-    expect(p).not.toContain("This is not the first conversation");
+    const first = { ...inferred, isFirstConversation: true };
+    expect(buildSystemPrompt("# Camille\nHuman.", first)).toContain("FIRST CONVERSATION");
+
+    const beat: DialogueRequest = {
+      ...first,
+      encounterBeat: { kind: "camille_encounter", n: 2, objective: "Places a treat.", slots: ["She waits."] },
+    };
+    const beatPrompt = buildSystemPrompt("# Camille\nHuman.", beat);
+    expect(beatPrompt).not.toContain("FIRST CONVERSATION");
+    expect(beatPrompt).toContain("This is not the first conversation");
   });
 
   it("includes nearbyCat context when provided", () => {
@@ -148,11 +215,10 @@ describe("buildSystemPrompt", () => {
     req.speaker = "Rose";
     req.speakerType = "human";
     req.nearbyCat = "Tiger";
-    const p = buildSystemPrompt("# Rose\n", req);
-    expect(p).toContain("Cat currently near you: Tiger");
+    expect(currentTurn(req)).toContain("Cat currently near you: Tiger");
   });
 
-  it("includes encounterBeat context when provided", () => {
+  it("gives an encounter beat its objective and one instruction per narrator slot", () => {
     const req = baseReq();
     req.speaker = "Camille";
     req.speakerType = "human";
@@ -160,10 +226,27 @@ describe("buildSystemPrompt", () => {
       kind: "camille_encounter",
       n: 3,
       objective: "Slow blink trust exchange.",
+      slots: ["She closes her eyes.", "Slow blink back?"],
     };
-    const p = buildSystemPrompt("# Camille\n", req);
-    expect(p).toContain("Encounter 3 of 5");
-    expect(p).toContain("Slow blink trust exchange.");
+    const final = currentTurn(req);
+    expect(final).toContain("Encounter 3 of 5");
+    expect(final).toContain("Objective: Slow blink trust exchange.");
+    expect(final).toContain("Reply with exactly 2 line(s), in order.");
+    expect(final).toContain('Line 1 is said while the narrator shows: "She closes her eyes."');
+    expect(final).toContain('Line 2 is said while the narrator shows: "Slow blink back?"');
+    expect(final).toContain("side-effects are handled by the game");
+    expect(final).toContain("Mamma Cat is here with you.");
+  });
+
+  it("asks an ambient bubble for exactly one short line said in passing", () => {
+    const req = baseReq();
+    req.speaker = "Rose";
+    req.speakerType = "human";
+    req.interaction = "ambient";
+    const final = currentTurn(req);
+    expect(final).toContain("Mamma Cat passes close by.");
+    expect(final).toContain("Say exactly ONE short line (under 60 characters), said in passing.");
+    expect(currentTurn(baseReq())).not.toContain("exactly ONE short line");
   });
 
   it("includes rapid same-NPC recency as deliberate continuity context", () => {
@@ -174,7 +257,7 @@ describe("buildSystemPrompt", () => {
       cadence: "continuing_conversation",
     };
 
-    const p = buildSystemPrompt("# Jayco Jr\nPlayful.", req);
+    const p = currentTurn(req);
 
     expect(p).toContain("## Encounter context (game time only)");
     expect(p).toContain("still in the same encounter");
@@ -189,7 +272,7 @@ describe("buildSystemPrompt", () => {
       const req = baseReq();
       req.isFirstConversation = false;
       req.conversationRecency = { cadence };
-      const p = buildSystemPrompt("# Blacky\nCat.", req);
+      const p = currentTurn(req);
 
       expect(p).not.toMatch(/\b\d+\s+(?:seconds?|minutes?|times|game days)\b/i);
       expect(p).toContain("Prefer the current subject");
@@ -202,7 +285,7 @@ describe("buildSystemPrompt", () => {
     const p = buildSystemPrompt("# Blacky\nCat.", baseReq());
     expect(p).not.toContain('"You came back."');
     expect(p).not.toContain('"label":"returned"');
-    expect(p).toContain("Only acknowledge a return or absence when the encounter context below permits it");
+    expect(p).toContain("Only acknowledge a return or absence when the encounter context in the current scene permits it");
     expect(p).toContain("advice to rest must follow her actual energy or visible condition");
     expect(p).toContain("including stopwatch-style wording from earlier replies");
   });
@@ -211,22 +294,20 @@ describe("buildSystemPrompt", () => {
     const req = baseReq();
     req.isFirstConversation = true;
     req.conversationRecency = { cadence: "long_absence" };
-    const p = buildSystemPrompt("# Blacky\nCat.", req);
-    expect(p).toContain("FIRST CONVERSATION");
-    expect(p).not.toContain("## Encounter context");
+    expect(buildSystemPrompt("# Blacky\nCat.", req)).toContain("FIRST CONVERSATION");
+    expect(currentTurn(req)).not.toContain("## Encounter context");
   });
 
-  it("includes first-conversation and memory context without inventing history", () => {
+  it("splits memories into the game's true record and the NPC's own guesses", () => {
     const req = baseReq();
-    req.isFirstConversation = true;
-    req.relationshipStage = 1;
+    req.isFirstConversation = false;
     req.npcMemories = [
       {
         npc: "Blacky",
         kind: "event",
         label: "first_meeting",
-        value: "Met Mamma Cat on day 1 at dusk.",
-        dedupeKey: '["Blacky","event","first_meeting","met mamma cat on day 1 at dusk."]',
+        value: "You first met Mamma Cat on day 1, at dawn.",
+        dedupeKey: "a",
         source: "scripted",
         createdAt: 1,
         gameDay: 1,
@@ -236,7 +317,7 @@ describe("buildSystemPrompt", () => {
         kind: "preference",
         label: "distance",
         value: "Mamma Cat responds better when Blacky gives her space.",
-        dedupeKey: '["Blacky","preference","distance","mamma cat responds better when blacky gives her space."]',
+        dedupeKey: "b",
         source: "ai",
         createdAt: 2,
         gameDay: 2,
@@ -244,12 +325,19 @@ describe("buildSystemPrompt", () => {
     ];
 
     const p = buildSystemPrompt("# Blacky\nCat.", req);
-    expect(p).toContain("FIRST CONVERSATION");
-    expect(p).toContain("do not reference shared history");
-    expect(p).toContain("[Event]");
-    expect(p).toContain("Met Mamma Cat on day 1 at dusk.");
-    expect(p).toContain("[Preference]");
-    expect(p).toContain("Only reference memories listed here");
+    const facts = p.indexOf("## What has happened between you (game record — true)\n- first_meeting: You first met Mamma Cat on day 1, at dawn.");
+    const guesses = p.indexOf(
+      "## Your own impressions of Mamma Cat (guesses; may be wrong — never present them as shared events)\n- distance: Mamma Cat responds better",
+    );
+    expect(facts).toBeGreaterThan(-1);
+    expect(guesses).toBeGreaterThan(facts);
+    expect(p).not.toContain("No durable memories are listed yet.");
+
+    req.npcMemories = [];
+    const empty = buildSystemPrompt("# Blacky\nCat.", req);
+    expect(empty).toContain("No durable memories are listed yet.");
+    // history and story facts are still fair to use; only the memory list is empty
+    expect(empty).not.toContain("Only reference memories listed here");
   });
 });
 
@@ -273,26 +361,55 @@ describe("buildMessages", () => {
     expect(m[m.length - 1]!.role).toBe("user");
   });
 
-  it("caps history at 20 chat messages and renders persisted Mamma Cat turns", () => {
+  it("sends every history entry, oldest first, while under the budget", () => {
     const req = baseReq();
-    req.speaker = "Blacky";
-    req.conversationHistory = Array.from({ length: 12 }, (_, i) => ({
+    req.conversationHistory = Array.from({ length: 30 }, (_, i) => ({
       timestamp: i,
       speaker: "Blacky",
       mammaCatTurn: `Mamma turn ${i}`,
       text: `line ${i}`,
     }));
-    const m = buildMessages(req);
-    // 10 exchange pairs * 2 messages, plus the final current-scene user turn.
-    expect(m.length).toBe(21);
-    const historyMessages = m.slice(0, -1);
-    expect(historyMessages[0]).toEqual({ role: "user", content: "Mamma turn 2" });
-    expect(historyMessages[1]).toEqual({ role: "assistant", content: "line 2" });
-    const assistants = m.filter((x) => x.role === "assistant");
-    expect(assistants[assistants.length - 1]!.content).toBe("line 11");
+    const m = buildMessages(req, "system");
+    expect(m).toHaveLength(61);
+    expect(m[0]).toEqual({ role: "user", content: "Mamma turn 0" });
+    expect(m[1]).toEqual({ role: "assistant", content: "line 0" });
+    expect(m[59]).toEqual({ role: "assistant", content: "line 29" });
   });
 
-  it("uses deterministic Mamma Cat fallback turns for legacy history", () => {
+  it("drops the oldest pairs to fit PROMPT_CHAR_BUDGET (system included) and says so", () => {
+    const req = baseReq();
+    req.conversationHistory = Array.from({ length: 40 }, (_, i) => ({
+      timestamp: i,
+      speaker: "Blacky",
+      mammaCatTurn: `[Day ${i + 1}, day] Mamma Cat came over to talk.`,
+      text: `${i} `.padEnd(1_000, "x"),
+    }));
+    const system = "s".repeat(5_000);
+    const m = buildMessages(req, system);
+    const total = system.length + m.reduce((n, message) => n + message.content.length, 0);
+    expect(total).toBeLessThanOrEqual(PROMPT_CHAR_BUDGET);
+
+    const assistants = m.filter((message) => message.role === "assistant");
+    expect(assistants.length).toBeLessThan(40);
+    expect(last(assistants).content.startsWith("39 ")).toBe(true);
+    const dropped = 40 - assistants.length;
+    expect(assistants[0]!.content.startsWith(`${dropped} `)).toBe(true);
+    expect(m[0]).toEqual({
+      role: "user",
+      content: `(Earlier meetings are not shown.) [Day ${dropped + 1}, day] Mamma Cat came over to talk.`,
+    });
+    // One more pair would not have fitted.
+    const lastDropped = req.conversationHistory[dropped - 1]!;
+    expect(total + lastDropped.mammaCatTurn!.length + lastDropped.text.length).toBeGreaterThan(PROMPT_CHAR_BUDGET);
+  });
+
+  it("does not mark history as trimmed when nothing was dropped", () => {
+    const req = baseReq();
+    req.conversationHistory = [{ timestamp: 1, speaker: "Blacky", mammaCatTurn: "Came over.", text: "Hi." }];
+    expect(buildMessages(req, "system")[0]!.content).toBe("Came over.");
+  });
+
+  it("uses a neutral Mamma Cat turn for entries without one", () => {
     const req = baseReq();
     req.speaker = "Kish";
     req.speakerType = "human";
@@ -302,12 +419,8 @@ describe("buildMessages", () => {
       text: "Earlier line.",
     }];
     const m = buildMessages(req);
-    expect(m[0]).toMatchObject({
-      role: "user",
-      content: expect.stringContaining("Mamma Cat spoke with"),
-    });
+    expect(m[0]).toEqual({ role: "user", content: "Mamma Cat came over." });
     expect(m[1]).toEqual({ role: "assistant", content: "Earlier line." });
-    expect(m[0]!.content).not.toContain("record 1");
     expect(m[m.length - 1]!.content).toContain("Respond in JSON");
   });
 
@@ -342,7 +455,7 @@ describe("AIDialogueService.getDialogue", () => {
     const fetchImpl = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
-          choices: [{ message: { content: '{"lines":["Careful now."],"speakerPose":"curious","emote":"curious","mammaCatCue":"Mamma Cat steps closer.","memoryNote":{"kind":"event","label":"first_step","value":"Mamma Cat stepped closer calmly."},"event":"model_must_not_win","trustChange":99}' } }],
+          choices: [{ message: { content: '{"lines":["Careful now."],"speakerPose":"curious","emote":"curious","mammaCatCue":"Mamma Cat steps closer.","memoryNote":{"kind":"trait","label":"steady","value":"Mamma Cat stepped closer calmly."},"event":"model_must_not_win","trustChange":99}' } }],
         }),
         { status: 200 },
       ),
@@ -359,10 +472,10 @@ describe("AIDialogueService.getDialogue", () => {
     expect(out.lines).toEqual(["Careful now."]);
     expect(out.event).toBe("blacky_first");
     expect(out.trustChange).toBe(10);
-    expect(out.mammaCatCue).toBe("Mamma Cat steps closer.");
+    expect(out).not.toHaveProperty("mammaCatCue");
     expect(out.memoryNote).toEqual({
-      kind: "event",
-      label: "first_step",
+      kind: "trait",
+      label: "steady",
       value: "Mamma Cat stepped closer calmly.",
     });
   });
@@ -531,7 +644,7 @@ describe("AIDialogueService.getDialogue", () => {
 });
 
 describe("AIDialogueService human dialogue", () => {
-  it("resolves human persona and includes encounterBeat in system prompt", async () => {
+  it("resolves human persona and puts the encounterBeat in the final user message", async () => {
     let capturedBody: string | undefined;
     const fetchImpl = vi.fn().mockImplementation((_url, init: RequestInit) => {
       capturedBody = init.body as string;
@@ -556,13 +669,18 @@ describe("AIDialogueService human dialogue", () => {
       kind: "camille_encounter",
       n: 2,
       objective: "Second meeting — places treat, waits.",
+      slots: ["She waits."],
     };
     const out = await svc.getDialogue(req);
     expect(out.lines).toEqual(["You came back."]);
     const parsed = JSON.parse(capturedBody!) as { messages: Array<{ role: string; content: string }> };
-    const systemMessage = parsed.messages.find((m) => m.role === "system");
-    expect(systemMessage?.content).toContain("Encounter 2 of 5");
-    expect(systemMessage?.content).toContain("Speaker species: human");
+    expect(parsed.messages[0]?.role).toBe("system");
+    expect(parsed.messages.filter((m) => m.role === "system")).toHaveLength(1);
+    expect(parsed.messages[0]?.content).not.toContain("Encounter 2 of 5");
+    const finalMessage = last(parsed.messages);
+    expect(finalMessage?.role).toBe("user");
+    expect(finalMessage?.content).toContain("Encounter 2 of 5");
+    expect(finalMessage?.content).toContain("Speaker species: human");
   });
 
   it("aborts the request when the per-call timeout elapses", async () => {
@@ -654,6 +772,7 @@ describe("FallbackDialogueService", () => {
       kind: "camille_encounter",
       n: 2,
       objective: "Places a treat and waits without crowding Mamma Cat.",
+      slots: ["She waits."],
     };
 
     const out = await fb.getDialogue(req);
@@ -685,13 +804,14 @@ describe("FallbackDialogueService", () => {
       kind: "camille_encounter",
       n: 3,
       objective: "Slow blink trust exchange.",
+      slots: ["She closes her eyes."],
     };
 
     await expect(fb.getDialogue(req)).rejects.toThrow("network");
     debug.mockRestore();
   });
 
-  it("does not replay an exhausted script when AI fails", async () => {
+  it("does not replay an exhausted script when AI fails, but keeps its event and trust", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const primary = {
       getDialogue: vi.fn().mockRejectedValue(new Error("network")),
@@ -701,7 +821,14 @@ describe("FallbackDialogueService", () => {
         {
           id: "blacky_return",
           condition: () => true,
-          response: { lines: ["Scripted return."] },
+          response: {
+            lines: ["Scripted return."],
+            speakerPose: "friendly",
+            emote: "heart",
+            narration: "Not for placeholders.",
+            trustChange: 5,
+            event: "blacky_return",
+          },
         },
       ],
     });
@@ -711,7 +838,14 @@ describe("FallbackDialogueService", () => {
 
     const out = await fb.getDialogue(req);
 
-    expect(out.lines).toEqual(["*The cat regards you warily.*"]);
+    expect(out).toEqual({
+      lines: ["*Blacky blinks slowly at you.*"],
+      speakerPose: "friendly",
+      emote: "heart",
+      trustChange: 5,
+      event: "blacky_return",
+      placeholder: true,
+    });
     warn.mockRestore();
   });
 
@@ -772,5 +906,158 @@ describe("FallbackDialogueService", () => {
     expect(out.lines).toEqual(["scripted"]);
     expect(secondary.getDialogue).toHaveBeenCalled();
     debug.mockRestore();
+  });
+});
+
+describe("AIDialogueService network", () => {
+  const json = (status: number, body: unknown) =>
+    new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+  const ok = () => json(200, { choices: [{ message: { content: '{"lines":["Hi."]}' } }] });
+  const service = (fetchImpl: ReturnType<typeof vi.fn>) =>
+    new AIDialogueService({
+      proxyUrl: "/api/ai/chat",
+      personas: { Blacky: "# Blacky" },
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+  const providers = (fetchImpl: ReturnType<typeof vi.fn>) =>
+    fetchImpl.mock.calls.map((c) => (JSON.parse((c[1] as RequestInit).body as string) as { provider: string }).provider);
+  /** A fetch that only settles when its signal aborts. */
+  const hangUntilAborted = (_url: string, init: RequestInit) =>
+    new Promise<Response>((_resolve, reject) => {
+      init.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+    });
+
+  afterEach(() => vi.useRealTimers());
+
+  it("does not fail over on a proxy rate limit and makes no calls until retryAfterSeconds lapses", async () => {
+    vi.useFakeTimers({ now: 1_000_000 });
+    const fetchImpl = vi.fn().mockResolvedValue(json(429, { error: "rate_limited", retryAfterSeconds: 12 }));
+    const svc = service(fetchImpl);
+
+    await expect(svc.getDialogue(baseReq())).rejects.toBeInstanceOf(AIProxyThrottledError);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+
+    vi.setSystemTime(1_000_000 + 11_999);
+    await expect(svc.getDialogue(baseReq())).rejects.toBeInstanceOf(AIProxyThrottledError);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+
+    vi.setSystemTime(1_000_000 + 12_000);
+    fetchImpl.mockResolvedValueOnce(ok());
+    await expect(svc.getDialogue(baseReq())).resolves.toMatchObject({ lines: ["Hi."] });
+  });
+
+  it.each([
+    [{ error: "rate_limited" }, 429, 30_000],
+    [{ error: "ai_disabled" }, 503, 300_000],
+  ])("defaults the cool-down for %j", async (body, status, coolDownMs) => {
+    vi.useFakeTimers({ now: 0 });
+    const fetchImpl = vi.fn().mockResolvedValue(json(status, body));
+    const svc = service(fetchImpl);
+    await expect(svc.getDialogue(baseReq())).rejects.toMatchObject({ retryAfterMs: coolDownMs });
+    vi.setSystemTime(coolDownMs - 1);
+    await expect(svc.getDialogue(baseReq())).rejects.toBeInstanceOf(AIProxyThrottledError);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("still fails over on an upstream-shaped 429 (object error)", async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(json(429, { error: { message: "Too many requests" } }))
+      .mockResolvedValueOnce(ok());
+    await expect(service(fetchImpl).getDialogue(baseReq())).resolves.toMatchObject({ lines: ["Hi."] });
+    expect(providers(fetchImpl)).toEqual(["deepseek", "openai"]);
+  });
+
+  it.each([400, 404, 422])("fails over on an upstream %i with an object error (e.g. a retired model)", async (status) => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(json(status, { error: { message: "Model Not Exist", type: "invalid_request_error" } }))
+      .mockResolvedValueOnce(ok());
+    await expect(service(fetchImpl).getDialogue(baseReq())).resolves.toMatchObject({ lines: ["Hi."] });
+    expect(providers(fetchImpl)).toEqual(["deepseek", "openai"]);
+  });
+
+  it("does not fail over on the Worker's own validation 400 (string error)", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(json(400, { error: "messages exceed size limit" }));
+    await expect(service(fetchImpl).getDialogue(baseReq())).rejects.toThrow(/AI proxy error 400/);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("tries the secondary provider at most once", async () => {
+    const fetchImpl = vi.fn()
+      .mockRejectedValueOnce(new TypeError("fetch failed"))
+      .mockResolvedValueOnce(json(503, { error: "upstream error" }));
+    await expect(service(fetchImpl).getDialogue(baseReq())).rejects.toThrow(/AI proxy error 503/);
+    expect(providers(fetchImpl)).toEqual(["deepseek", "openai"]);
+  });
+
+  it("gives both attempts one deadline", async () => {
+    vi.useFakeTimers({ now: 0 });
+    const fetchImpl = vi.fn()
+      .mockImplementationOnce(() => new Promise((_resolve, reject) => setTimeout(() => reject(new TypeError("fetch failed")), 1_000)))
+      .mockImplementationOnce(hangUntilAborted);
+    const outcome = service(fetchImpl).getDialogue(baseReq(), { timeoutMs: 3_000 }).catch((err: unknown) => err);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    const secondarySignal = (fetchImpl.mock.calls[1]![1] as RequestInit).signal!;
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(secondarySignal.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(secondarySignal.aborted).toBe(true);
+    expect(await outcome).toMatchObject({ name: "AbortError" });
+  });
+
+  it("skips the secondary provider when too little of the deadline is left", async () => {
+    vi.useFakeTimers({ now: 0 });
+    const fetchImpl = vi.fn().mockImplementationOnce(
+      () => new Promise((resolve) => setTimeout(() => resolve(json(503, { error: { message: "busy" } })), 1_500)),
+    );
+    const outcome = service(fetchImpl).getDialogue(baseReq(), { timeoutMs: 2_000 }).catch((err: unknown) => err);
+    await vi.advanceTimersByTimeAsync(1_500);
+    expect(String(await outcome)).toMatch(/AI proxy error 503/);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not fetch at all for an already-aborted caller signal", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok());
+    const controller = new AbortController();
+    controller.abort();
+    await expect(service(fetchImpl).getDialogue(baseReq(), { signal: controller.signal })).rejects.toMatchObject({
+      name: "AbortError",
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("does not fail over when the caller aborts after a primary failure", async () => {
+    const controller = new AbortController();
+    const fetchImpl = vi.fn().mockImplementationOnce(async () => {
+      controller.abort();
+      return json(503, { error: { message: "busy" } });
+    });
+    await expect(service(fetchImpl).getDialogue(baseReq(), { signal: controller.signal })).rejects.toMatchObject({
+      name: "AbortError",
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("FallbackDialogueService serves scripted lines to cats while throttled, and rethrows for beats", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "debug").mockImplementation(() => {});
+    const fetchImpl = vi.fn().mockResolvedValue(json(429, { error: "rate_limited", retryAfterSeconds: 30 }));
+    const ai = new AIDialogueService({
+      proxyUrl: "/api/ai/chat",
+      personas: { Blacky: "# Blacky", Camille: "# Camille" },
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    const scripted: DialogueService = { getDialogue: vi.fn().mockResolvedValue({ lines: ["(scripted)"] }) };
+    const fb = new FallbackDialogueService(ai, scripted);
+    await expect(fb.getDialogue(baseReq())).resolves.toEqual({ lines: ["(scripted)"] });
+
+    const beat = baseReq();
+    beat.speaker = "Camille";
+    beat.speakerType = "human";
+    beat.encounterBeat = { kind: "camille_encounter", n: 2, objective: "Places a treat.", slots: ["She waits."] };
+    await expect(fb.getDialogue(beat)).rejects.toBeInstanceOf(AIProxyThrottledError);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    vi.restoreAllMocks();
   });
 });

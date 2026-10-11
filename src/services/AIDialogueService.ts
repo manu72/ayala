@@ -19,6 +19,7 @@ import {
   isNpcMemoryKind,
   normalizeNpcMemoryText,
 } from "./NpcMemoryValidation";
+import { describeMammaCatCondition } from "../utils/mammaCatCondition";
 
 export class AIParseError extends Error {
   constructor(message: string) {
@@ -26,6 +27,28 @@ export class AIParseError extends Error {
     this.name = "AIParseError";
   }
 }
+
+/** Thrown when the proxy itself (not an upstream provider) refuses: rate limit or kill switch. */
+export class AIProxyThrottledError extends Error {
+  constructor(readonly retryAfterMs: number, reason: string) {
+    super(`AI proxy throttled: ${reason}`);
+    this.name = "AIProxyThrottledError";
+  }
+}
+
+/** Total characters (system + every message) sent per request; the Worker rejects above 32k. */
+export const PROMPT_CHAR_BUDGET = 28_000;
+
+const EARLIER_MEETINGS_NOT_SHOWN = "(Earlier meetings are not shown.) ";
+
+/** Longer lines overflow the dialogue box / bubble; reject them so the scripted fallback runs. */
+const MAX_LINE_CHARS = 160;
+
+/** A secondary provider attempt with less budget than this left can't finish; fail fast instead. */
+const MIN_SECONDARY_ATTEMPT_MS = 750;
+
+/** Proxy refusal codes (string `error`) and their default cool-downs. */
+const PROXY_THROTTLE_DEFAULT_SECONDS: Record<string, number> = { rate_limited: 30, ai_disabled: 300 };
 
 const VALID_POSES: SpeakerPose[] = ["friendly", "wary", "hostile", "sleeping", "curious", "submissive"];
 
@@ -41,6 +64,25 @@ const RELATIONSHIP_STAGE_CONTEXT: Record<RelationshipStage, string> = {
   4: "RELATIONSHIP STAGE 4: You have established trust. Speak with warmth and ease while staying in character.",
 };
 
+const CAT_STYLE = [
+  "## Conversational Style",
+  "When you speak, use natural, plain English. Be terse, wary, playful, proud, or affectionate according to your persona; never use cat-speak as your main language.",
+  "Reply with 1 to 3 lines: one short sentence per line, each under about 90 characters.",
+  "Where your persona says you don't talk or barely talk, a line may be a wordless action in *asterisks* instead of speech.",
+  "Mamma Cat is a cat: she never speaks words. She meows, approaches, blinks, rubs, eats. Never claim she told you anything.",
+].join("\n");
+
+const HUMAN_STYLE = [
+  "## Conversational Style",
+  "You are speaking aloud to a cat who can't answer in words. Use plain, everyday speech; no baby-talk.",
+  "Keep each line under about 60 characters.",
+  "Once you have history with her, don't introduce yourself again.",
+  "Don't claim to give, place, or bring her anything unless the story beat says so.",
+].join("\n");
+
+const CAT_EXAMPLE = '{"lines":["There is shade by the fountain."],"speakerPose":"friendly","emote":"heart","narration":"Tail tip curls."}';
+const HUMAN_EXAMPLE = '{"lines":["Hey there. Taking it easy?"],"speakerPose":"friendly","emote":"curious"}';
+
 interface ChatMessage {
   role: "system" | "user" | "assistant";
   content: string;
@@ -48,7 +90,6 @@ interface ChatMessage {
 
 interface ProxyResponseShape {
   choices?: Array<{ message?: { content?: string } }>;
-  error?: { message?: string };
 }
 
 export interface AIDialogueServiceOptions {
@@ -60,17 +101,19 @@ export interface AIDialogueServiceOptions {
   primaryProvider?: "deepseek" | "openai";
   secondaryProvider?: "deepseek" | "openai";
   /**
-   * Upstream request abort in milliseconds. Defaults to 8000ms (full engage).
-   * Callers that render a quick ambient bubble can pass a tighter budget via
-   * {@link AIDialogueService.getDialogue}'s per-call `timeoutMs` option.
+   * Total budget in milliseconds across the primary and any secondary attempt.
+   * Defaults to 8000ms (full engage). Callers that render a quick ambient
+   * bubble can pass a tighter budget via {@link AIDialogueService.getDialogue}'s
+   * per-call `timeoutMs` option.
    */
   defaultTimeoutMs?: number;
 }
 
 /**
  * Per-call options that don't belong on the shared `DialogueRequest` contract.
- * `timeoutMs` is used for tight-budget bubbles; leaving it unset keeps the
- * default 8s budget which suits engaged (Space-triggered) dialogue.
+ * `timeoutMs` (one deadline for the whole call) is used for tight-budget
+ * bubbles; leaving it unset keeps the default 8s budget which suits engaged
+ * (Space-triggered) dialogue.
  */
 export interface AIDialogueCallOptions {
   timeoutMs?: number;
@@ -82,6 +125,8 @@ export class AIDialogueService implements DialogueService {
   private readonly primaryProvider: "deepseek" | "openai";
   private readonly secondaryProvider: "deepseek" | "openai";
   private readonly defaultTimeoutMs: number;
+  /** Wall-clock instant before which calls fail fast after a proxy refusal. */
+  private throttledUntil = 0;
 
   constructor(private readonly opts: AIDialogueServiceOptions) {
     this.fetchImpl = opts.fetchImpl ?? globalThis.fetch.bind(globalThis);
@@ -95,10 +140,12 @@ export class AIDialogueService implements DialogueService {
     if (!persona) {
       throw new Error(`No AI persona loaded for speaker: ${request.speaker}`);
     }
+    const coolingDownMs = this.throttledUntil - Date.now();
+    if (coolingDownMs > 0) throw new AIProxyThrottledError(coolingDownMs, "cooling down");
 
     const scripted = matchScriptedResponse(request);
     const systemPrompt = buildSystemPrompt(persona, request);
-    const messages = buildMessages(request);
+    const messages = buildMessages(request, systemPrompt);
     const temperature = HARSHER_TEMP_SPEAKERS.has(request.speaker) ? 0.6 : 0.8;
     if (isAiDialogueConsoleDebugEnabled()) {
       console.log("[AIDialogueService] dialogue context:", {
@@ -119,7 +166,6 @@ export class AIDialogueService implements DialogueService {
       speakerPose: parsed.speakerPose ?? scripted?.speakerPose,
       emote: parsed.emote ?? scripted?.emote,
       narration: parsed.narration ?? scripted?.narration,
-      mammaCatCue: parsed.mammaCatCue,
       memoryNote: parsed.memoryNote,
       trustChange: scripted?.trustChange,
       event: scripted?.event,
@@ -150,23 +196,29 @@ export class AIDialogueService implements DialogueService {
       console.groupEnd();
     }
 
-    // Primary → secondary failover covers two distinct failure modes:
-    //  1. Primary resolved with a retriable HTTP status (5xx / 429 / 401) — see
-    //     `shouldRetryWithFallback`.
+    // One deadline covers both attempts. The secondary provider is tried at
+    // most once, for two distinct failure modes:
+    //  1. Primary resolved with a provider failure — see `shouldFailOver`.
     //  2. Primary rejected with a non-abort error (DNS, TLS, connection
     //     refused, etc.) — the different upstream host behind the secondary
     //     provider may still be reachable.
     // Abort errors (internal timeout OR external caller signal) are preserved
-    // as caller intent and propagate without burning the secondary provider.
-    let res: Response;
+    // as caller intent and propagate without burning the secondary provider,
+    // and so do proxy refusals (the secondary would hit the same Worker).
+    const deadline = Date.now() + (callOpts?.timeoutMs ?? this.defaultTimeoutMs);
+    const post = (provider: "deepseek" | "openai") =>
+      this.postProvider(provider, payloadBase, deadline, callOpts?.signal);
+    let res: Response | undefined;
+    let primaryError: unknown;
     try {
-      res = await this.postProvider(this.primaryProvider, payloadBase, callOpts);
+      res = await post(this.primaryProvider);
     } catch (err) {
-      if (isAbortError(err)) throw err;
-      res = await this.postProvider(this.secondaryProvider, payloadBase, callOpts);
+      if (isAbortError(err) || err instanceof AIProxyThrottledError) throw err;
+      primaryError = err;
     }
-    if (shouldRetryWithFallback(res.status)) {
-      res = await this.postProvider(this.secondaryProvider, payloadBase, callOpts);
+    if (!res || (await shouldFailOver(res))) {
+      if (deadline - Date.now() >= MIN_SECONDARY_ATTEMPT_MS) res = await post(this.secondaryProvider);
+      else if (!res) throw primaryError;
     }
 
     if (!res.ok) {
@@ -209,18 +261,20 @@ export class AIDialogueService implements DialogueService {
   private async postProvider(
     provider: "deepseek" | "openai",
     body: { messages: ChatMessage[]; temperature: number; max_tokens: number },
-    callOpts?: AIDialogueCallOptions,
+    deadline: number,
+    signal?: AbortSignal,
   ): Promise<Response> {
+    // A listener never fires for a signal that is already aborted.
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
     const controller = new AbortController();
-    const timeoutMs = callOpts?.timeoutMs ?? this.defaultTimeoutMs;
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const timer = setTimeout(() => controller.abort(), Math.max(0, deadline - Date.now()));
     // Honour caller abort (e.g. player moves away mid-bubble) by bridging
     // the external signal onto our internal controller.
-    const externalSignal = callOpts?.signal;
-    const externalAbort = externalSignal ? () => controller.abort() : null;
-    externalSignal?.addEventListener("abort", externalAbort!);
+    const abortWithCaller = () => controller.abort();
+    signal?.addEventListener("abort", abortWithCaller);
+    let res: Response;
     try {
-      return await this.fetchImpl(this.opts.proxyUrl, {
+      res = await this.fetchImpl(this.opts.proxyUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ provider, ...body }),
@@ -228,10 +282,16 @@ export class AIDialogueService implements DialogueService {
       });
     } finally {
       clearTimeout(timer);
-      if (externalSignal && externalAbort) {
-        externalSignal.removeEventListener("abort", externalAbort);
-      }
+      signal?.removeEventListener("abort", abortWithCaller);
     }
+    // A proxy refusal applies to this player, not to a provider: stop calling
+    // until it lapses (FallbackDialogueService serves scripted lines meanwhile).
+    const throttle = await readProxyThrottle(res);
+    if (throttle) {
+      this.throttledUntil = Date.now() + throttle.retryAfterMs;
+      throw new AIProxyThrottledError(throttle.retryAfterMs, throttle.reason);
+    }
+    return res;
   }
 }
 
@@ -240,12 +300,42 @@ function isAbortError(err: unknown): boolean {
   return err instanceof Error && err.name === "AbortError";
 }
 
-function shouldRetryWithFallback(status: number): boolean {
+async function readJsonObject(res: Response): Promise<Record<string, unknown> | null> {
+  try {
+    const body: unknown = await res.clone().json();
+    return body !== null && typeof body === "object" ? (body as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The Worker's own refusals carry a string `error` code; upstream provider
+ * errors are forwarded verbatim with an object `error`.
+ */
+async function readProxyThrottle(res: Response): Promise<{ retryAfterMs: number; reason: string } | null> {
+  if (res.status !== 429 && res.status !== 503) return null;
+  const body = await readJsonObject(res);
+  const reason = body?.["error"];
+  if (typeof reason !== "string") return null;
+  const defaultSeconds = PROXY_THROTTLE_DEFAULT_SECONDS[reason];
+  if (defaultSeconds === undefined) return null;
+  const seconds = body?.["retryAfterSeconds"];
+  const retryAfterSeconds = typeof seconds === "number" && Number.isFinite(seconds) && seconds > 0 ? seconds : defaultSeconds;
+  return { retryAfterMs: retryAfterSeconds * 1000, reason };
+}
+
+async function shouldFailOver(res: Response): Promise<boolean> {
   // 401 covers bad/expired primary API keys forwarded verbatim by the proxy
   // (see proxy/src/worker.ts#forwardChat: `status: upstream.status`). Without
   // 401 here, a bad DEEPSEEK_API_KEY skips the documented provider-retry and
   // collapses straight to FallbackDialogueService — see README "Provider retry".
-  return status === 401 || status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
+  if ([401, 429, 500, 502, 503, 504].includes(res.status)) return true;
+  // An upstream 400/404/422 (object `error`, e.g. a retired model name) is the
+  // provider's problem; the Worker's own validation 4xx (string `error`) is ours.
+  if (res.status !== 400 && res.status !== 404 && res.status !== 422) return false;
+  const error = (await readJsonObject(res))?.["error"];
+  return typeof error === "object" && error !== null;
 }
 
 export function matchScriptedResponse(request: DialogueRequest): DialogueResponse | null {
@@ -259,48 +349,39 @@ export function matchScriptedResponse(request: DialogueRequest): DialogueRespons
 }
 
 export function buildSystemPrompt(personaMarkdown: string, request: DialogueRequest): string {
-  const gs = request.gameState;
   const isHuman = request.speakerType === "human";
-  const nearbyCatLine = request.nearbyCat ? `- Cat currently near you: ${request.nearbyCat}` : null;
   const relationshipStage = request.relationshipStage ?? inferRelationshipStage(request);
-  const relationshipContext = RELATIONSHIP_STAGE_CONTEXT[relationshipStage];
-  const memoryContext = buildMemoryContext(request.npcMemories ?? []);
-  const isFirstConversation = request.isFirstConversation ?? relationshipStage === 1;
-  const firstConversationContext = isFirstConversation
+  const continuityContext = isFirstConversationTurn(request)
     ? [
         "## First Conversation",
         "FIRST CONVERSATION (ONE-TIME INSTRUCTION): This is the very first time you speak with Mamma Cat. Introduce yourself in your own way, be cautious or curious according to your personality, and do not reference shared history. This instruction will not appear again.",
       ].join("\n")
-    : request.isFirstConversation === false
+    : request.isFirstConversation === false || request.encounterBeat
       ? [
           "## Conversation Continuity",
-          "This is not the first conversation. Continue naturally from established trust, recent scene facts, and listed memories only.",
+          "This is not the first conversation. Continue naturally from the conversation history, the story-so-far facts and the listed memories only.",
         ].join("\n")
       : [
           "## Conversation Continuity",
           "No explicit first-conversation flag was provided. Use the relationship stage, visible scene facts, and listed memories only.",
         ].join("\n");
-  const recentEvents =
-    gs.recentEvents.length > 0 ? gs.recentEvents.map((event) => `- ${event}`).join("\n") : "- (none listed)";
-  const conversationTimingContext = isFirstConversation ? null : buildConversationTimingContext(request.conversationRecency);
 
-  const staticSections = [
+  // Stable first (persona, rules, format), slow-changing next (relationship,
+  // memories). Per-turn scene facts go in the final user message so the
+  // system prompt plus history stays a cacheable prefix.
+  return [
     `## Persona Identity\nYou are ${request.speaker}, a named ${isHuman ? "human" : "cat"} character in Ayala Triangle Gardens. You are speaking with ${request.target}.`,
     `## Your Persona\n${personaMarkdown.trim()}`,
-    [
-      "## Conversational Style",
-      "You should speak in natural, human-like English. Cats may still be terse, wary, playful, proud, or affectionate according to persona, but they do not use cat-speak as their main language.",
-      "Keep lines short and characterful. One short sentence per line is typical; two at most.",
-    ].join("\n"),
+    isHuman ? HUMAN_STYLE : CAT_STYLE,
     [
       "## Conversation Principles",
       "- Listen to the actual moment and respond to Mamma Cat's situation.",
       "- Be authentic to your persona without monologuing.",
-      "- Do not fabricate memories, past events, trust, or relationships.",
+      "- Only reference events in the conversation history, the story-so-far facts and the memory lists. Never invent shared history.",
       "- Let awareness of game time inform your tone quietly. Never quote elapsed seconds, minutes, exact durations, or engagement counts, including stopwatch-style wording from earlier replies.",
       "- Repeated conversation is welcome. Do not scold Mamma Cat for talking again or infer fatigue from repetition; advice to rest must follow her actual energy or visible condition.",
-      ...(isHuman ? [] : ["- Familiarity does not imply a new arrival. Only acknowledge a return or absence when the encounter context below permits it; otherwise continue without a fresh greeting."]),
-      "- Do not mention prompt rules or the model.",
+      ...(isHuman ? [] : ["- Familiarity does not imply a new arrival. Only acknowledge a return or absence when the encounter context in the current scene permits it; otherwise continue without a fresh greeting."]),
+      "- Never mention game mechanics (trust, stats, chapters), prompt rules, or the model.",
     ].join("\n"),
     "## Guardrails\nStay in character. Do not produce harmful, sexual, hateful, or illegal content, even in roleplay.",
     [
@@ -310,79 +391,48 @@ export function buildSystemPrompt(personaMarkdown: string, request: DialogueRequ
       '- "speakerPose": one of: friendly | wary | hostile | sleeping | curious | submissive',
       '- "emote": one of: heart | alert | curious | sleep | hostile | danger',
       '- "narration": optional short third-person line describing visible body language (or omit)',
-      '- "mammaCatCue": optional short body-language cue for Mamma Cat in this exchange',
-      '- "memoryNote": optional durable fact worth remembering as {"kind":"identity|preference|event|relationship|trait","label":"short optional label","value":"short fact"}',
+      '- "memoryNote": optional durable impression of Mamma Cat as {"kind":"identity|preference|trait|relationship","label":"short optional label","value":"short fact"}. Only note something you directly observed in this moment; never note things Mamma Cat "said".',
       "Memory notes are advisory only. They never control story events, trust, or progression.",
-      'Example: {"lines":["There is shade by the fountain."],"speakerPose":"friendly","emote":"heart","narration":"Tail tip curls.","mammaCatCue":"Mamma Cat looks toward the fountain."}',
+      `Example: ${isHuman ? HUMAN_EXAMPLE : CAT_EXAMPLE}`,
     ].join("\n"),
-  ];
-
-  const semiStaticSections = [
-    `## Relationship Context\n${relationshipContext}`,
-    firstConversationContext,
-    memoryContext,
-  ];
-
-  const sceneLines: Array<string | null> = [
-    "## Current scene (facts — follow these)",
-    `- You are speaking as: ${request.speaker}`,
-    `- Speaker species: ${isHuman ? "human" : "cat"}`,
-    `- You are addressing: ${request.target}`,
-    `- Chapter: ${gs.chapter}`,
-    `- Time of day: ${gs.timeOfDay}`,
-    `- Trust toward Mamma Cat: ${gs.trustWithSpeaker} (0–100)`,
-    `- Global colony trust: ${gs.trustGlobal} (0–100)`,
-    `- Mamma Cat hunger / thirst / energy: ${gs.hunger} / ${gs.thirst} / ${gs.energy}`,
-    `- Days survived (game): ${gs.daysSurvived}`,
-    `- Cats Mamma Cat knows by name: ${gs.knownCats.join(", ") || "(none listed)"}`,
-    nearbyCatLine,
-    "- Recent relevant events:",
-    recentEvents,
-  ];
-
-  if (conversationTimingContext) {
-    sceneLines.push("", conversationTimingContext);
-  }
-
-  if (request.encounterBeat?.kind === "camille_encounter") {
-    sceneLines.push(
-      "",
-      "## Story beat context (follow the emotional objective)",
-      `- Encounter ${request.encounterBeat.n} of 5 with Mamma Cat.`,
-      `- Objective: ${request.encounterBeat.objective}`,
-      "- The beat's registry side-effects are handled by the game; you only supply dialogue.",
-    );
-  }
-
-  sceneLines.push(
-    "",
-    "## Final Instruction",
-    `You are ${request.speaker}. Speak to Mamma Cat now, in character, using the JSON schema above.`,
-  );
-
-  return [...staticSections, ...semiStaticSections, sceneLines.filter((l): l is string => l !== null).join("\n")].join(
-    "\n\n",
-  );
+    `## Relationship Context\n${RELATIONSHIP_STAGE_CONTEXT[relationshipStage]}`,
+    continuityContext,
+    buildMemoryContext(request.npcMemories ?? []),
+  ].join("\n\n");
 }
 
-export function buildMessages(request: DialogueRequest): ChatMessage[] {
-  const msgs: ChatMessage[] = [];
-  const exchangeWindow = 10; // 10 pairs = 20 historical chat messages.
-  const recent = (request.promptConversationHistory ?? request.conversationHistory).slice(-exchangeWindow);
-  for (const entry of recent) {
-    msgs.push({ role: "user", content: entry.mammaCatTurn ?? legacyMammaCatTurn(request) });
-    msgs.push({ role: "assistant", content: entry.text });
+/**
+ * Chat turns after the system prompt: every history entry (oldest first) as a
+ * user/assistant pair, then the current scene. The oldest pairs are dropped
+ * while the whole request, system prompt included, exceeds PROMPT_CHAR_BUDGET.
+ */
+export function buildMessages(request: DialogueRequest, systemPrompt = ""): ChatMessage[] {
+  const pairs = (request.promptConversationHistory ?? request.conversationHistory).map(
+    (entry): [ChatMessage, ChatMessage] => [
+      { role: "user", content: entry.mammaCatTurn ?? "Mamma Cat came over." },
+      { role: "assistant", content: entry.text },
+    ],
+  );
+  const current: ChatMessage = { role: "user", content: buildCurrentTurn(request) };
+  const pairChars = pairs.map(([user, assistant]) => user.content.length + assistant.content.length);
+  let total = systemPrompt.length + current.content.length + pairChars.reduce((sum, n) => sum + n, 0);
+  let dropped = 0;
+  for (const chars of pairChars) {
+    if (total + (dropped > 0 ? EARLIER_MEETINGS_NOT_SHOWN.length : 0) <= PROMPT_CHAR_BUDGET) break;
+    total -= chars;
+    dropped++;
   }
-  msgs.push({
-    role: "user",
-    content: [buildCurrentMammaCatTurn(request), "Respond in JSON as specified in the system message."].join(" "),
-  });
-  return msgs;
+  const history = pairs.slice(dropped).flat();
+  const oldestKept = history[0];
+  if (dropped > 0 && oldestKept) {
+    history[0] = { ...oldestKept, content: EARLIER_MEETINGS_NOT_SHOWN + oldestKept.content };
+  }
+  return [...history, current];
 }
 
 export function parseAIJson(
   raw: string,
-): Pick<DialogueResponse, "lines" | "speakerPose" | "emote" | "narration" | "mammaCatCue" | "memoryNote"> {
+): Pick<DialogueResponse, "lines" | "speakerPose" | "emote" | "narration" | "memoryNote"> {
   const stripped = stripCodeFences(raw.trim());
   let data: unknown;
   try {
@@ -403,6 +453,9 @@ export function parseAIJson(
     if (typeof line !== "string" || line.trim() === "") {
       throw new AIParseError("Each line must be a non-empty string");
     }
+    if (line.trim().length > MAX_LINE_CHARS) {
+      throw new AIParseError(`Each line must be at most ${MAX_LINE_CHARS} characters`);
+    }
     lines.push(line.trim());
   }
 
@@ -421,16 +474,20 @@ export function parseAIJson(
     narration = o["narration"].trim();
   }
 
-  const mammaCatCue = normalizeNpcMemoryText(o["mammaCatCue"], NPC_MEMORY_VALUE_MAX);
   const memoryNote = parseMemoryNote(o["memoryNote"]);
 
-  return { lines, speakerPose, emote, narration, mammaCatCue, memoryNote };
+  return { lines, speakerPose, emote, narration, memoryNote };
 }
 
 function stripCodeFences(s: string): string {
   const fence = /^```(?:json)?\s*([\s\S]*?)```$/m.exec(s);
   if (fence?.[1]) return fence[1]!.trim();
   return s;
+}
+
+/** Only when the caller says so; an encounter beat is never a first conversation. */
+function isFirstConversationTurn(request: DialogueRequest): boolean {
+  return request.isFirstConversation === true && !request.encounterBeat;
 }
 
 function inferRelationshipStage(request: DialogueRequest): RelationshipStage {
@@ -443,30 +500,23 @@ function inferRelationshipStage(request: DialogueRequest): RelationshipStage {
 }
 
 function buildMemoryContext(memories: NonNullable<DialogueRequest["npcMemories"]>): string {
-  if (memories.length === 0) {
+  const facts = memories.filter((m) => m.source === "scripted");
+  const impressions = memories.filter((m) => m.source === "ai");
+  if (facts.length === 0 && impressions.length === 0) {
     return [
       "## What You Know About Mamma Cat",
       "No durable memories are listed yet.",
-      "Only reference memories listed here. If unsure, ask or stay with visible scene facts.",
     ].join("\n");
   }
-
-  const groups = new Map<string, string[]>();
-  for (const memory of memories) {
-    const heading = `[${memory.kind.charAt(0).toUpperCase()}${memory.kind.slice(1)}]`;
-    const label = memory.label ? `${memory.label}: ` : "";
-    const line = `- ${label}${memory.value}`;
-    groups.set(heading, [...(groups.get(heading) ?? []), line]);
-  }
-
-  const lines = [
-    "## What You Know About Mamma Cat",
-    "Only reference memories listed here. Never invent or embellish prior conversations.",
-  ];
-  for (const [heading, items] of groups) {
-    lines.push("", heading, ...items);
-  }
-  return lines.join("\n");
+  const section = (heading: string, items: typeof memories): string[] =>
+    items.length === 0 ? [] : [[heading, ...items.map((m) => `- ${m.label ? `${m.label}: ` : ""}${m.value}`)].join("\n")];
+  return [
+    ...section("## What has happened between you (game record — true)", facts),
+    ...section(
+      "## Your own impressions of Mamma Cat (guesses; may be wrong — never present them as shared events)",
+      impressions,
+    ),
+  ].join("\n\n");
 }
 
 function buildConversationTimingContext(recency: DialogueRequest["conversationRecency"]): string | null {
@@ -488,32 +538,66 @@ function buildConversationTimingContext(recency: DialogueRequest["conversationRe
   ].join("\n");
 }
 
-function buildCurrentMammaCatTurn(request: DialogueRequest): string {
+const CURRENT_ACTION: Record<NonNullable<DialogueRequest["interaction"]>, string> = {
+  talk: "comes over to you",
+  ambient: "passes close by",
+  beat: "is here with you",
+};
+
+/** The final user message: everything that changes per turn. */
+function buildCurrentTurn(request: DialogueRequest): string {
   const gs = request.gameState;
-  return [
-    `Mamma Cat speaks with ${request.speaker} during ${gs.timeOfDay}.`,
-    `Her hunger is ${gs.hunger}, thirst is ${gs.thirst}, and energy is ${gs.energy}.`,
-    `Trust with ${request.speaker} is ${gs.trustWithSpeaker}.`,
-    buildCurrentTurnRecency(request.conversationRecency),
-  ]
-    .filter(Boolean)
-    .join(" ");
-}
-
-function buildCurrentTurnRecency(recency: DialogueRequest["conversationRecency"]): string {
-  return recency?.cadence === "continuing_conversation" || recency?.cadence === "recent_return"
-    ? "Continue the existing conversation naturally."
-    : "";
-}
-
-function legacyMammaCatTurn(request: DialogueRequest): string {
-  return `Mamma Cat spoke with ${request.speaker} in an earlier exchange.`;
+  const isHuman = request.speakerType === "human";
+  const interaction = request.interaction ?? (request.encounterBeat ? "beat" : "talk");
+  const cadence = request.conversationRecency?.cadence;
+  const beat = request.encounterBeat;
+  const sections = [
+    [
+      "## Current scene (facts — follow these)",
+      `- You are speaking as: ${request.speaker}`,
+      `- Speaker species: ${isHuman ? "human" : "cat"}`,
+      `- You are addressing: ${request.target}`,
+      `- Chapter: ${gs.chapter}`,
+      `- Time of day: ${gs.timeOfDay}`,
+      `- Game day: ${gs.daysSurvived}`,
+      ...(request.nearbyCat ? [`- Cat currently near you: ${request.nearbyCat}`] : []),
+      // Humans have no per-human trust; colony trust means nothing to them.
+      ...(isHuman ? [] : [`- Trust toward Mamma Cat: ${gs.trustWithSpeaker} (0–100)`]),
+      `- Mamma Cat's condition: ${describeMammaCatCondition(gs.hunger, gs.thirst, gs.energy)}`,
+      `- Cats Mamma Cat knows by name: ${gs.knownCats.join(", ") || "(none listed)"}`,
+      "- Story so far:",
+      ...(gs.recentEvents.length > 0 ? gs.recentEvents.map((event) => `  - ${event}`) : ["  - (none listed)"]),
+    ].join("\n"),
+    isFirstConversationTurn(request) ? null : buildConversationTimingContext(request.conversationRecency),
+    beat
+      ? [
+          "## Story beat context (follow the emotional objective)",
+          `- Encounter ${beat.n} of 5 with Mamma Cat.`,
+          `- Objective: ${beat.objective}`,
+          `- Reply with exactly ${beat.slots.length} line(s), in order.`,
+          ...beat.slots.map((slot, i) => `- Line ${i + 1} is said while the narrator shows: "${slot}"`),
+          "- The beat's registry side-effects are handled by the game; you only supply dialogue.",
+        ].join("\n")
+      : null,
+    [
+      "## Final Instruction",
+      `[Day ${gs.daysSurvived}, ${gs.timeOfDay}] Mamma Cat ${CURRENT_ACTION[interaction]}.`,
+      ...(cadence === "continuing_conversation" || cadence === "recent_return"
+        ? ["Continue the existing conversation naturally."]
+        : []),
+      ...(interaction === "ambient" ? ["Say exactly ONE short line (under 60 characters), said in passing."] : []),
+      `You are ${request.speaker}. Respond to Mamma Cat now, in character.`,
+      "Respond in JSON as specified in the system message.",
+    ].join("\n"),
+  ];
+  return sections.filter((section): section is string => section !== null).join("\n\n");
 }
 
 function parseMemoryNote(value: unknown): DialogueResponse["memoryNote"] {
   if (value === null || typeof value !== "object") return undefined;
   const raw = value as Record<string, unknown>;
-  if (!isNpcMemoryKind(raw["kind"])) {
+  // Events are the game's record; the model may only note impressions.
+  if (!isNpcMemoryKind(raw["kind"]) || raw["kind"] === "event") {
     return undefined;
   }
   const memoryValue = normalizeNpcMemoryText(raw["value"], NPC_MEMORY_VALUE_MAX);
@@ -521,7 +605,7 @@ function parseMemoryNote(value: unknown): DialogueResponse["memoryNote"] {
   const label = raw["label"] === undefined ? undefined : normalizeNpcMemoryText(raw["label"], NPC_MEMORY_LABEL_MAX);
   if (raw["label"] !== undefined && !label) return undefined;
   return {
-    kind: raw["kind"] as NonNullable<DialogueResponse["memoryNote"]>["kind"],
+    kind: raw["kind"],
     label,
     value: memoryValue,
   };

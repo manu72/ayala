@@ -13,6 +13,7 @@ import {
   addNpcMemory,
   getNpcMemories,
   pruneNpcMemories,
+  recordKind,
   type ConversationRecord,
 } from '../../src/services/ConversationStore'
 
@@ -126,14 +127,14 @@ describe('ConversationStore — IndexedDB happy path', () => {
     expect(last3.map((r) => r.lines[0])).toEqual(['L2', 'L3', 'L4'])
   })
 
-  it('getRecentConversations defaults to the most recent 20 when no limit is given', async () => {
+  it('getRecentConversations returns every kept record, oldest first, when no limit is given', async () => {
     for (let i = 0; i < 22; i++) {
       await storeConversation(buildRecord({ speaker: 'mamma', timestamp: i, lines: [`L${i}`] }))
     }
-    const defaultLimit = await getRecentConversations('mamma')
-    expect(defaultLimit).toHaveLength(20)
-    expect(defaultLimit[0]!.lines[0]).toBe('L2')
-    expect(defaultLimit[defaultLimit.length - 1]!.lines[0]).toBe('L21')
+    const all = await getRecentConversations('mamma')
+    expect(all).toHaveLength(22)
+    expect(all[0]!.lines[0]).toBe('L0')
+    expect(all[all.length - 1]!.lines[0]).toBe('L21')
   })
 
   it('prune keeps at most 100 records per speaker after many writes', async () => {
@@ -298,6 +299,91 @@ describe('ConversationStore — IndexedDB happy path', () => {
     const blackyMemories = await getNpcMemories('Blacky')
     expect(blackyMemories).toHaveLength(1)
     expect(typeof blackyMemories[0]!.dedupeKey).toBe('string')
+  })
+
+  it('evicts AI impressions before scripted milestones when over the memory cap', async () => {
+    await addNpcMemory('Blacky', {
+      kind: 'event',
+      label: 'first_meeting',
+      value: 'You first met Mamma Cat on day 1, at dawn.',
+      source: 'scripted',
+      gameDay: 1,
+    })
+    for (let i = 0; i < 25; i++) {
+      await addNpcMemory('Blacky', { kind: 'trait', label: `t${i}`, value: `Impression ${i}`, source: 'ai', gameDay: 2 })
+    }
+    const memories = await getNpcMemories('Blacky')
+    expect(memories).toHaveLength(20)
+    expect(memories[0]!.label).toBe('first_meeting')
+    expect(memories.map((m) => m.value)).not.toContain('Impression 5')
+    expect(memories.map((m) => m.value)).toContain('Impression 6')
+    expect(memories[memories.length - 1]!.value).toBe('Impression 24')
+  })
+
+  it('evicts legacy per-day _return filler before anything else', async () => {
+    for (let i = 0; i < 18; i++) {
+      await addNpcMemory('Blacky', {
+        kind: 'event',
+        label: 'blacky_return',
+        value: `Shared a blacky return exchange on day ${i + 2}.`,
+        source: 'scripted',
+        gameDay: i + 2,
+      })
+    }
+    await addNpcMemory('Blacky', { kind: 'trait', label: 'calm', value: 'Mamma Cat is calm.', source: 'ai', gameDay: 20 })
+    await addNpcMemory('Blacky', { kind: 'preference', label: 'shade', value: 'She likes shade.', source: 'ai', gameDay: 21 })
+    await addNpcMemory('Blacky', { kind: 'identity', label: 'coat', value: 'Black and white.', source: 'ai', gameDay: 22 })
+
+    const values = (await getNpcMemories('Blacky')).map((m) => m.value)
+    expect(values).toHaveLength(20)
+    expect(values).toEqual(expect.arrayContaining(['Mamma Cat is calm.', 'She likes shade.', 'Black and white.']))
+    expect(values).not.toContain('Shared a blacky return exchange on day 2.')
+  })
+
+  it('records a kind on new rows and derives one for legacy rows', () => {
+    expect(recordKind({ kind: 'story', playerAction: 'ambient_greeting' })).toBe('story')
+    expect(recordKind({ playerAction: 'ambient_greeting' })).toBe('ambient')
+    expect(recordKind({ playerAction: 'camille_encounter_3' })).toBe('story')
+    expect(recordKind({})).toBe('talk')
+  })
+
+  describe('a transaction that aborts after its request succeeded (e.g. quota)', () => {
+    const abortAfterSuccess = (method: 'add' | 'clear') => {
+      const real = IDBObjectStore.prototype[method] as (...args: unknown[]) => IDBRequest
+      IDBObjectStore.prototype[method] = function (this: IDBObjectStore, ...args: unknown[]) {
+        const request = real.apply(this, args)
+        request.addEventListener('success', () => this.transaction.abort())
+        return request
+      } as never
+      return () => {
+        IDBObjectStore.prototype[method] = real as never
+      }
+    }
+
+    it('settles storeConversation and addNpcMemory instead of hanging, storing nothing', async () => {
+      const restore = abortAfterSuccess('add')
+      try {
+        await expect(storeConversation(buildRecord())).resolves.toBeUndefined()
+        await expect(
+          addNpcMemory('Blacky', { kind: 'trait', value: 'Calm.', source: 'ai', gameDay: 1 }),
+        ).resolves.toBeUndefined()
+      } finally {
+        restore()
+      }
+      expect(await getRecentConversations('mamma')).toEqual([])
+      expect(await getNpcMemories('Blacky')).toEqual([])
+    })
+
+    it('settles clearAllConversations instead of hanging', async () => {
+      await storeConversation(buildRecord())
+      const restore = abortAfterSuccess('clear')
+      try {
+        await expect(clearAllConversations()).resolves.toBeUndefined()
+      } finally {
+        restore()
+      }
+      expect(await getRecentConversations('mamma')).toHaveLength(1)
+    })
   })
 
   it('drops invalid memory writes without throwing', async () => {

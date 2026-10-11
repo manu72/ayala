@@ -88,6 +88,12 @@ export const CAMILLE_CARE_ROUTE_ENTRY_BLACKY_PAUSE_MS = 3800;
 export const CAMILLE_BEAT5_DECISION_MS = 10_000;
 
 /**
+ * Human speech bubbles wrap at this width (world px, ~400 screen px at the
+ * 2.5x zoom) so long lines such as the beat-5 acceptance stay on screen.
+ */
+export const HUMAN_BUBBLE_WRAP_PX = 160;
+
+/**
  * Max number of automatic proximity greetings a single human NPC may fire at
  * Mamma Cat while she is stationary. Before this cap was introduced, cat-
  * persons would loop `startGreeting` → idle cooldown → `startGreeting` again

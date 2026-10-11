@@ -4,8 +4,9 @@ function isFirstMeeting(req: DialogueRequest): boolean {
   return req.conversationHistory.length === 0;
 }
 
-function hasMet(req: DialogueRequest): boolean {
-  return req.conversationHistory.length > 0;
+/** A record from an earlier game day: no "You remembered us!" seconds after the first line. */
+function metOnEarlierDay(req: DialogueRequest): boolean {
+  return req.conversationHistory.some((entry) => entry.gameDay !== undefined && entry.gameDay < req.gameState.daysSurvived);
 }
 
 const camilleScripts: DialogueScript[] = [
@@ -13,16 +14,16 @@ const camilleScripts: DialogueScript[] = [
     id: "camille_first",
     condition: isFirstMeeting,
     response: {
-      lines: ["Hi, little one. I'll give you space."],
+      lines: ["And who are you, sweetheart?"],
       speakerPose: "friendly",
       emote: "heart",
     },
   },
   {
     id: "camille_return",
-    condition: hasMet,
+    condition: metOnEarlierDay,
     response: {
-      lines: ["There you are. I brought something for you."],
+      lines: ["There you are. I hoped you'd come."],
       speakerPose: "friendly",
       emote: "heart",
     },
@@ -41,7 +42,7 @@ const manuScripts: DialogueScript[] = [
   },
   {
     id: "manu_return",
-    condition: hasMet,
+    condition: metOnEarlierDay,
     response: {
       lines: ["Still here. That's good."],
       speakerPose: "friendly",
@@ -62,7 +63,7 @@ const kishScripts: DialogueScript[] = [
   },
   {
     id: "kish_return",
-    condition: hasMet,
+    condition: metOnEarlierDay,
     response: {
       lines: ["You remembered us!"],
       speakerPose: "friendly",
@@ -83,7 +84,7 @@ const roseScripts: DialogueScript[] = [
   },
   {
     id: "rose_return",
-    condition: hasMet,
+    condition: metOnEarlierDay,
     response: {
       lines: ["Come eat when you're ready."],
       speakerPose: "friendly",
@@ -104,7 +105,7 @@ const benScripts: DialogueScript[] = [
   },
   {
     id: "ben_return",
-    condition: hasMet,
+    condition: metOnEarlierDay,
     response: {
       lines: ["There's enough for you too."],
       speakerPose: "friendly",

@@ -1833,8 +1833,10 @@ export class GameScene extends Phaser.Scene {
         stepsAtFire.y ?? 0,
       );
       if (distAtFire > TERRITORY_NEGOTIATION_NEAR_STEPS_PX) return;
-      this.dialogue.show(['"You want to stay? ...There\'s room. The steps are wide enough for all of us."'], () => {
+      const offer = ['"You want to stay? ...There\'s room. The steps are wide enough for all of us."'];
+      this.dialogue.show(offer, () => {
         this.claimTerritory();
+        this.catDialogue.storeStoryLines("Jayco", offer, "Mamma Cat came to Jayco's steps.");
       });
     });
   }

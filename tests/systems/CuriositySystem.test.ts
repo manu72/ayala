@@ -25,26 +25,33 @@ function makeScene(day = 1) {
   return { scene: scene as unknown as GameScene & typeof scene, reg, shown };
 }
 
+/** Her press shows the rumour and she reads it to the end. */
+function hear(c: CuriositySystem, cat: string): string[] | null {
+  const r = c.rumour(cat);
+  r?.heard();
+  return r?.lines ?? null;
+}
+
 describe("CuriositySystem", () => {
   it("D1: Blacky warns from day 2, Jayco's zombie gossip only after, and the follow-ups once she has seen them", () => {
     const { scene } = makeScene(1);
     const c = new CuriositySystem(scene);
-    expect(c.takeRumour("Blacky")).toBeNull(); // day 1: not yet
-    expect(c.takeRumour("Jayco")).toBeNull();
+    expect(hear(c, "Blacky")).toBeNull(); // day 1: not yet
+    expect(hear(c, "Jayco")).toBeNull();
     scene.dayNight.dayCount = 2;
-    expect(c.takeRumour("Blacky")?.[0]).toMatch(/Makati/);
-    expect(c.takeRumour("Blacky")).toBeNull(); // heard once
-    expect(c.takeRumour("Jayco")?.[0]).toMatch(/ZOMBIES/);
+    expect(hear(c, "Blacky")?.[0]).toMatch(/Makati/);
+    expect(hear(c, "Blacky")).toBeNull(); // heard once
+    expect(hear(c, "Jayco")?.[0]).toMatch(/ZOMBIES/);
     c.markZombiesSeen();
     expect(c.zombiesSeen).toBe(true);
-    expect(c.takeRumour("Blacky")?.join(" ")).toMatch(/don't always stop for us/);
-    expect(c.takeRumour("Jayco")?.[0]).toMatch(/You WENT/);
+    expect(hear(c, "Blacky")?.join(" ")).toMatch(/don't always stop for us/);
+    expect(hear(c, "Jayco")?.[0]).toMatch(/You WENT/);
   });
 
   it("D4: the shop's glass shows a little more each day, and the rescue pays off once", () => {
     const { scene, shown } = makeScene(3);
     const c = new CuriositySystem(scene);
-    expect(c.takeRumour("Tiger")?.[0]).toMatch(/empty shop/);
+    expect(hear(c, "Tiger")?.[0]).toMatch(/empty shop/);
     expect(c.wonders()).toEqual([{ open: true, text: expect.stringMatching(/empty shop/) }]);
     for (const day of [3, 4, 5, 6, 9]) {
       scene.dayNight.dayCount = day;
@@ -60,13 +67,23 @@ describe("CuriositySystem", () => {
     expect(scene.audio.playKitten).toHaveBeenCalledTimes(1);
     expect(scene.scoring.recordFind).toHaveBeenCalledTimes(1);
     expect(c.wonders()[0]?.open).toBe(false);
-    expect(c.takeRumour("Tiger")?.[0]).toMatch(/Kittens\? In a SHOP/);
+    expect(hear(c, "Tiger")?.[0]).toMatch(/Kittens\? In a SHOP/);
+  });
+
+  it("a rumour closed before its end stays untold: it plays again, and its payoff clock hasn't started", () => {
+    const { scene, reg } = makeScene(3);
+    const c = new CuriositySystem(scene);
+    const first = c.rumour("Tiger");
+    expect(first?.lines[0]).toMatch(/empty shop/);
+    expect(c.rumour("Tiger")?.lines).toEqual(first?.lines);
+    expect(c.wonders()).toEqual([]);
+    expect(reg.get(CURIOSITY_KEY)).toBeUndefined();
   });
 
   it("never replaces a first meeting", () => {
     const { scene, reg } = makeScene(3);
     reg.delete("MET_BLACKY");
-    expect(new CuriositySystem(scene).takeRumour("Blacky")).toBeNull();
+    expect(new CuriositySystem(scene).rumour("Blacky")).toBeNull();
   });
 
   it("does nothing away from the glass, and survives a reload through the registry", () => {
@@ -74,9 +91,9 @@ describe("CuriositySystem", () => {
     const c = new CuriositySystem(scene);
     scene.player.x = 400;
     expect(c.tryWindow()).toBe(false);
-    c.takeRumour("Blacky");
+    hear(c, "Blacky");
     const again = new CuriositySystem(scene);
-    expect(again.takeRumour("Blacky")).toBeNull();
+    expect(again.rumour("Blacky")).toBeNull();
     expect((reg.get(CURIOSITY_KEY) as { heard: Record<string, number> }).heard.d1_warn).toBe(2);
   });
 });

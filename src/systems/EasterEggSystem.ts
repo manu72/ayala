@@ -7,6 +7,7 @@ import { fringeStarts, gatheringSlots } from "../utils/gathering";
 import { mixSeed, seededRng } from "../utils/forage";
 import type { NPCCat } from "../sprites/NPCCat";
 import { StoryKeys } from "../registry/storyKeys";
+import { addNpcMemory } from "../services/ConversationStore";
 
 /**
  * The secrets in docs/Ayala_Easter_Eggs.md: the Hidden Letter and the Stuffed Cat (carried in her
@@ -16,7 +17,7 @@ import { StoryKeys } from "../registry/storyKeys";
  * per save, never with a banner (easter egg principle 1), and never gates the story.
  */
 
-export const EGGS_KEY = "EGGS";
+export const EGGS_KEY = StoryKeys.EGGS;
 
 const NAMED_CATS = ["Blacky", "Tiger", "Jayco", "Jayco Jr", "Fluffy", "Pedigree", "Ginger", "Ginger B"] as const;
 const GATHERING_TRUST = 80;
@@ -179,8 +180,11 @@ export class EasterEggSystem {
     return false;
   }
 
-  /** Lines a named cat has for her right now from an egg (Blacky at 3am, Pedigree after the collar). */
-  takeCatLines(catName: string): string[] | null {
+  /**
+   * A named cat's egg story for her right now (Blacky at 3am, Pedigree after the collar). It is
+   * told only once she has heard it out (`heard`); until then it plays again on her next press.
+   */
+  catStory(catName: string): { lines: string[]; heard: () => void } | null {
     const h = this.scene.sunday.hour();
     // never in place of a first meeting (same rule as CuriositySystem's rumours)
     const met = (key: string) => !!this.scene.registry.get(key);
@@ -191,9 +195,11 @@ export class EasterEggSystem {
       h >= STORY_HOURS[0] &&
       h < STORY_HOURS[1]
     ) {
-      this.state.blackyStory = true;
-      this.persist();
-      return BLACKY_STORY;
+      const heard = (): void => {
+        this.state.blackyStory = true;
+        this.persist();
+      };
+      return { lines: BLACKY_STORY, heard };
     }
     if (
       catName === "Pedigree" &&
@@ -201,9 +207,11 @@ export class EasterEggSystem {
       this.state.collar !== undefined &&
       !this.state.pedigreeThanked
     ) {
-      this.state.pedigreeThanked = true;
-      this.persist();
-      return PEDIGREE_THANKS;
+      const heard = (): void => {
+        this.state.pedigreeThanked = true;
+        this.persist();
+      };
+      return { lines: PEDIGREE_THANKS, heard };
     }
     return null;
   }
@@ -376,6 +384,16 @@ export class EasterEggSystem {
       .setOrigin(0.5);
     card.add([dim, paper, fold, words]);
     this.scene.tweens.add({ targets: card, alpha: 1, duration: 600 });
+    // Camille says nothing here, so it is a fact she remembers rather than a line she said.
+    const day = this.scene.dayNight.dayCount;
+    void addNpcMemory("Camille", {
+      kind: "event",
+      label: "letter",
+      value: `On day ${day}, Mamma Cat brought you a folded letter she had found. You read it, laughed, and held it to your chest.`,
+      source: "scripted",
+      gameDay: day,
+      timestamp: this.scene.dayNight.totalGameTimeMs,
+    });
     this.scene.dialogue.show(
       [
         "Camille unfolds the paper. She reads it once, and laughs, and reads it again.",
@@ -401,15 +419,21 @@ export class EasterEggSystem {
     const spot = placeNamed(this.scene.places, "egg_plush");
     this.state.plushAt = spot ? { x: spot.x, y: spot.y } : undefined;
     this.persist();
-    humans.renderHumanBubble(kish, "OMG it's a TINY cat! Can we keep it?");
+    const kishLine = "OMG it's a TINY cat! Can we keep it?";
+    humans.renderHumanBubble(kish, kishLine);
+    humans.recordHumanLines("Kish", "story", [kishLine], "Mamma Cat brought Kish a tiny stuffed cat she had found.");
     const camille = this.scene.camille.activeCamilleNPC;
     if (camille?.visible) {
       this.scene.time.delayedCall(2600, () => {
-        if (camille.active)
-          humans.renderHumanBubble(
-            camille,
-            "It belongs to some other kid, Kish. Let's put it back where they'll find it.",
-          );
+        if (!camille.active) return;
+        const camilleLine = "It belongs to some other kid, Kish. Let's put it back where they'll find it.";
+        humans.renderHumanBubble(camille, camilleLine);
+        humans.recordHumanLines(
+          "Camille",
+          "story",
+          [camilleLine],
+          "Mamma Cat brought Kish a tiny stuffed cat she had found, and Kish asked to keep it.",
+        );
       });
     }
     this.scene.time.delayedCall(5000, () => this.placeProps());
@@ -453,7 +477,14 @@ export class EasterEggSystem {
     });
     const kish = this.scene.camille.activeKishNPC;
     if (kish?.visible && Phaser.Math.Distance.Between(this.scene.player.x, this.scene.player.y, kish.x, kish.y) < 320) {
-      this.scene.humans.renderHumanBubble(kish, "Oh! There's a balloon! Bye balloon!");
+      const line = "Oh! There's a balloon! Bye balloon!";
+      this.scene.humans.renderHumanBubble(kish, line);
+      this.scene.humans.recordHumanLines(
+        "Kish",
+        "story",
+        [line],
+        "Mamma Cat batted a balloon loose from a tree, and it floated away.",
+      );
     } else this.float(this.scene.player.x, this.scene.player.y - 24, "Pop! No. It floats away, up and up.");
   }
 

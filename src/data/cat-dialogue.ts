@@ -14,14 +14,17 @@ import type { DialogueScript, DialogueRequest } from "../services/DialogueServic
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
-/** True when this is the speaker's first-ever conversation. */
-function isFirstMeeting(req: DialogueRequest): boolean {
-  return req.conversationHistory.length === 0;
+/**
+ * Engaged talks so far. Rumours and story lines stored under a cat don't
+ * count; entries without a kind are legacy talks.
+ */
+function talkCount(req: DialogueRequest): number {
+  return req.conversationHistory.filter((entry) => (entry.kind ?? "talk") === "talk").length;
 }
 
-/** Conversation count for return-dialogue branching. */
-function talkCount(req: DialogueRequest): number {
-  return req.conversationHistory.length;
+/** True when this is the speaker's first-ever conversation. */
+function isFirstMeeting(req: DialogueRequest): boolean {
+  return talkCount(req) === 0;
 }
 
 // ── Blacky ──────────────────────────────────────────────────────────

@@ -7,19 +7,23 @@ import { StoryKeys } from "../registry/storyKeys";
 import { GP, CAMILLE_BEAT5_DECISION_MS } from "../config/gameplayConstants";
 import { AI_PERSONAS } from "../ai/personas";
 import { FallbackDialogueService } from "../services/FallbackDialogueService";
-import type { ConversationEntry, DialogueRequest } from "../services/DialogueService";
-import { calculateRelationshipStage } from "../services/DialogueRelationship";
-import { getConversationCount, getRecentConversations, storeConversation } from "../services/ConversationStore";
+import type { DialogueRequest, DialogueResponse } from "../services/DialogueService";
+import { loadNpcContext } from "../services/NpcContext";
 import { buildCamilleEraCareRoutes, canAdoptAmbientCareGroup } from "../utils/camilleCareRoute";
 import {
   CAMILLE_ENCOUNTER_BEATS,
+  CAMILLE_ENCOUNTER_MEMORY,
   CAMILLE_ENCOUNTER_5_PREDECISION_STEPS,
   CAMILLE_ENCOUNTER_5_JOURNEY_STEPS,
   CAMILLE_BEAT5_ACCEPT_LINE,
   CAMILLE_BEAT5_TIMEOUT_LINE,
+  beatSpokenSlots,
   mergeCamilleBeatSteps,
   type EncounterStep,
 } from "../data/camille-encounter-beats";
+
+/** What the AI added to a beat: Camille's spoken lines and, optionally, her impression of Mamma Cat. */
+type EncounterReply = Pick<DialogueResponse, "lines" | "memoryNote">;
 
 /**
  * Owns the entire Chapter-5 Camille encounter flow: ambient care-route
@@ -55,8 +59,8 @@ import {
  *   - Beat-5 cleanup on shutdown: input frozen flag released, body
  *     enabled, alpha + visibility restored on the player so the next
  *     scene start is playable.
- *   - Conversation history persists the *rendered* merged lines, not
- *     the raw AI payload (WORKING_MEMORY 5.1a lesson).
+ *   - Conversation history persists the spoken lines whose bubble
+ *     actually rendered, not the raw AI payload (WORKING_MEMORY 5.1a lesson).
  */
 
 /**
@@ -92,13 +96,16 @@ export class CamilleEncounterSystem {
   private beat5PickupDialogueActive = false;
   private beat5DecisionTimer: Phaser.Time.TimerEvent | null = null;
   private kishSlowDownShown = false;
+  /** The 8–12 s wait between reaching Camille and her beat (see {@link scheduleEncounterDialogue}). */
+  private beatDelay: Phaser.Time.TimerEvent | null = null;
   /**
    * Cancellation token for the in-flight `requestEncounterLines` LLM call.
    * Mirrors `CatDialogueController.requestAbort` /
-   * `HumanPresenceSystem.humanAiBubbleAbort`. Aborted from
-   * {@link shutdownCamilleState}; the `runEncounterBeat` orchestrator
-   * checks `signal.aborted` before calling `playPairedBeat` so an
-   * orphaned `.then` cannot render dialogue on a torn-down scene.
+   * `HumanPresenceSystem.humanAiBubbleAbort`. Aborted by
+   * {@link cancelStagedBeat} on shutdown and teardown; the
+   * `runEncounterBeat` orchestrator checks `signal.aborted` before calling
+   * `playPairedBeat` so an orphaned `.then` cannot render dialogue on a
+   * torn-down scene.
    */
   private encounterRequestAbort: AbortController | null = null;
 
@@ -117,7 +124,7 @@ export class CamilleEncounterSystem {
     Tiger: ["Tiger, not hissing today?", "Hi, Tiger.", "Easy, Tiger."],
     Jayco: ["Jayco. Good to see you.", "Hey, Jayco."],
     "Jayco Jr": ["Hey, little one.", "Jayco Jr — you're getting big."],
-    Fluffy: ["Fluffy. How's the fountain?", "Hi, Fluffy."],
+    Fluffy: ["Fluffy. Waiting for Manu?", "Hi, Fluffy."],
     Pedigree: ["Well, look at you.", "Hello, beautiful."],
     Ginger: ["Ginger. Hey, sweetie.", "Hi, Ginger."],
     "Ginger B": ["There you are, Ginger B.", "Hey, you."],
@@ -152,6 +159,18 @@ export class CamilleEncounterSystem {
     return this.pendingEncounter;
   }
 
+  /**
+   * Camille's group keeps its ambient greetings back while a beat is staged
+   * (its delay or its AI request), so nothing talks over the beat's opening.
+   * Greetings to Mamma Cat wait from the moment the beat is armed: one on her
+   * approach would land seconds before the beat and pre-empt its first line.
+   */
+  holdsGreetingFrom(human: HumanNPC, toMammaCat: boolean): boolean {
+    const held =
+      this.beatDelay !== null || this.encounterRequestAbort !== null || (toMammaCat && this.pendingEncounter !== 0);
+    return held && (human === this.camilleNPC || human === this.manuNPC || human === this.kishNPC);
+  }
+
   /** Accessed by {@link GameScene.pickScriptedGreeting}; stays owned here. */
   getPersonalLineForNamedCat(catName: string): string | null {
     const lines = this.personalLines[catName];
@@ -182,6 +201,7 @@ export class CamilleEncounterSystem {
       this.beat5DecisionTimer.remove(false);
       this.beat5DecisionTimer = null;
     }
+    this.cancelStagedBeat();
     this.kishSlowDownShown = false;
   }
 
@@ -328,6 +348,7 @@ export class CamilleEncounterSystem {
   flushTeardown(): void {
     if (!this.eraTeardownPending) return;
     this.eraTeardownPending = false;
+    this.cancelStagedBeat();
     this.eraParkExitCount = 0;
     this.eraParkExitTarget = 1;
     for (const npc of [this.camilleNPC, this.manuNPC, this.kishNPC]) {
@@ -356,8 +377,22 @@ export class CamilleEncounterSystem {
     this.kishSlowDownShown = true;
     // Consolidated into the ambient-bubble channel so all human-spoken
     // dialogue uses the same visual surface as greetings and encounter beats.
-    this.scene.humans.renderGreetingBubble(this.camilleNPC, "Kish, slow down.");
-    this.scene.emotes.show(this.scene, this.camilleNPC, "curious");
+    const camille = this.camilleNPC;
+    this.scene.humans.renderGreetingBubble(camille, "Kish, slow down.");
+    this.scene.emotes.show(this.scene, camille, "curious");
+    // Camille only remembers it if Mamma Cat was there to see it.
+    const { player } = this.scene;
+    if (
+      Phaser.Math.Distance.Between(player.x, player.y, camille.x, camille.y) <= GP.NARRATION_WITNESS_DIST &&
+      this.scene.hasLineOfSight(player.x, player.y, camille.x, camille.y)
+    ) {
+      this.scene.humans.recordHumanLines(
+        "Camille",
+        "story",
+        ["Kish, slow down."],
+        "Kish ran ahead near Mamma Cat and Camille called her back.",
+      );
+    }
   }
 
   /**
@@ -438,10 +473,7 @@ export class CamilleEncounterSystem {
     // aborted` guards, so `playPairedBeat` / `scene.dialogue.show` never
     // runs against a torn-down scene. Matches the sibling shutdowns in
     // `HumanPresenceSystem` and `CatDialogueController`.
-    if (this.encounterRequestAbort) {
-      this.encounterRequestAbort.abort();
-      this.encounterRequestAbort = null;
-    }
+    this.cancelStagedBeat();
 
     const scene = this.scene;
     if (scene.player) {
@@ -567,6 +599,7 @@ export class CamilleEncounterSystem {
     this.eraParkExitCount = 0;
     this.eraParkExitTarget = 1;
     this.kishSlowDownShown = false;
+    this.cancelStagedBeat();
     this.cancelBeat5Decision();
     this.beat5DecisionActive = false;
     this.beat5PickupDialogueActive = false;
@@ -583,35 +616,44 @@ export class CamilleEncounterSystem {
   }
 
   /**
-   * Delayed Camille beat: re-check proximity + LOS before dialogue (Phase 4.5).
-   * If conditions fail, re-arm {@link pendingEncounter} for the next 5s poll.
+   * Delayed Camille beat: re-check the witness gate before dialogue (Phase 4.5).
+   * If it fails, re-arm {@link pendingEncounter} for the next 5s poll.
    */
   private scheduleEncounterDialogue(delayMs: number, encounterNum: number, run: () => void): void {
-    this.scene.time.delayedCall(delayMs, () => {
-      if (!this.camilleNPC?.active) {
-        this.pendingEncounter = encounterNum;
-        return;
-      }
-      const dist = Phaser.Math.Distance.Between(
-        this.scene.player.x,
-        this.scene.player.y,
-        this.camilleNPC.x,
-        this.camilleNPC.y,
-      );
-      if (dist > GP.CAMILLE_ENCOUNTER_DIST) {
-        this.pendingEncounter = encounterNum;
-        return;
-      }
-      if (!this.scene.hasLineOfSight(this.scene.player.x, this.scene.player.y, this.camilleNPC.x, this.camilleNPC.y)) {
-        this.pendingEncounter = encounterNum;
-        return;
-      }
-      if (this.scene.dialogue.isActive) {
+    this.beatDelay = this.scene.time.delayedCall(delayMs, () => {
+      this.beatDelay = null;
+      if (!this.canRunBeatNow()) {
         this.pendingEncounter = encounterNum;
         return;
       }
       run();
     });
+  }
+
+  /**
+   * Phase 4.5 witness gate, checked where a beat is about to show (after its
+   * delay, and again after its AI request): Camille is still here and in
+   * sight, it is still evening, and nothing else holds the screen.
+   */
+  private canRunBeatNow(): boolean {
+    const scene = this.scene;
+    const camille = this.camilleNPC;
+    if (!camille?.active || !camille.visible || camille.isExitingPark) return false;
+    if (scene.dayNight.currentPhase !== "evening") return false;
+    if (scene.dialogue.isActive || scene.playerInputFrozen || scene.isPaused) return false;
+    const { x, y } = scene.player;
+    return (
+      Phaser.Math.Distance.Between(x, y, camille.x, camille.y) <= GP.CAMILLE_ENCOUNTER_DIST &&
+      scene.hasLineOfSight(x, y, camille.x, camille.y)
+    );
+  }
+
+  /** Drop a beat still waiting on its delay or its AI request. */
+  private cancelStagedBeat(): void {
+    this.beatDelay?.remove(false);
+    this.beatDelay = null;
+    this.encounterRequestAbort?.abort();
+    this.encounterRequestAbort = null;
   }
 
   private playEncounterNarrative(encounterNum: number): void {
@@ -645,7 +687,7 @@ export class CamilleEncounterSystem {
         this.scheduleEncounterDialogue(12000, 5, () => {
           this.scene.registry.set(StoryKeys.CAMILLE_ENCOUNTER, encounterNum);
           this.scene.registry.set(StoryKeys.CAMILLE_ENCOUNTER_DAY, this.scene.dayNight.dayCount);
-          this.playBeat5Predecision(hud);
+          this.playBeat5Predecision();
         });
         break;
     }
@@ -655,6 +697,13 @@ export class CamilleEncounterSystem {
    * Drive a paired narrator+spoken sequence. See the extensive docstring
    * on the pre-refactor `GameScene.playPairedBeat` for the pause-lifecycle
    * contract; unchanged here.
+   *
+   * Returns false, pausing nobody, when another modal is already open
+   * (`DialogueSystem.show` would silently drop this one and strand the
+   * pause); the caller re-arms.
+   *
+   * `onComplete(spokenShown)` runs on natural completion with the spoken
+   * lines whose bubble actually rendered (what Mamma Cat saw Camille say).
    *
    * `opts.completeOnDismiss` — when true, an early dismiss (player closes
    * the modal before the final line) still fires the caller's onComplete
@@ -672,23 +721,25 @@ export class CamilleEncounterSystem {
    * final line AND `completeOnDismiss` is not set. Runs after the pause
    * release so callers can re-arm retry state (e.g. `runEncounterBeat`
    * puts `pendingEncounter` back so the player can re-approach Camille
-   * and retry within the same evening). Mutually exclusive with
-   * `completeOnDismiss` in the current codebase.
+   * and retry within the same evening). Never fires on natural
+   * completion. Mutually exclusive with `completeOnDismiss` in the
+   * current codebase.
    */
   private playPairedBeat(
     steps: ReadonlyArray<EncounterStep>,
     speaker: HumanNPC | null,
-    onComplete: () => void,
+    onComplete: (spokenShown: string[]) => void,
     opts?: {
       onStepShown?: (index: number) => void;
       completeOnDismiss?: boolean;
       onDismiss?: () => void;
     },
-  ): void {
+  ): boolean {
     if (steps.length === 0) {
-      onComplete();
-      return;
+      onComplete([]);
+      return true;
     }
+    if (this.scene.dialogue.isActive) return false;
 
     if (speaker) {
       speaker.pauseForEncounter(this.scene.player.x);
@@ -696,12 +747,13 @@ export class CamilleEncounterSystem {
     const isCamilleBeat = speaker !== null && speaker === this.camilleNPC;
     if (isCamilleBeat) {
       this.pauseEraHumans(this.scene.player.x);
+      // A pending ambient line would land on top of the beat's bubble.
+      this.scene.humans.abortAmbientAi();
     }
 
     const narratorLines = steps.map((s) => s.narrator);
-    const dialogueOpenBefore = this.scene.dialogue.isActive;
+    const spokenShown: string[] = [];
     let currentBubble: Phaser.GameObjects.Text | null = null;
-    let completed = false;
     const clearBubble = (): void => {
       if (currentBubble) {
         currentBubble.destroy();
@@ -711,29 +763,21 @@ export class CamilleEncounterSystem {
 
     this.scene.dialogue.show(
       narratorLines,
-      () => {
-        // Idempotency guard: when `completeOnDismiss` is set, onHide runs
-        // onComplete synchronously and then this doneHook still fires from
-        // DialogueSystem.advance() (captured before hide()). Short-circuit
-        // the second invocation so story-critical callbacks never double-
-        // fire Chapter 6 / autoSave / registry writes.
-        if (completed) return;
-        completed = true;
-        clearBubble();
-        onComplete();
-      },
+      () => onComplete(spokenShown),
       {
         onLineShown: (index: number): void => {
           clearBubble();
           const step = steps[index];
           if (step?.spoken && speaker && speaker.active && speaker.visible) {
             currentBubble = this.scene.humans.renderHumanBubble(speaker, step.spoken, { persistent: true });
+            spokenShown.push(step.spoken);
           }
           opts?.onStepShown?.(index);
         },
-        onHide: (): void => {
+        onHide: (completed): void => {
           clearBubble();
           if (opts?.completeOnDismiss) this.beat5PickupDialogueActive = false;
+          // Natural completion: onComplete runs next and owns the resume.
           if (completed) return;
           if (isCamilleBeat) {
             this.resumeEraHumans();
@@ -742,11 +786,8 @@ export class CamilleEncounterSystem {
           }
           // Beat-5 journey opts into completion-on-dismiss so the player
           // can't soft-lock the scene by closing the modal mid-pickup.
-          // The idempotency guard above ensures the doneHook captured in
-          // DialogueSystem.advance() becomes a no-op afterwards.
           if (opts?.completeOnDismiss) {
-            completed = true;
-            onComplete();
+            onComplete(spokenShown);
           } else {
             // Caller-owned dismiss hook (e.g. runEncounterBeat re-arms
             // `pendingEncounter`). Mutually exclusive with
@@ -756,9 +797,8 @@ export class CamilleEncounterSystem {
         },
       },
     );
-    if (opts?.completeOnDismiss && !dialogueOpenBefore && this.scene.dialogue.isActive) {
-      this.beat5PickupDialogueActive = true;
-    }
+    if (opts?.completeOnDismiss) this.beat5PickupDialogueActive = true;
+    return true;
   }
 
   /**
@@ -769,19 +809,18 @@ export class CamilleEncounterSystem {
    * rendered spoken lines are all written only when the beat reaches
    * natural completion (player reads through all lines and `onComplete`
    * fires). An early dismiss, a caller-initiated abort (scene shutdown),
-   * or an AI request failure that fails before rendering leaves both the
-   * registry AND the conversation history unchanged, so the encounter is
-   * retriable on the next eligible evening and the AI's memory of
-   * previous Camille turns stays truthful (persisting lines Mamma Cat
-   * never actually heard would poison subsequent dialogue). Within the
-   * SAME evening, re-entry is still blocked by the existing
-   * `encounterActive` (set in `startEncounter`) + `rollDay` (set in
-   * `checkEncounter`) gates, so the design intent of "pause/resume
-   * cannot re-trigger the beat" is preserved without needing to advance
-   * the registry up-front. On dismiss the orchestrator re-arms
-   * `pendingEncounter = n` via the `onDismiss` hook on `playPairedBeat`,
-   * so the player can re-approach Camille and retry within the same
-   * evening after the scheduled 8–10 s delay.
+   * or a witness gate that fails once the AI reply arrives leaves both
+   * the registry AND the conversation history unchanged, so the
+   * encounter is retriable, and the AI's memory of previous Camille
+   * turns stays truthful (persisting lines Mamma Cat never actually heard
+   * would poison subsequent dialogue). Within the SAME evening, re-entry
+   * is still blocked by the existing `encounterActive` (set in
+   * `startEncounter`) + `rollDay` (set in `checkEncounter`) gates, so the
+   * design intent of "pause/resume cannot re-trigger the beat" is
+   * preserved without needing to advance the registry up-front. On
+   * dismiss or a failed gate the orchestrator re-arms
+   * `pendingEncounter = n`, so the player can re-approach Camille and
+   * retry within the same evening after the scheduled 8–10 s delay.
    */
   private runEncounterBeat(n: 2 | 3 | 4, hud: HUDScene | undefined): void {
     const scene = this.scene;
@@ -789,20 +828,11 @@ export class CamilleEncounterSystem {
 
     const beat = this.beats[n];
 
-    const runBeatWith = (spokenOverrides: string[] | null): void => {
-      const { steps, spokenRendered } = mergeCamilleBeatSteps(beat.steps, spokenOverrides);
-      // `onComplete` is declared inside `runBeatWith` so it can close over
-      // the per-run `spokenRendered` — we persist the conversation history
-      // (and all other saved-progress side effects) only on natural
-      // completion of the rendered beat, never on early dismiss / abort.
-      // The conversation store is the AI's memory for future Camille
-      // turns; writing lines Mamma Cat didn't actually hear would poison
-      // subsequent dialogue ("as I was saying yesterday…" about a beat
-      // the player never finished).
-      const onComplete = (): void => {
-        // Advance saved progress only on successful completion of the
-        // rendered beat. See the docstring on this method for the
-        // rationale and the retry-on-dismiss/abort contract.
+    const runBeatWith = (reply: EncounterReply | null): void => {
+      const { steps } = mergeCamilleBeatSteps(beat.steps, reply?.lines ?? null);
+      // Saved-progress side effects run only on natural completion of the
+      // rendered beat, never on early dismiss / abort (see docstring).
+      const onComplete = (spokenShown: string[]): void => {
         scene.registry.set(StoryKeys.CAMILLE_ENCOUNTER, n);
         scene.registry.set(StoryKeys.CAMILLE_ENCOUNTER_DAY, scene.dayNight.dayCount);
         scene.humans.recordHumanEngagement();
@@ -829,55 +859,48 @@ export class CamilleEncounterSystem {
         // follow-up phase without a one-frame "resume then re-pause"
         // flicker.
         this.resumeEraHumans();
-        // Persist the rendered spoken lines so the conversation store's
-        // record matches what Mamma Cat actually witnessed. Fire-and-
-        // forget: best-effort IndexedDB write, failures are swallowed
-        // inside `persistBeatHistory`.
-        if (spokenRendered.length > 0) {
-          void this.persistBeatHistory(n, spokenRendered);
+        // Camille remembers what Mamma Cat saw her say, with the authored
+        // fact of the encounter as Mamma Cat's side.
+        if (spokenShown.length > 0) {
+          scene.humans.recordHumanLines("Camille", "story", spokenShown, CAMILLE_ENCOUNTER_MEMORY[n], reply?.memoryNote);
         }
       };
 
-      this.playPairedBeat(steps, this.camilleNPC, onComplete, {
-        // Early dismiss → re-arm so the player can re-approach Camille
-        // and retry within the same evening. `checkProximity` consumed
-        // `pendingEncounter` when this beat fired; putting it back
-        // un-consumes that edge. Next evening's retry is separately
-        // covered by leaving `CAMILLE_ENCOUNTER_DAY` unchanged above.
+      // Early dismiss (or a modal that got there first) → re-arm so the
+      // player can re-approach Camille and retry within the same evening.
+      // `checkProximity` consumed `pendingEncounter` when this beat fired;
+      // putting it back un-consumes that edge. Next evening's retry is
+      // separately covered by leaving `CAMILLE_ENCOUNTER_DAY` unchanged.
+      const opened = this.playPairedBeat(steps, this.camilleNPC, onComplete, {
         onDismiss: () => {
           this.pendingEncounter = n;
         },
       });
+      if (!opened) this.pendingEncounter = n;
     };
 
     // Abort + signal-check pattern required for every LLM caller — see the
     // WORKING_MEMORY "In-flight LLM requests carry an AbortController"
     // lesson. If the scene tears down (e.g. snatcher capture during a
-    // Camille beat) while the LLM call is in flight, aborting here both
-    // cancels the fetch AND prevents the orphaned `.then`/`.catch`
+    // Camille beat) or Camille's group is torn down while the LLM call is
+    // in flight, aborting both cancels the fetch AND prevents the orphaned
     // continuation from calling `runBeatWith` → `playPairedBeat` →
-    // `scene.dialogue.show` against a destroyed scene. On abort we also
-    // re-arm `pendingEncounter` so a non-shutdown caller (hypothetical
-    // future mid-session reset) can retry via `checkProximity`; during
-    // a real shutdown this gets cleared again by `cleanupNPCs`, which
-    // makes the re-arm a safe no-op.
+    // `scene.dialogue.show` against a destroyed scene. Teardown resets the
+    // encounter itself, so an aborted beat is not re-armed.
     const abort = new AbortController();
     this.encounterRequestAbort = abort;
+    const proceed = (reply: EncounterReply | null): void => {
+      if (abort.signal.aborted) return;
+      // The reply took seconds: Camille may have walked off, the evening
+      // ended, or another modal opened meanwhile.
+      if (!this.canRunBeatNow()) {
+        this.pendingEncounter = n;
+        return;
+      }
+      runBeatWith(reply);
+    };
     void this.requestEncounterLines(n, beat.objective, abort.signal)
-      .then((lines) => {
-        if (abort.signal.aborted) {
-          this.pendingEncounter = n;
-          return;
-        }
-        runBeatWith(lines);
-      })
-      .catch(() => {
-        if (abort.signal.aborted) {
-          this.pendingEncounter = n;
-          return;
-        }
-        runBeatWith(null);
-      })
+      .then(proceed, () => proceed(null))
       .finally(() => {
         if (this.encounterRequestAbort === abort) {
           this.encounterRequestAbort = null;
@@ -885,45 +908,35 @@ export class CamilleEncounterSystem {
       });
   }
 
-  /**
-   * Persist the spoken lines Camille was actually seen saying during a
-   * middle beat (2/3/4). Stored record matches what the player saw — not
-   * the raw AI payload, which may be reshaped by the merge.
-   */
-  private async persistBeatHistory(n: 2 | 3 | 4, spokenRendered: string[]): Promise<void> {
-    try {
-      const snapshotTrust = this.scene.trust.global;
-      await storeConversation({
-        speaker: "Camille",
-        timestamp: this.scene.dayNight.totalGameTimeMs,
-        realTimestamp: Date.now(),
-        gameDay: this.scene.dayNight.dayCount,
-        lines: spokenRendered,
-        trustBefore: snapshotTrust,
-        trustAfter: snapshotTrust,
-        chapter: this.scene.chapters.chapter,
-        playerAction: `camille_encounter_${n}`,
-        gameStateSnapshot: {
-          trustWithSpeaker: snapshotTrust,
-          trustGlobal: this.scene.trust.global,
-          timeOfDay: this.scene.dayNight.currentPhase,
-          hunger: this.scene.stats.hunger,
-          thirst: this.scene.stats.thirst,
-          energy: this.scene.stats.energy,
-        },
-      });
-    } catch {
-      // Best-effort persistence; deliberately silent.
-    }
-  }
-
   // ──────────── Beat 5 (three-phase decision gate) ────────────
 
-  /** Phase A: Camille asks. Holds the encounter pause through onComplete. */
-  private playBeat5Predecision(hud: HUDScene | undefined): void {
-    void hud;
+  /**
+   * Phase A: Camille asks. Holds the encounter pause through onComplete.
+   * An early close re-arms the beat (the registry is already at 5).
+   */
+  private playBeat5Predecision(): void {
     this.camilleNPC?.playCrouchToward(this.scene.player.x);
-    this.playPairedBeat(this.beat5PredecisionSteps, this.camilleNPC, () => this.beginBeat5Decision());
+    const opened = this.playPairedBeat(
+      this.beat5PredecisionSteps,
+      this.camilleNPC,
+      (spokenShown) => {
+        if (spokenShown.length > 0) {
+          this.scene.humans.recordHumanLines(
+            "Camille",
+            "story",
+            spokenShown,
+            "Camille crouched and asked Mamma Cat to come home with her.",
+          );
+        }
+        this.beginBeat5Decision();
+      },
+      {
+        onDismiss: () => {
+          this.pendingEncounter = 5;
+        },
+      },
+    );
+    if (!opened) this.pendingEncounter = 5;
   }
 
   /**
@@ -959,6 +972,9 @@ export class CamilleEncounterSystem {
   private acceptBeat5(): void {
     this.beat5DecisionActive = false;
     this.cancelBeat5Decision();
+    // Freeze now, not at the journey: a cat chat or the letter opened in
+    // the next 3.2 s would hold the screen the journey needs.
+    this.scene.playerInputFrozen = true;
     this.scene.player.startGreeting();
     this.scene.humans.recordHumanEngagement();
     if (this.camilleNPC) {
@@ -974,6 +990,12 @@ export class CamilleEncounterSystem {
     const bubble = this.scene.humans.renderHumanBubble(speaker, CAMILLE_BEAT5_ACCEPT_LINE, {
       persistent: true,
     });
+    this.scene.humans.recordHumanLines(
+      "Camille",
+      "story",
+      [CAMILLE_BEAT5_ACCEPT_LINE],
+      "Mamma Cat came to Camille's feet. She said yes.",
+    );
     this.scene.time.delayedCall(3200, () => {
       bubble?.destroy();
       this.playBeat5Journey();
@@ -989,6 +1011,12 @@ export class CamilleEncounterSystem {
       const bubble = this.scene.humans.renderHumanBubble(speaker, CAMILLE_BEAT5_TIMEOUT_LINE, {
         persistent: true,
       });
+      this.scene.humans.recordHumanLines(
+        "Camille",
+        "story",
+        [CAMILLE_BEAT5_TIMEOUT_LINE],
+        "Camille waited, but Mamma Cat did not come to her.",
+      );
       this.scene.time.delayedCall(2600, () => bubble?.destroy());
     }
     this.resumeEraHumans();
@@ -1002,10 +1030,18 @@ export class CamilleEncounterSystem {
    * we kick off the pickup tween so "The garden shrinks behind you" is
    * perfectly synchronised with Mamma Cat being lifted into the carrier
    * and Camille walking toward the underpass exit.
+   *
+   * Input is already frozen from the accept, but a modal that opened just
+   * before (a cat reply in flight, a guard's tale) would swallow the
+   * journey's; it waits for that one to close instead.
    */
   private playBeat5Journey(): void {
     this.scene.playerInputFrozen = true;
     this.scene.player.setVelocity(0);
+    if (this.scene.dialogue.isActive) {
+      this.scene.time.delayedCall(250, () => this.playBeat5Journey());
+      return;
+    }
     this.playPairedBeat(
       this.beat5JourneySteps,
       this.camilleNPC,
@@ -1086,21 +1122,26 @@ export class CamilleEncounterSystem {
 
   /**
    * Ask Camille's AI persona for beat-appropriate spoken lines. Returns
-   * the trimmed lines on success, or `null` on any failure (the caller
-   * then substitutes authored fallback text without error propagation).
+   * the trimmed lines (and any impression of Mamma Cat) on success, or
+   * `null` on any failure (the caller then substitutes authored fallback
+   * text without error propagation).
    *
-   * Intentionally SIDE-EFFECT-FREE — conversation persistence happens
-   * in {@link persistBeatHistory} after the caller has merged the AI
-   * lines with the authored beat so the stored record reflects what
-   * Camille actually said on screen.
+   * Intentionally SIDE-EFFECT-FREE — conversation persistence happens in
+   * the beat's `onComplete`, after the caller has merged the AI lines
+   * with the authored beat, so the stored record reflects what Camille
+   * actually said on screen.
    *
    * `signal` — caller's abort signal, forwarded to the LLM service so a
    * scene shutdown / system reset cancels the in-flight fetch. Internal
    * awaits don't need explicit `.aborted` checks because this function
    * is side-effect-free; the orchestrator in `runEncounterBeat` guards
-   * the `.then`/`.catch` boundary where state mutation actually happens.
+   * the continuation where state mutation actually happens.
    */
-  private async requestEncounterLines(n: 2 | 3 | 4, objective: string, signal?: AbortSignal): Promise<string[] | null> {
+  private async requestEncounterLines(
+    n: 2 | 3 | 4,
+    objective: string,
+    signal?: AbortSignal,
+  ): Promise<EncounterReply | null> {
     const scene = this.scene;
     if (!(scene.dialogueService instanceof FallbackDialogueService)) {
       return null;
@@ -1108,40 +1149,13 @@ export class CamilleEncounterSystem {
     if (!("Camille" in AI_PERSONAS)) return null;
 
     try {
-      const history = await getRecentConversations("Camille", 10);
-      const conversationHistory: ConversationEntry[] = history.map((r) => ({
-        timestamp: r.timestamp,
-        speaker: r.speaker,
-        mammaCatTurn: r.mammaCatTurn,
-        text: r.lines.join(" "),
-      }));
-      const conversationCount = await getConversationCount("Camille");
-      const isFirstConversation = conversationCount === 0;
-
+      const context = await loadNpcContext("Camille", {
+        timestamp: scene.dayNight.totalGameTimeMs,
+        gameDay: scene.dayNight.dayCount,
+      });
       const request: DialogueRequest = {
-        speaker: "Camille",
-        speakerType: "human",
-        target: "Mamma Cat",
-        gameState: {
-          chapter: scene.chapters.chapter,
-          timeOfDay: scene.dayNight.currentPhase,
-          trustGlobal: scene.trust.global,
-          trustWithSpeaker: scene.trust.global,
-          hunger: scene.stats.hunger,
-          thirst: scene.stats.thirst,
-          energy: scene.stats.energy,
-          daysSurvived: scene.dayNight.dayCount,
-          knownCats: Array.from(scene.knownCats),
-          recentEvents: [],
-        },
-        conversationHistory,
-        isFirstConversation,
-        relationshipStage: calculateRelationshipStage({
-          isFirstConversation,
-          conversationCount,
-          trustWithSpeaker: scene.trust.global,
-        }),
-        encounterBeat: { kind: "camille_encounter", n, objective },
+        ...scene.humans.humanDialogueRequest("Camille", context, "beat"),
+        encounterBeat: { kind: "camille_encounter", n, objective, slots: beatSpokenSlots(this.beats[n].steps) },
       };
 
       const response = await scene.dialogueService.getDialogue(request, {
@@ -1152,7 +1166,7 @@ export class CamilleEncounterSystem {
       });
 
       const lines = response.lines.map((l) => l.trim()).filter((l) => l.length > 0);
-      return lines.length === 0 ? null : lines;
+      return lines.length === 0 ? null : { lines, memoryNote: response.memoryNote };
     } catch {
       return null;
     }

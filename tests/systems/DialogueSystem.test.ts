@@ -649,6 +649,30 @@ describe('DialogueSystem — onLineShown + onHide hooks', () => {
     expect(b).toHaveBeenCalledTimes(1)
   })
 
+  it('tells onHide whether the player read to the end (true) or the box closed early (false)', () => {
+    const { system: read, spaceKey } = buildDialogue()
+    const readHide = vi.fn()
+    read.show(['A', 'B'], undefined, { onHide: readHide })
+    spaceKey.emit('down')
+    spaceKey.emit('down')
+    expect(readHide).toHaveBeenCalledWith(true)
+
+    const { system: dismissed } = buildDialogue()
+    const dismissHide = vi.fn()
+    dismissed.show(['A'], undefined, { onHide: dismissHide })
+    dismissed.dismiss()
+    expect(dismissHide).toHaveBeenCalledWith(false)
+
+    // completeOnClose still runs onComplete, but the player did not read to the end
+    const { system: closed, closeBtn } = buildDialogue()
+    const closeHide = vi.fn()
+    const onComplete = vi.fn()
+    closed.show(['A', 'B'], onComplete, { onHide: closeHide, completeOnClose: true })
+    closeBtn.emit('pointerdown')
+    expect(closeHide).toHaveBeenCalledWith(false)
+    expect(onComplete).toHaveBeenCalledTimes(1)
+  })
+
   it('clears hooks between calls so a fresh show() is not cross-contaminated', () => {
     const firstHide = vi.fn()
     const secondHide = vi.fn()

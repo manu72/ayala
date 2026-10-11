@@ -162,7 +162,7 @@ Serves the `dist/` folder locally to verify the production build before deployin
 
 ## AI Dialogue Proxy
 
-Named colony cats use LLM-backed dialogue when a proxy URL is configured. The proxy (`proxy/`, a Cloudflare Worker) forwards `POST /api/ai/chat` to Deepseek (primary) or OpenAI (fallback) using **server-held API keys only** — no secret ever ships to the browser. Scripted dialogue (`src/data/cat-dialogue.ts`) remains the automatic fallback if the proxy is unreachable or the model returns malformed output.
+Named colony cats and named humans use LLM-backed dialogue when a proxy URL is configured. The proxy (`proxy/`, a Cloudflare Worker) forwards `POST /api/ai/chat` to DeepSeek (primary, `deepseek-flash` with thinking disabled) or OpenAI (fallback) using **server-held API keys only** — no secret ever ships to the browser. Scripted dialogue remains the automatic fallback if the proxy is unreachable, refuses the request, or the model returns malformed output.
 
 The client reads `VITE_AI_PROXY_URL` at build time. In dev it is a relative path (`/api/ai/chat`) proxied by Vite to `wrangler dev` — effectively same-origin. In production the value depends on how the static site is hosted: on Cloudflare Pages (or any zone that routes `/api/*` → this Worker) it can stay relative; on GitHub Pages it must be the absolute Worker URL, because `*.github.io` cannot route a path to a Worker.
 
@@ -175,10 +175,13 @@ The client reads `VITE_AI_PROXY_URL` at build time. In dev it is a relative path
    DEEPSEEK_API_KEY=sk-...
    OPENAI_API_KEY=sk-...
    # Optional overrides — defaults are fine locally:
-   # DEEPSEEK_MODEL=deepseek-chat
+   # DEEPSEEK_MODEL=deepseek-flash
    # OPENAI_MODEL=gpt-4.1-mini
    # ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+   # AI_DISABLED=1   # kill switch: every chat POST gets 503 ai_disabled
    ```
+
+   A `DEEPSEEK_MODEL` line in an existing `.dev.vars` overrides the `deepseek-flash` default under `wrangler dev`; delete it if it still says `deepseek-chat`.
 
 3. Install Worker deps once: `cd proxy && npm install`.
 
@@ -188,10 +191,17 @@ Without `VITE_AI_PROXY_URL`, the game runs scripted-only — identical to Phase 
 
 ```bash
 cd proxy
+npx wrangler deploy --dry-run   # must list AI_RATE_LIMIT_BURST and AI_RATE_LIMIT_MINUTE under "Rate Limit"
 npx wrangler deploy
 ```
 
+**Deploy the Worker before the client.** A push to `main` publishes the client to GitHub Pages; the Worker ships only with `wrangler deploy`. When a change makes the client send more (this client sends up to `PROMPT_CHAR_BUDGET` = 28,000 characters; Workers before it reject anything over 12,000), run `wrangler deploy` first and merge after. An older Worker answers the larger requests with 400 `messages exceed size limit`, which the client does not retry, so every speaker with a long stored history falls back to scripted lines until the Worker is deployed.
+
+The dry run is the only check that the rate-limit bindings ship: without them the Worker logs one warning and serves every request unlimited. `[[ratelimits]]` needs Wrangler 4.36+. The bindings don't show in the dashboard; watch for 429s in Workers Logs or `npx wrangler tail`.
+
 Set secrets via the Cloudflare dashboard or `wrangler secret put DEEPSEEK_API_KEY` / `wrangler secret put OPENAI_API_KEY`. Set `ALLOWED_ORIGINS` to the exact `Origin` values the browser will send (e.g. `https://yourname.github.io` for GitHub Pages) — anything else gets a 403.
+
+**Kill switch.** `npx wrangler secret put AI_DISABLED` with the value `1` makes every chat POST return 503 `ai_disabled`; the game stops calling for 5 minutes at a time and plays scripted lines. `npx wrangler secret delete AI_DISABLED` turns AI back on (any value other than `1` also leaves it on). Keep it a secret: a plain-text variable set in the dashboard is overwritten by the next `wrangler deploy`, because `wrangler.toml` does not set `keep_vars = true`.
 
 Pick one of the two hosting shapes below and configure `VITE_AI_PROXY_URL` accordingly. After each production build, run `npm run verify:dist` to confirm no secret patterns leaked into `dist/`.
 
@@ -201,58 +211,112 @@ Pick one of the two hosting shapes below and configure `VITE_AI_PROXY_URL` accor
 
 Symptom of a mis-set prod URL: the client logs `[AIDialogueService] Proxy returned HTML (404) instead of JSON — VITE_AI_PROXY_URL is likely misrouted` and drops to scripted dialogue. That warning means the POST hit the static host's 404 page, not the Worker.
 
+### What the Worker enforces
+
+Checks run in this order ([proxy/src/worker.ts](proxy/src/worker.ts)), so preflights, forbidden origins, unknown paths, wrong methods and kill-switch refusals never use up a rate-limit token.
+
+1. CORS preflight and `ALLOWED_ORIGINS` (bare 403 for other origins), then route (404) and method (405).
+2. Kill switch: `AI_DISABLED === "1"` → 503 `{"error":"ai_disabled","retryAfterSeconds":300}` + `Retry-After: 300`.
+3. Per-IP rate limit: `AI_RATE_LIMIT_BURST` (10 per 10 s) and `AI_RATE_LIMIT_MINUTE` (30 per 60 s), keyed on `CF-Connecting-IP` with IPv6 grouped by /64 → 429 `{"error":"rate_limited","retryAfterSeconds":30}` + `Retry-After: 30`. If the bindings are missing it warns once and lets requests through; if a limiter throws it logs the error and lets the request through.
+4. Raw body at most 65,536 bytes, else 413.
+5. Shape: exactly one system message and it comes first, the last message is from the user, at most 202 messages and 32,000 content characters, `max_tokens` at most 256. Anything else is a 400.
+6. Upstream call (15 s timeout → 504, other network failures → 502). DeepSeek requests carry `thinking: { type: "disabled" }`; OpenAI requests never do. Upstream errors come back with the provider's status and body.
+
+The Worker's own refusals carry a **string** `error`; upstream provider errors are forwarded with an **object** `error`. `AIDialogueService` relies on that split: on `rate_limited` / `ai_disabled` it throws `AIProxyThrottledError`, does not try the other provider, and makes no AI calls until `retryAfterSeconds` has passed (30 s / 300 s by default). It fails over to the secondary provider on 401, 429, 500, 502, 503 and 504, and on upstream 400 / 404 / 422 with an object `error` (for example a retired model name), but not on the Worker's own validation errors.
+
+### Settings the owner must change outside code
+
+Per-IP limits do not cap total spend: one IP at 30 requests a minute and 32k characters is an upper bound of roughly $120–160 a day, there are no accounts, and a caller can ask for `"provider": "openai"` directly. The real ceiling is the provider caps:
+
+- **OpenAI:** use a dedicated project; under Project settings → Limits set a monthly spend limit, enable "Enforce a hard limit", and add an alert below it. Enforcement is not instant.
+- **DeepSeek:** there is no budget cap, only a prepaid balance. Keep it small and turn off auto top-up. An empty balance returns 402, which the client does not fail over on (players get scripted lines).
+- **Optional Cloudflare WAF rate-limiting rule:** needs the Worker on a custom domain in a Cloudflare zone (e.g. `api.ayalacats.app`); WAF rules can't apply to `*.workers.dev`. Then set `workers_dev = false` and `preview_urls = false`, and update `VITE_AI_PROXY_URL` and `ALLOWED_ORIGINS`.
+- Confirm the Workers plan: the Free plan's 100k requests a day per account is a crude global ceiling.
+
 ## AI Prompts & Character Personalities
 
-The system prompt is **assembled per request** — it's not a static string. The persona files are the single source of truth for character; everything else (scene facts, output contract) is injected in code so the contract stays consistent across cats **and humans**.
+Every request is **assembled per call**: a system message that rarely changes (persona, rules, output contract, relationship, memories), the conversation history as chat turns, and one final user message describing the current scene. The persona files are the single source of truth for character; everything else is injected in code so the contract stays consistent across cats **and humans**.
 
 ### Where things live
 
-| Concern                                                      | File                                                                           | Notes                                                             |
-| ------------------------------------------------------------ | ------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
-| Prompt assembly (`buildSystemPrompt`, `buildMessages`)       | [src/services/AIDialogueService.ts](src/services/AIDialogueService.ts)         | One prompt per `getDialogue()` call; `max_tokens` 150             |
-| Persona markdown (one file per speaker, cats **and** humans) | [src/ai/personas/\*.md](src/ai/personas/)                                      | Source of truth for character — edit these to change voice        |
-| Persona → speaker map + tier table                           | [src/ai/personas/index.ts](src/ai/personas/index.ts)                           | `AI_PERSONAS` (canonical) + `CAT_PERSONAS` alias + `PERSONA_TIER` |
-| Scripted anchors (trust, story flags)                        | [src/data/cat-dialogue.ts](src/data/cat-dialogue.ts)                           | Authoritative `trustChange` + `event` — AI never controls these   |
-| Human encounter side-effects (Camille beats 1-5)             | [src/scenes/GameScene.ts](src/scenes/GameScene.ts) (`runCamilleEncounterBeat`) | Registry / chapter / stats side-effects — AI never controls these |
+| Concern                                                      | File                                                                                                | Notes                                                              |
+| ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| Prompt assembly (`buildSystemPrompt`, `buildMessages`)       | [src/services/AIDialogueService.ts](src/services/AIDialogueService.ts)                              | One request per `getDialogue()` call; `max_tokens` 220             |
+| Persona markdown (one file per speaker, cats **and** humans) | [src/ai/personas/\*.md](src/ai/personas/)                                                           | Source of truth for character — edit these to change voice         |
+| Persona → speaker map                                        | [src/ai/personas/index.ts](src/ai/personas/index.ts)                                                | `AI_PERSONAS` (canonical) + `CAT_PERSONAS` alias                   |
+| What an NPC knows, and the stored record shape               | [src/services/NpcContext.ts](src/services/NpcContext.ts)                                            | `loadNpcContext`, `toConversationEntry`, `buildConversationRecord` |
+| "Story so far" facts, human relationship stage               | [src/utils/npcStoryFacts.ts](src/utils/npcStoryFacts.ts)                                            | Read from the save-backed registry                                 |
+| Scripted anchors (trust, story flags)                        | [src/data/cat-dialogue.ts](src/data/cat-dialogue.ts)                                                | Authoritative `trustChange` + `event` — AI never controls these    |
+| Named humans' first / return lines                           | [src/data/human-dialogue.ts](src/data/human-dialogue.ts)                                            | Each plays once, before AI is asked                                |
+| Human encounter side-effects (Camille beats 1-5)             | [src/systems/CamilleEncounterSystem.ts](src/systems/CamilleEncounterSystem.ts) (`runEncounterBeat`) | Registry / chapter / stats side-effects — AI never controls these  |
 
 ### AI-backed speakers
 
-| Speaker                                                            | Type  | Tier          | Where AI fires                                 |
-| ------------------------------------------------------------------ | ----- | ------------- | ---------------------------------------------- |
-| Blacky, Tiger, Jayco, Fluffy, Pedigree, Ginger, Ginger B, Jayco Jr | cat   | tier1 / tier2 | Space-engaged dialogue                         |
-| Camille                                                            | human | tier1         | Ambient greeting bubbles + encounter beats 2-4 |
-| Manu, Kish                                                         | human | tier2         | Ambient greeting bubbles                       |
-| Rose, Ben (named feeders)                                          | human | tier2         | Ambient greeting bubbles while feeding         |
+| Speaker                                                            | Type  | Where AI fires                                 |
+| ------------------------------------------------------------------ | ----- | ---------------------------------------------- |
+| Blacky, Tiger, Jayco, Fluffy, Pedigree, Ginger, Ginger B, Jayco Jr | cat   | Space-engaged dialogue                         |
+| Camille                                                            | human | Ambient greeting bubbles + encounter beats 2-4 |
+| Manu, Kish                                                         | human | Ambient greeting bubbles                       |
+| Rose, Ben (named feeders)                                          | human | Ambient greeting bubbles while feeding         |
 
-Tier 1 personas get the full **20-turn** history window for richer continuity; Tier 2 personas get **10 turns** to keep prompts compact and cheap. The split is defined in `PERSONA_TIER` and applied in `buildMessages`.
+There is no fixed history window. Every stored exchange with the speaker goes in, oldest first, and `buildMessages` drops the oldest pairs only while the whole request (system message included) is over `PROMPT_CHAR_BUDGET` (28,000 characters; the Worker rejects anything over 32,000). When pairs are dropped, the oldest remaining turn starts with "(Earlier meetings are not shown.)".
 
-### System prompt structure
+### Prompt structure
 
-`buildSystemPrompt(personaMarkdown, request)` concatenates three or four blocks:
+**System message** — `buildSystemPrompt(personaMarkdown, request)`. Per-turn scene facts are kept out of it, so the system message plus history stays a cacheable prefix (DeepSeek caches prefixes automatically).
 
-1. **`## Current scene`** — live facts from `DialogueRequest.gameState`: speaker, species (`cat` or `human`), target, chapter, time of day, `trustWithSpeaker`, `trustGlobal`, Mamma Cat's hunger / thirst / energy, days survived, known cats, and optional `nearbyCat` for human speakers. Rebuilt every turn.
-2. **`## Story beat context`** — _optional_, only present when `DialogueRequest.encounterBeat` is set (Camille encounters 2-4). Tells the model which beat we are in and the emotional objective, with an explicit reminder that registry side-effects are owned by the game.
-3. **`## Your persona`** — full markdown for that speaker, inserted verbatim (trimmed) from `AI_PERSONAS[request.speaker]`.
-4. **`## Output format`** — the JSON contract (`lines`, `speakerPose`, `emote`, optional `narration`), a **species-specific** speech reminder ("cats use cat-speak" vs "humans speak plainly and briefly"), and a one-line example matching that species.
+1. `## Persona Identity` and `## Your Persona` — who is speaking, then the persona markdown verbatim.
+2. `## Conversational Style` — species-specific. Cats: natural plain English, never cat-speak; 1–3 lines of one short sentence, under ~90 characters each; Mamma Cat is a cat who never speaks words, so never claim she told you anything. Humans: speaking aloud to a cat who can't answer; plain speech, no baby-talk, under ~60 characters a line; no re-introductions once there is history; no claims of giving her anything unless the story beat says so.
+3. `## Conversation Principles` and `## Guardrails` — only reference events in the history, the story-so-far facts and the memory lists; never quote elapsed time or counts; never scold a repeat visit; never mention game mechanics.
+4. `## Output Format` — the JSON contract (`lines` 1–3, `speakerPose`, `emote`, optional `narration`, optional `memoryNote`) and an example line for the speaker's species.
+5. `## Relationship Context` — stage 1–4. Cats: `calculateRelationshipStage` (talk count, trust, memories). Humans: `humanRelationshipStage` — Camille by completed encounters, everyone else by the number of distinct game days in their records (0 → 1, 1–2 → 2, 3–5 → 3, 6+ → 4).
+6. `## First Conversation` (only when the caller passes `isFirstConversation: true`, never for an encounter beat) or `## Conversation Continuity`.
+7. Memories, split by source: `## What has happened between you (game record — true)` for scripted memories and `## Your own impressions of Mamma Cat (guesses; may be wrong …)` for the model's own notes, or "No durable memories are listed yet."
 
-Prior conversation turns are **not** in the system prompt. They go in as alternating `user` / `assistant` chat messages via `buildMessages()`, windowed per the speaker's tier (20 turns for Tier 1, 10 for Tier 2) from `ConversationStore` (IndexedDB, pruned to 100 per speaker).
+**Chat turns** — `buildMessages(request, systemPrompt)`. Each stored exchange becomes a user turn, `[Day N, phase]` plus a short game-authored sentence about Mamma Cat (e.g. `[Day 4, evening] Mamma Cat came over to talk. She was very hungry.`), and an assistant turn with what the speaker said. Then one **final user message**:
+
+- `## Current scene (facts — follow these)` — speaker, species, target, chapter, time of day, game day, trust toward Mamma Cat (**cats only**; humans have no per-human trust), Mamma Cat's condition in words (`describeMammaCatCondition`; raw stats are never sent), cats she knows by name, and `Story so far:` bullets from `gameState.recentEvents`.
+- `## Encounter context (game time only)` from `conversationRecency` (omitted on a first conversation).
+- `## Story beat context` for Camille beats 2–4: the objective, "Reply with exactly N line(s), in order", and the narrator text each line is said beside (`encounterBeat.slots`).
+- `## Final Instruction` — `[Day N, phase] Mamma Cat comes over to you / passes close by / is here with you.` from `request.interaction` (`talk` / `ambient` / `beat`). Ambient requests must answer with exactly one line under 60 characters.
+
+**Story-so-far facts** (`buildNpcStoryFacts`), so speakers only mention progress the save actually holds:
+
+| Speaker         | Facts                                                                                       |
+| --------------- | ------------------------------------------------------------------------------------------- |
+| Every named cat | "Mamma Cat has met Camille…" once encounter 1 has happened                                  |
+| Fluffy          | When Manu last came by (today / yesterday / N days ago)                                     |
+| Camille         | One line per completed encounter (`CAMILLE_ENCOUNTER_MEMORY`) and the day of the last one   |
+| Manu            | Has walked the evening rounds with Camille (encounter 2+); whether he has seen Fluffy today |
+| Kish            | Has come along on the evening rounds (encounter 3+)                                         |
+| Rose, Ben       | None                                                                                        |
 
 Per-request knobs live next to `getDialogue()`:
 
 - `temperature`: `0.6` for speakers in `HARSHER_TEMP_SPEAKERS` (tighter, colder), `0.8` for the rest.
-- `max_tokens`: `150` — keeps responses short and cheap.
-- `timeoutMs`: per-call override passed through to the upstream `AbortController`. Defaults to 8s for engaged cat dialogue; **1.5s** for human ambient bubbles and **5s** for Camille encounter beats. On 429/5xx the service retries once against the fallback provider before surfacing the error to `FallbackDialogueService`.
+- `max_tokens`: `220` (the Worker caps it at 256).
+- `timeoutMs`: one deadline for the whole call, both providers included: 8 s for engaged cat dialogue, 3.5 s for human ambient bubbles, 5 s for Camille beats 2–4. The secondary provider is tried at most once, on the failures listed under [What the Worker enforces](#what-the-worker-enforces), and skipped when less than 750 ms remain. Timeouts, caller aborts and proxy refusals never fail over.
+- `parseAIJson` rejects any line over 160 characters (the scripted fallback runs instead) and drops a `memoryNote` unless its kind is `identity`, `preference`, `trait` or `relationship`.
+
+### What NPCs remember
+
+`ConversationStore` (IndexedDB `ayala_conversations`) keeps two things per speaker:
+
+- **Conversation records**, the newest 100. `lines` is exactly what the player saw, never the raw AI payload, and `mammaCatTurn` is a short game-authored sentence about what Mamma Cat did. `kind` is `talk` (engaged cat dialogue, the only kind that advances a cat's scripts), `ambient` (a named human's bubble aimed at Mamma Cat) or `story` (rumours, egg lines, Jayco's offer of the steps, Camille's beats 2–5 and their outcome, "Kish, slow down.", the plush and balloon reactions). Rows from older builds have no `kind` and are read through `recordKind`.
+- **Memories**, at most 20. Scripted ones are milestones only (a cat's first meeting, Tiger warming up, Camille reading the letter); the rest are the model's `memoryNote` impressions, kept for cats and humans. Pruning drops legacy `_return` filler first, then the oldest AI impressions, then the oldest scripted memories.
+
+`loadNpcContext(speaker, now)` reads all of it. Scripted progression and "already played" checks use every record; the prompt sees only records that exist at the current game time (so a restored older save doesn't leak the abandoned timeline) and only memories formed by the current game day. A cat talk is stored once the player has seen its last line, even if they then close the box or walk off; closing before the last line stores nothing and awards nothing. Greetings a human aims at a nearby cat are not stored.
 
 ### Fallback rule (important)
 
-Every AI path has a scripted safety net. If the LLM is slow, unreachable, rate-limited, or returns malformed JSON:
+Every AI path has a scripted safety net. If the LLM is slow, unreachable, throttled by the proxy, or returns malformed JSON:
 
-- **Engaged cat dialogue** → `FallbackDialogueService` delivers the scripted line from `cat-dialogue.ts`.
-- **Human ambient bubbles** → render a scripted line from `catPersonGreetings` / `camillePersonalLines` (or the caller-forced line for first-meet Camille).
+- **Engaged cat dialogue** → an unplayed scripted line from `cat-dialogue.ts` always plays first, before AI is asked. If AI then fails and the matching script has already been shown, the cat gets a non-verbal placeholder for its pose (`*Blacky blinks slowly at you.*`, `*Tiger's ears flatten.*`, …) instead of a replay. The placeholder still applies that script's `event` and `trustChange` but is not stored as something the cat said.
+- **Human ambient bubbles** → an unplayed line from `human-dialogue.ts` plays first (`*_first` on a first meeting, `*_return` only once there is a record from an earlier game day); otherwise AI; on failure, a line from the human's scripted pool (`catPersonGreetings`).
 - **Camille encounter beats 2–4** → render the authored `steps[i].spoken` line for that step (narrator line is unchanged either way).
 - **Camille beats 1 and 5** → always authored, never LLM-sourced. Beat 1 is pure narrator POV; beat 5 is the chapter-6 handoff and must run byte-for-byte.
 
-No LLM response is allowed to mutate trust, registry keys, chapter state, or story flags. That split is enforced in `AIDialogueService.getDialogue()` (`trustChange` and `event` are always taken from `matchScriptedResponse`) and in `runCamilleEncounterBeat` (all registry / stats / emote side-effects live in `onComplete`, independent of dialogue source).
+No LLM response is allowed to mutate trust, registry keys, chapter state, or story flags. That split is enforced in `AIDialogueService.getDialogue()` (`trustChange` and `event` are always taken from `matchScriptedResponse`) and in `CamilleEncounterSystem.runEncounterBeat` (all registry / stats / emote side-effects live in `onComplete`, independent of dialogue source).
 
 ### What the persona markdown controls (and what it doesn't)
 
@@ -263,18 +327,19 @@ The persona drives **voice and behaviour only**. Game-state progression stays de
 | `lines` — what the speaker actually says                                    | `trustChange` — trust deltas applied to speaker and colony      |
 | `speakerPose` — friendly / wary / hostile / sleeping / curious / submissive | `event` — story flags, chapter progression, Camille triggers    |
 | `emote` — heart / alert / curious / sleep / hostile / danger                | HUD narration, stats restore, chapter-6 handoff (Camille beats) |
-| `narration` — optional body-language line                                   | —                                                               |
+| `narration` — optional body-language line                                   | Milestone memories and "Story so far" facts                     |
+| `memoryNote` — optional impression of Mamma Cat (never an event)            | —                                                               |
 
 ### Persona markdown format
 
 Every persona (cat or human) follows the same seven-section structure so prompts stay comparable:
 
 ```markdown
-# <Name>
+# <Name>  (the exact in-game name; the model says it out loud)
 
 ## Identity
 
-- Species (cat / human), age, appearance (one-line bullets)
+- Species (cat with sex / human), age, appearance, usual spot (one-line bullets)
 
 ## Backstory
 
@@ -286,23 +351,27 @@ Short paragraph — what do they remember, where do they usually sit/stand
 
 ## Speech Style
 
-- Length rules ("one sentence, two at most")
-- For cats: cat-speak examples ("Mrrp", "Prrp")
-- For humans: "no baby-talk, no cat-speak, speak plainly"
+- Length rules ("one sentence per line, two at most")
+- Plain English for everyone, no cat-speak; humans speak plainly, no baby-talk
+- Sample lines marked "tone only, never copy"
 
 ## Knowledge
 
-- What they know about the park, humans, threats, the colony
+- What they know about the park, humans, threats, and 2–3 named colony cats (keep each relationship consistent across both files)
+- Anything that depends on story progress is gated on the story facts ("names her only once the story facts say Mamma Cat has met her")
 
 ## Relationship to Mamma Cat
 
-- How they treat her at low vs high trust
+- She answers with meows and blinks, never words; never claim she told you anything
+- How they treat her at low vs high trust (cats) or as the history grows (humans)
 
 ## Rules of Engagement
 
-- When to approach / retreat
-- What warms them, what cools them
+- When to approach / retreat; what warms them, what cools them
+- Never repeat a tip or story already in the history
 ```
+
+[tests/ai/personaCanon.test.ts](tests/ai/personaCanon.test.ts) checks the title, the seven headings in order, a 2,400-character cap (the file is sent with every request for that speaker), the "meows and blinks, never words" line, and that no persona presumes an absence ("Haven't seen you in a while"): only the encounter context in the prompt may raise one. Key behaviour to the story facts and the conversation history, not to counts the model can't see.
 
 See [src/ai/personas/blacky.md](src/ai/personas/blacky.md) (cat) and [src/ai/personas/camille.md](src/ai/personas/camille.md) (human) as canonical examples.
 
@@ -320,12 +389,18 @@ This keeps all human-spoken dialogue in the same visual channel as ambient greet
 | 1 — First sighting              | Scripted (HUD narration)     | —                                                            | Pure interiority, no bubble                               |
 | 2 — Places a treat              | Scripted `steps[i].narrator` | AI (`encounterBeat.n = 2`) → falls back to `steps[i].spoken` | AI lines replace authored spoken positionally             |
 | 3 — Slow blink                  | Scripted `steps[i].narrator` | AI (`encounterBeat.n = 3`) → falls back to `steps[i].spoken` | Step 2 is narrator-only by design (Mamma Cat's memory)    |
-| 4 — First touch                 | Scripted `steps[i].narrator` | AI (`encounterBeat.n = 4`) → falls back to `steps[i].spoken` | Kish is loud nearby; Camille stays steady                 |
+| 4 — First touch                 | Scripted `steps[i].narrator` | AI (`encounterBeat.n = 4`) → falls back to `steps[i].spoken` | Objective doesn't mention Kish (she may be off-screen)    |
 | 5 — Carrier / chapter-6 handoff | Scripted `steps[i].narrator` | Scripted `steps[i].spoken`                                   | Never AI; Camille still gets a bubble for her asking line |
 
-The paired data lives in [src/data/camille-encounter-beats.ts](src/data/camille-encounter-beats.ts); `GameScene.playPairedBeat` drives the sequence using `DialogueSystem`'s `onLineShown` + `onHide` hooks to keep the modal and bubble in lockstep. Hooks tear down the persistent bubble on every exit path (completion, Space-past-end, backdrop click, close button).
+The paired data lives in [src/data/camille-encounter-beats.ts](src/data/camille-encounter-beats.ts); `CamilleEncounterSystem.playPairedBeat` drives the sequence using `DialogueSystem`'s `onLineShown` + `onHide(completed)` hooks to keep the modal and bubble in lockstep. Hooks tear down the persistent bubble on every exit path (completion, Space-past-end, backdrop click, close button).
 
-Tweak the `objective` field to change the LLM's emotional target for a beat; tweak `steps[i].spoken` to change the scripted fallback line that plays when the LLM is unavailable.
+- **AI request.** `encounterBeat.slots` (from `beatSpokenSlots`) carries the narrator text of each step that has a `spoken` line, so the model writes exactly one line per slot.
+- **Witness gate.** A beat plays only if `canRunBeatNow()` still holds after its 8–12 s delay and again when the AI reply arrives: Camille active, visible and not leaving, evening, within `CAMILLE_ENCOUNTER_DIST` with line of sight, no other dialogue open, input not frozen, game not paused. Otherwise it re-arms (`pendingEncounter = n`) and nothing is stored.
+- **Re-arm vs complete.** `playPairedBeat` refuses to open over another modal and the caller re-arms. Closing a beat before its last line re-arms it (beat-5's question included); reading to the end never does.
+- **Memory.** On completion, the spoken lines whose bubble actually rendered are stored under Camille as a `story` record, with `CAMILLE_ENCOUNTER_MEMORY[n]` as Mamma Cat's side. Beat 5's question, accept line and timeout line are stored the same way.
+- **Beat 5 accept.** Input freezes at the accept itself; the journey waits while another dialogue is open instead of being dropped.
+
+Tweak the `objective` field to change the LLM's emotional target for a beat (don't put a line count in it; the slot instruction sets that); tweak `steps[i].spoken` to change the scripted fallback line that plays when the LLM is unavailable.
 
 ### Human ambient bubbles (throttling)
 
@@ -333,10 +408,13 @@ When a cat person (Camille, Manu, Kish, Rose, Ben) gets within greet range of Ma
 
 - **Per-human cooldown:** 30s between AI-sourced bubbles for that specific human. During the cooldown, scripted bubbles still fire from the existing pools so the world does not fall silent.
 - **Global single-flight:** at most one AI ambient bubble may be in flight at any time across all humans. A second proximity event falls through to scripted.
-- **Tight budget:** 1.5s `timeoutMs` for the upstream call. Anything slower renders the scripted line.
-- **Abort on disappearance:** if the human becomes inactive mid-flight (walked off-screen, deactivated), the scripted path is skipped and nothing renders.
+- **Budget:** 3.5 s `timeoutMs` for the whole call. Anything slower renders the scripted line.
+- **Only Mamma Cat gets AI.** A greeting aimed at a nearby cat is always scripted (a pool line, or Camille's line for that cat) and is not stored; lines aimed at Mamma Cat (AI, scripted or pool) are stored as `ambient` records.
+- **Held for story moments:** Camille, Manu and Kish don't greet while a Camille beat is waiting on its delay or AI request, nobody greets while input is frozen for the beat-5 pickup, and opening a beat aborts any in-flight ambient AI request.
+- **Re-checked on arrival:** if, when the line arrives, the human is inactive, out of range, paused for a beat, held as above, or the request was aborted, nothing renders and nothing is stored.
+- **Layout:** bubbles wrap at `HUMAN_BUBBLE_WRAP_PX` (160 world px) and grow upward from just above the head.
 
-These knobs live as `HUMAN_AI_BUBBLE_COOLDOWN_MS` / `HUMAN_AI_BUBBLE_TIMEOUT_MS` in `GameScene.ts`.
+The cooldown and budget live as `HUMAN_AI_BUBBLE_COOLDOWN_MS` / `HUMAN_AI_BUBBLE_TIMEOUT_MS` in [src/systems/HumanPresenceSystem.ts](src/systems/HumanPresenceSystem.ts).
 
 ### Editing or adding a character
 
@@ -345,26 +423,28 @@ These knobs live as `HUMAN_AI_BUBBLE_COOLDOWN_MS` / `HUMAN_AI_BUBBLE_TIMEOUT_MS`
 **Adding a new AI-backed cat.**
 
 1. Create `src/ai/personas/<slug>.md` using the seven-section format above.
-2. Register it in [src/ai/personas/index.ts](src/ai/personas/index.ts) with the `?raw` import, keyed by the **exact** `NPCCat.npcName` set in [GameScene.ts](src/scenes/GameScene.ts). Also add it to `PERSONA_TIER`.
-3. Add the expected key to [tests/ai/personas.test.ts](tests/ai/personas.test.ts) so the persona file is guaranteed to load.
+2. Register it in [src/ai/personas/index.ts](src/ai/personas/index.ts) with the `?raw` import, keyed by the **exact** `NPCCat.npcName` set in [GameScene.ts](src/scenes/GameScene.ts).
+3. Add the expected key to [tests/ai/personas.test.ts](tests/ai/personas.test.ts) so the persona file is guaranteed to load; the file must also pass [tests/ai/personaCanon.test.ts](tests/ai/personaCanon.test.ts).
 4. If the cat should read as colder or more clipped, add the name to `HARSHER_TEMP_SPEAKERS` in [AIDialogueService.ts](src/services/AIDialogueService.ts) to drop their temperature to `0.6`.
 5. Add scripted anchor entries to [src/data/cat-dialogue.ts](src/data/cat-dialogue.ts) for any trust deltas or story events — AI alone cannot create them.
 
 **Adding a new AI-backed human.**
 
 1. Create `src/ai/personas/<slug>.md` using the seven-section format (Identity states `Species: human, ...`).
-2. Register in `src/ai/personas/index.ts` — key by the exact `HumanNPC.identityName`, add to `PERSONA_TIER` (tier2 unless they deserve tier1 memory like Camille).
-3. Wire `identityName` on the `HumanConfig` so the `HumanNPC` instance links to the persona. For named types (`camille` / `manu` / `kish`) the default identity name is auto-derived; for anonymous types (`feeder`) pass `identityName: "Rose"` etc. explicitly.
-4. If they're involved in an encounter beat, extend `CAMILLE_ENCOUNTER_BEATS` (or add a sibling table) in [src/data/camille-encounter-beats.ts](src/data/camille-encounter-beats.ts) with paired `{ narrator, spoken? }` steps, and route the beat through `runCamilleEncounterBeat` / `playPairedBeat` so side-effects stay deterministic and the spoken bubble renders above the right speaker.
-5. Extend [tests/ai/personas.test.ts](tests/ai/personas.test.ts) with the new key.
+2. Register in `src/ai/personas/index.ts` — key by the exact `HumanNPC.identityName`.
+3. Wire `identityName` on the `HumanConfig` so the `HumanNPC` instance links to the persona. For named types (`camille` / `manu` / `kish` / `ben`) the default identity name is auto-derived; for anonymous types (`feeder`) pass `identityName: "Rose"` etc. explicitly.
+4. If they're involved in an encounter beat, extend `CAMILLE_ENCOUNTER_BEATS` (or add a sibling table) in [src/data/camille-encounter-beats.ts](src/data/camille-encounter-beats.ts) with paired `{ narrator, spoken? }` steps, and route the beat through `CamilleEncounterSystem.runEncounterBeat` / `playPairedBeat` (passing `slots: beatSpokenSlots(steps)`) so side-effects stay deterministic and the spoken bubble renders above the right speaker. Persist what was shown through `HumanPresenceSystem.recordHumanLines` as a `story` record.
+5. If they should know about story progress, add their facts to `buildNpcStoryFacts` in [src/utils/npcStoryFacts.ts](src/utils/npcStoryFacts.ts); optionally add first / return lines to [src/data/human-dialogue.ts](src/data/human-dialogue.ts).
+6. Extend [tests/ai/personas.test.ts](tests/ai/personas.test.ts) with the new key.
 
 ### Tuning tips
 
-- **Too rambly?** Reinforce the "one sentence per line, two at most" rule in the persona's `Speech Style`. `max_tokens=150` is already a hard ceiling.
+- **Too rambly?** Reinforce the "one sentence per line, two at most" rule in the persona's `Speech Style`. `max_tokens` 220 is the hard ceiling, and `parseAIJson` rejects any line over 160 characters.
 - **Out of character?** Tighten `Personality` and `Rules of Engagement` with concrete do/don't bullets; persona markdown is prompt-weight, so specific beats abstract.
-- **Ignoring the scene?** The `## Current scene` block already surfaces chapter / trust / stats / nearbyCat; if you want the speaker to react to more, extend `DialogueRequest.gameState` in [DialogueService.ts](src/services/DialogueService.ts) and add a line to `buildSystemPrompt`.
-- **Camille encounter beat feels off?** Edit the `objective` string in `camilleEncounterBeats` — that's the one-sentence brief the LLM sees under `## Story beat context`.
-- **Humans sound too formal?** The human example line in `buildSystemPrompt` deliberately shows one short, warm sentence. Adjust it there or tighten the persona's `Speech Style` with concrete examples.
+- **Ignoring the scene?** The `## Current scene` block in the final user message already surfaces chapter / trust (cats) / Mamma Cat's condition / story facts; if you want the speaker to react to more, extend `DialogueRequest.gameState` in [DialogueService.ts](src/services/DialogueService.ts) and add a line to `buildCurrentTurn` in AIDialogueService.ts.
+- **Inventing shared history or story progress?** The model may only use the history, the story facts and the memory lists. Put anything that depends on progress into `buildNpcStoryFacts` and gate the persona on it, rather than stating it in the persona.
+- **Camille encounter beat feels off?** Edit the `objective` string in `CAMILLE_ENCOUNTER_BEATS` — that's the brief the LLM sees under `## Story beat context`.
+- **Humans sound too formal?** `HUMAN_EXAMPLE` in AIDialogueService.ts deliberately shows one short, warm sentence. Adjust it there or tighten the persona's `Speech Style` with concrete examples.
 - **Breaking JSON?** `parseAIJson` strips markdown fences and validates enums; on parse failure `FallbackDialogueService` delivers the scripted line instead, so a malformed reply degrades gracefully rather than crashing.
 
 ## Local Development & Testing
@@ -375,7 +455,7 @@ The repo ships two npm projects — the game (root) and the Worker (`proxy/`). T
 
 ```bash
 npm test            # Vitest: game systems, AIDialogueService, FallbackDialogueService, personas, ConversationStore
-npm run test:proxy  # Vitest (in proxy/): worker origin check, validation, timeout paths
+npm run test:proxy  # Vitest (in proxy/): origin check, validation, timeout paths, rate limits, kill switch
 ```
 
 ### Static-bundle secret leak check
@@ -410,42 +490,52 @@ Vite's `server.proxy` in [vite.config.ts](vite.config.ts) forwards `/api/ai/chat
 | Check                                                  | Where to look                                              |
 | ------------------------------------------------------ | ---------------------------------------------------------- |
 | 400ms "thinking" curious emote if the model is slow    | Above the engaged cat                                      |
-| Lines feel in character (cat-speak, short)             | Dialogue box                                               |
+| Lines feel in character (plain English, short)         | Dialogue box                                               |
 | First-meeting trust, indicator, registry all fire once | Journal (J key)                                            |
 | Turn persisted to IndexedDB                            | DevTools → Application → IndexedDB → `ayala_conversations` |
 | Second conversation references the first               | Re-approach the same cat                                   |
 
-Each Space on a named cat should produce one `POST /api/ai/chat` with status **200** in DevTools → Network. Body shape: `{ provider, messages, temperature, max_tokens }`.
+Once a cat's unplayed scripted lines are used up (first meetings and other authored beats play without AI), each Space on it should produce one `POST /api/ai/chat` with status **200** in DevTools → Network. Body shape: `{ provider, messages, temperature, max_tokens }`; the system message has no `## Current scene` block, the last user message does. No cat should claim Mamma Cat said anything.
 
 **Human ambient bubbles.** Walk near **Camille / Manu / Kish** (evening Chapter 5+) or **Rose / Ben** (dawn/evening feeder circuit). Verify:
 
 | Check                                                                                       | Where to look                                                            |
 | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| Bubble appears within ~1.5s of proximity                                                    | Floating text above the human                                            |
+| Bubble appears within ~3.5s of proximity                                                    | Floating text above the human                                            |
 | Line reflects their persona (Rose warm Tita voice, Ben gruff one-liner, Kish excited, etc.) | Bubble contents                                                          |
 | Same human does **not** fire another AI bubble for 30s                                      | DevTools → Network (no repeat `/api/ai/chat`)                            |
 | Scripted line still fires during cooldown when approaching again                            | Bubble contents (shorter, from pool)                                     |
-| When Worker is stopped, scripted fallback fires within 1.5s                                 | Bubble still appears; console shows `AI failed; using scripted fallback` |
+| When Worker is stopped, scripted fallback fires within 3.5s                                 | Bubble still appears; console shows `AI failed; using scripted fallback` |
 
 **Camille encounter beats 2–5 (paired surfaces).** Progress to Chapter 5 and trigger a Camille encounter (one per eligible evening). Verify:
 
-| Check                                                                                  | Where to look                  |
-| -------------------------------------------------------------------------------------- | ------------------------------ |
-| Narrator POV appears in the modal dialogue box at the bottom                           | Modal text                     |
-| Camille's spoken line appears as a bubble **above her head**, not in the modal         | Floating bubble                |
-| Pressing Space advances **both** the modal and the bubble to the next pair             | Modal + bubble                 |
-| Dismissing the modal (backdrop click / x) tears down the current bubble too            | No orphan bubble after dismiss |
-| Beat 1 is narrator-only in the HUD; Camille has no bubble for beat 1                   | HUD narration                  |
-| Beat 5 still plays byte-for-byte when Worker is stopped (fully scripted)               | Modal + bubble                 |
-| `CAMILLE_ENCOUNTER` registry key increments exactly once per beat, even on LLM failure | DevTools → saved state         |
+| Check                                                                                     | Where to look                  |
+| ----------------------------------------------------------------------------------------- | ------------------------------ |
+| Narrator POV appears in the modal dialogue box at the bottom                              | Modal text                     |
+| Camille's spoken line appears as a bubble **above her head**, not in the modal            | Floating bubble                |
+| Pressing Space advances **both** the modal and the bubble to the next pair                | Modal + bubble                 |
+| Dismissing the modal (backdrop click / x) tears down the current bubble too               | No orphan bubble after dismiss |
+| Beat 1 is narrator-only in the HUD; Camille has no bubble for beat 1                      | HUD narration                  |
+| Beat 5 still plays byte-for-byte when Worker is stopped (fully scripted)                  | Modal + bubble                 |
+| `CAMILLE_ENCOUNTER` registry key increments exactly once per beat, even on LLM failure    | DevTools → saved state         |
+| Closing a beat before its last line replays it on the next approach; finishing it doesn't | Next approach to Camille       |
 
 For beats 2–4, one `POST /api/ai/chat` fires per beat (Camille persona, `encounterBeat.n` in the prompt). Kish's "Kish, slow down." line also renders in the same bubble style — not as a bare text overlay.
 
 ### Test the fallback paths (do not skip)
 
-- **AI down, scripted fallback.** Stop the Worker (Ctrl+C in Terminal A) and talk to any named cat. After the 8s client abort the scripted line from `cat-dialogue.ts` fires; console logs `[Dialogue] AI failed; using scripted fallback` from [FallbackDialogueService](src/services/FallbackDialogueService.ts).
+- **AI down, scripted fallback.** Stop the Worker (Ctrl+C in Terminal A) and talk to any named cat. Within the 8 s budget the scripted line from `cat-dialogue.ts` fires, or, if that cat's matching line has already played, a non-verbal placeholder such as `*Blacky blinks slowly at you.*` (its trust/story effects still apply; it isn't stored). Console logs `[Dialogue] AI failed; using scripted fallback` from [FallbackDialogueService](src/services/FallbackDialogueService.ts).
 - **No proxy configured at all.** Comment out `VITE_AI_PROXY_URL` in `.env`, restart Vite. Zero AI network calls — scripted-only.
-- **Provider retry.** Put a bad `DEEPSEEK_API_KEY` in `proxy/.dev.vars` and restart `dev:proxy`. Deepseek 401s; the client retries with `provider: "openai"` automatically. Two POSTs in Network.
+- **Provider retry.** Put a bad `DEEPSEEK_API_KEY` in `proxy/.dev.vars` and restart `dev:proxy`. DeepSeek 401s; the client retries with `provider: "openai"` automatically. Two POSTs in Network. An upstream 400 / 404 / 422 with an object `error` (e.g. DeepSeek rejecting an unknown `DEEPSEEK_MODEL`) fails over the same way.
+- **Kill switch.** Add `AI_DISABLED=1` to `proxy/.dev.vars` and restart `dev:proxy`. The next AI request gets 503 `ai_disabled`, a scripted line plays, and the game sends no further `/api/ai/chat` POSTs for 5 minutes (one POST, no OpenAI retry). Remove the line, restart, and reload the page to clear the client's cool-down.
+- **Rate limit.** `wrangler dev` simulates the rate-limit bindings in memory. Twelve quick requests from the shell should show ten 400s (the empty body fails validation after the limiter) and then 429s:
+
+  ```bash
+  for i in $(seq 12); do curl -s -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:8787/api/ai/chat \
+    -H 'Origin: http://localhost:5173' -H 'Content-Type: application/json' -d '{}'; done
+  ```
+
+  In the game a 429 pauses AI calls for 30 s; players get scripted lines meanwhile.
 
 ### Reset conversation memory between tests
 
@@ -527,6 +617,8 @@ ayala/
 │   │   ├── dialoguePoseAnim.ts         #   Maps SpeakerPose tones to NPC animation rows
 │   │   ├── lifetimeCount.ts            #   Defensive registry reader for lifetime life-stat counters (unit tested)
 │   │   ├── lineOfSight.ts              #   Pure raymarch through tile collision for LOS checks
+│   │   ├── mammaCatCondition.ts        #   Mamma Cat's stats in words for NPC prompts
+│   │   ├── npcStoryFacts.ts            #   "Story so far" facts + human relationship stage for NPC prompts
 │   │   └── snatcherSpawnLogic.ts       #   Pure nightly spawn decision logic (unit tested)
 │   ├── scenes/
 │   │   ├── BootScene.ts                #   Asset preloading
@@ -539,7 +631,8 @@ ayala/
 │   │   ├── DialogueService.ts          #   Dialogue interface + scripted + AI + fallback wiring
 │   │   ├── AIDialogueService.ts        #   Proxy-backed LLM dialogue + JSON parse
 │   │   ├── FallbackDialogueService.ts  #   AI then scripted fallback
-│   │   └── ConversationStore.ts        #   IndexedDB conversation history persistence
+│   │   ├── NpcContext.ts               #   Loads an NPC's records + memories; builds stored records
+│   │   └── ConversationStore.ts        #   IndexedDB conversation history + NPC memories
 │   ├── sprites/
 │   │   ├── BaseNPC.ts                  #   Abstract base for physics NPCs
 │   │   ├── MammaCat.ts                 #   Player character
@@ -563,9 +656,9 @@ ayala/
 │       └── ThreatIndicator.ts          #   NPC disposition indicators
 │
 ├── proxy/                               # Cloudflare Worker — POST /api/ai/chat (see AI Dialogue Proxy above)
-│   ├── src/worker.ts                   #   Origin check, validation, upstream forwarding
-│   ├── tests/worker.test.ts            #   Vitest suite (npm run test:proxy)
-│   ├── wrangler.toml                   #   Worker config
+│   ├── src/worker.ts                   #   Origin check, kill switch, rate limits, validation, upstream forwarding
+│   ├── tests/                          #   Vitest suites: worker.test.ts, ratelimit.test.ts (npm run test:proxy)
+│   ├── wrangler.toml                   #   Worker config + [[ratelimits]] bindings
 │   └── .dev.vars.example               #   Copy to .dev.vars (gitignored) with real keys
 ├── index.html                           # Vite entry page
 ├── package.json                         # npm manifest
@@ -654,6 +747,7 @@ Read the full document: [docs/Ayala_GDD_v0.1.md](docs/Ayala_GDD_v0.1.md)
 - Colony cat spawn positions are hardcoded, not tied to map POIs
 - The `"wary"` disposition affects indicators and narration but not yet NPC AI behaviour weights
 - Dumping events fire probabilistically rather than on a deterministic schedule
+- AI spend is bounded only by the Worker's per-IP limits and the provider-side caps (see [Settings the owner must change outside code](#settings-the-owner-must-change-outside-code)): there are no accounts, players behind one shared IP (mobile CGNAT) share a bucket, the client still chooses the provider, and a deploy without the rate-limit bindings is unlimited
 
 ## License
 

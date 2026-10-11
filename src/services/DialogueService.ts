@@ -8,7 +8,7 @@
  * remains responsible for rendering; this service decides WHAT to say.
  */
 
-import type { NpcMemory } from "./ConversationStore";
+import type { ConversationKind, NpcMemory } from "./ConversationStore";
 import type { DialogueRecencyContext } from "../utils/dialogueRecency";
 
 // ── Public Interfaces ───────────────────────────────────────────────
@@ -20,7 +20,7 @@ export interface DialogueRequest {
   gameState: {
     chapter: number;
     timeOfDay: string;
-    trustGlobal: number;
+    /** Cats only; humans have no per-human trust and the prompt omits it. */
     trustWithSpeaker: number;
     hunger: number;
     thirst: number;
@@ -32,6 +32,8 @@ export interface DialogueRequest {
   conversationHistory: ConversationEntry[];
   /** Optional snapshot-compatible history for AI context; scripted branch selection keeps the full history above. */
   promptConversationHistory?: ConversationEntry[];
+  /** What Mamma Cat is doing this turn. Defaults to "beat" with an encounterBeat, else "talk". */
+  interaction?: "talk" | "ambient" | "beat";
   /** Prompt-only context derived from existing first-meet logic. */
   isFirstConversation?: boolean;
   /** Relationship warmth stage for prompt tone. */
@@ -55,12 +57,16 @@ export interface DialogueRequest {
     kind: "camille_encounter";
     n: 1 | 2 | 3 | 4 | 5;
     objective: string;
+    /** Narrator text shown beside each spoken line the AI must supply, in order. */
+    slots: string[];
   };
 }
 
 export interface ConversationEntry {
   timestamp: number;
   speaker: string;
+  gameDay?: number;
+  kind?: ConversationKind;
   /** The Mamma Cat side of this previous exchange, if captured. */
   mammaCatTurn?: string;
   text: string;
@@ -73,8 +79,6 @@ export interface DialogueResponse {
   speakerPose?: SpeakerPose;
   emote?: string;
   narration?: string;
-  /** Optional body-language cue describing Mamma Cat's side of this exchange. */
-  mammaCatCue?: string;
   /** Advisory-only memory suggestion. Never drives story state. */
   memoryNote?: {
     kind: NpcMemory["kind"];
@@ -83,6 +87,11 @@ export interface DialogueResponse {
   };
   trustChange?: number;
   event?: string;
+  /**
+   * A non-verbal stand-in shown when the AI failed and the speaker's scripts
+   * are used up: apply its event/trust, but don't persist it as speech.
+   */
+  placeholder?: boolean;
 }
 
 export interface DialogueService {
@@ -97,6 +106,15 @@ export interface DialogueScript {
   condition: (req: DialogueRequest) => boolean;
   response: DialogueResponse;
 }
+
+const PLACEHOLDER_BY_POSE: Record<SpeakerPose, string> = {
+  friendly: " blinks slowly at you.",
+  wary: " watches you, tail low.",
+  hostile: "'s ears flatten.",
+  curious: " tilts their head at you.",
+  submissive: " tilts their head at you.",
+  sleeping: " is half asleep.",
+};
 
 function dialogueTextSignature(lines: string[]): string {
   return lines.join(" ").replace(/\s+/g, " ").trim();
@@ -152,7 +170,21 @@ export class ScriptedDialogueService implements DialogueService {
   }
 
   async getFallbackDialogue(request: DialogueRequest): Promise<DialogueResponse> {
-    return (await this.getUnplayedDialogue(request)) ?? this.getDefaultResponse(request);
+    const unplayed = await this.getUnplayedDialogue(request);
+    if (unplayed) return unplayed;
+    if (request.speakerType !== "cat") return this.getDefaultResponse(request);
+    // Don't replay used-up words, but keep the matched script's deterministic
+    // trust/story fields so AI failure progresses like AI success.
+    const match = findMatchingDialogueScript(this.scripts, request)?.response;
+    const pose = match?.speakerPose;
+    return {
+      lines: [`*${request.speaker}${pose ? PLACEHOLDER_BY_POSE[pose] : " regards you quietly."}*`],
+      speakerPose: pose,
+      emote: match?.emote,
+      trustChange: match?.trustChange,
+      event: match?.event,
+      placeholder: true,
+    };
   }
 
   private getDefaultResponse(request: DialogueRequest): DialogueResponse {
