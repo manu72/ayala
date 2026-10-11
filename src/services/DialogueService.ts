@@ -30,6 +30,12 @@ export interface DialogueRequest {
     recentEvents: string[];
   };
   conversationHistory: ConversationEntry[];
+  /**
+   * Cats: talks the save's registry flags record (e.g. `TIGER_TALKS`), so a
+   * wiped or unavailable history can't replay a first meeting. Scripted
+   * branches count max(history talks, talkFloor); never seed fake records.
+   */
+  talkFloor?: number;
   /** Optional snapshot-compatible history for AI context; scripted branch selection keeps the full history above. */
   promptConversationHistory?: ConversationEntry[];
   /** What Mamma Cat is doing this turn. Defaults to "beat" with an encounterBeat, else "talk". */

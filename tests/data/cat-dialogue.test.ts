@@ -122,6 +122,35 @@ describe('cat-dialogue — talkCount (via Tiger scripts)', () => {
   })
 })
 
+describe('cat-dialogue — registry talk floor (New Game+, no IndexedDB)', () => {
+  const namedCats = ['Blacky', 'Tiger', 'Jayco', 'Jayco Jr', 'Fluffy', 'Pedigree', 'Ginger', 'Ginger B']
+
+  for (const cat of namedCats) {
+    it(`${cat}: a registry-recorded talk is never a first meeting, even with no history`, () => {
+      const match = CAT_DIALOGUE_SCRIPTS[cat]!.find(s => s.condition(makeRequest({ speaker: cat, talkFloor: 1 })))
+      expect(match?.response.event ?? '').not.toMatch(/_first$/)
+    })
+  }
+
+  it('Tiger: the floor picks warmup at one talk and return at two', () => {
+    const scripts = CAT_DIALOGUE_SCRIPTS['Tiger']!
+    expect(scripts.find(s => s.condition(makeRequest({ speaker: 'Tiger', talkFloor: 1 })))!.id).toBe('tiger_warmup')
+    expect(scripts.find(s => s.condition(makeRequest({ speaker: 'Tiger', talkFloor: 2 })))!.id).toBe('tiger_return')
+  })
+
+  it('Tiger: history beyond the floor still counts', () => {
+    const req = makeRequest({
+      speaker: 'Tiger',
+      talkFloor: 1,
+      conversationHistory: [
+        { timestamp: 1, speaker: 'Tiger', text: 'hi' },
+        { timestamp: 2, speaker: 'Tiger', text: 'hey' },
+      ],
+    })
+    expect(CAT_DIALOGUE_SCRIPTS['Tiger']!.find(s => s.condition(req))!.id).toBe('tiger_return')
+  })
+})
+
 describe('cat-dialogue — trust-gated scripts', () => {
   it('Fluffy: requires trust >= 20 for second dialogue', () => {
     const lowTrust = makeRequest({

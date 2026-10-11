@@ -64,6 +64,26 @@ const POSITIVE_EMOTES: ReadonlySet<EmoteType> = new Set(["heart"]);
 /** What Mamma Cat did while a cat told her a rumour or an egg story. */
 const LISTENED_TURN = "Mamma Cat came over and listened.";
 
+/** Each named cat's progression flag, written in {@link CatDialogueController.processResponse}; `true` means one talk. */
+const TALK_FLAGS: Readonly<Record<string, string>> = {
+  Blacky: "MET_BLACKY",
+  Tiger: "TIGER_TALKS",
+  Jayco: "JAYCO_TALKS",
+  "Jayco Jr": "JAYCO_JR_TALKS",
+  Fluffy: "FLUFFY_TALKS",
+  Pedigree: "PEDIGREE_TALKS",
+  Ginger: "MET_GINGER_A",
+  "Ginger B": "MET_GINGER_B",
+};
+
+/** Talks the save records for this cat, which New Game+ seeds without any history. */
+function registryTalks(registry: Phaser.Data.DataManager, name: string): number {
+  const key = TALK_FLAGS[name];
+  const value = key === undefined ? undefined : registry.get(key);
+  if (value === true) return 1;
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+}
+
 /**
  * Owns the full cat-dialogue lifecycle: engagement gating, AI request
  * orchestration, response rendering (emote + narration + lines), and the
@@ -325,7 +345,9 @@ export class CatDialogueController {
       // Scripted branches see every engaged talk, unfiltered: filtering by the
       // clock could replay a first meeting or warmup after a save rollback.
       const talks = context.records.filter((r) => recordKind(r) === "talk");
-      const isFirstConversation = talks.length === 0;
+      const talkFloor = registryTalks(scene.registry, name);
+      const talkCount = Math.max(talks.length, talkFloor);
+      const isFirstConversation = talkCount === 0;
 
       const request = {
         speaker: name,
@@ -345,10 +367,11 @@ export class CatDialogueController {
         },
         conversationHistory: talks.map(toConversationEntry),
         promptConversationHistory: context.promptRecords.map(toConversationEntry),
+        talkFloor,
         isFirstConversation,
         relationshipStage: calculateRelationshipStage({
           isFirstConversation,
-          conversationCount: talks.length,
+          conversationCount: talkCount,
           trustWithSpeaker: trustBefore,
           memories: context.memories,
         }),

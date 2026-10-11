@@ -335,6 +335,36 @@ describe("CatDialogueController — what a cat remembers", () => {
     expect(ai).toHaveBeenCalledTimes(11); // talks 3-13; talks 1-2 are blacky_first and blacky_return
   });
 
+  it("New Game+ (cats met in the registry, history wiped) replays no first meeting and awards no first trust", async () => {
+    const f = fixture();
+    f.history.splice(0);
+    // As GameScene's New Game+ setup seeds them.
+    const seeded = { MET_BLACKY: true, TIGER_TALKS: 2, JAYCO_TALKS: 1, JAYCO_JR_TALKS: 1, FLUFFY_TALKS: 1, PEDIGREE_TALKS: 1, MET_GINGER_A: true, MET_GINGER_B: true };
+    for (const [key, value] of Object.entries(seeded)) f.registryData.set(key, value);
+    f.getDialogue.mockImplementation(async (request) => matchScriptedResponse(request) ?? { lines: ["..."] });
+    const names = ["Blacky", "Tiger", "Jayco", "Jayco Jr", "Fluffy", "Pedigree", "Ginger", "Ginger B"];
+    for (const name of names) {
+      const request = await f.speak(name === "Blacky" ? f.blacky : cat(name));
+      expect(request.isFirstConversation, name).toBe(false);
+      expect(matchScriptedResponse(request)?.event ?? "", name).not.toMatch(/_first$/);
+      if (name === "Tiger") expect(matchScriptedResponse(request)?.event).toBe("tiger_return");
+    }
+    expect(f.scene.trust.firstConversation).not.toHaveBeenCalled();
+    expect(f.registryData.get("TIGER_TALKS")).toBe(2);
+  });
+
+  it("without stored history (no IndexedDB) the registry still moves Tiger on, awarding first trust once", async () => {
+    const f = fixture();
+    f.history.splice(0);
+    vi.mocked(storeConversation).mockResolvedValue(undefined);
+    f.getDialogue.mockImplementation(async (request) => matchScriptedResponse(request) ?? { lines: ["..."] });
+    const tiger = cat("Tiger");
+    const events = [];
+    for (let talk = 0; talk < 3; talk++) events.push(matchScriptedResponse(await f.speak(tiger))?.event);
+    expect(events).toEqual(["tiger_first", "tiger_warmup", "tiger_return"]);
+    expect(f.scene.trust.firstConversation).toHaveBeenCalledTimes(1);
+  });
+
   it("stores a rumour as a story record that the cat's scripts don't count as a talk", async () => {
     const f = fixture();
     const tiger = cat("Tiger");

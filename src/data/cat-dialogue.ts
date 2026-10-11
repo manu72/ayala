@@ -5,9 +5,10 @@
  * condition wins. Order matters: place specific/early conditions before
  * broad fallbacks.
  *
- * First-meeting conditions use conversation history only. Trust can rise
- * through proximity before any dialogue, so it is not a reliable "has spoken"
- * signal. Later relationship branches may still use trust.
+ * First-meeting conditions use conversation history, floored by the talks the
+ * save's registry flags record (`talkFloor`). Trust can rise through proximity
+ * before any dialogue, so it is not a reliable "has spoken" signal. Later
+ * relationship branches may still use trust.
  */
 
 import type { DialogueScript, DialogueRequest } from "../services/DialogueService";
@@ -16,10 +17,12 @@ import type { DialogueScript, DialogueRequest } from "../services/DialogueServic
 
 /**
  * Engaged talks so far. Rumours and story lines stored under a cat don't
- * count; entries without a kind are legacy talks.
+ * count; entries without a kind are legacy talks. The registry floor covers
+ * talks history lacks (New Game+ wipes it; IndexedDB may be unavailable).
  */
 function talkCount(req: DialogueRequest): number {
-  return req.conversationHistory.filter((entry) => (entry.kind ?? "talk") === "talk").length;
+  const stored = req.conversationHistory.filter((entry) => (entry.kind ?? "talk") === "talk").length;
+  return Math.max(stored, req.talkFloor ?? 0);
 }
 
 /** True when this is the speaker's first-ever conversation. */
