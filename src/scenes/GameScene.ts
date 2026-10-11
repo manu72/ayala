@@ -573,6 +573,7 @@ export class GameScene extends Phaser.Scene {
       StoryKeys.COLONY_NAMED,
       StoryKeys.COLONY_LOST,
       StoryKeys.COLONY_NEWCOMERS,
+      StoryKeys.CAT_DIALOGUE_SEPARATIONS,
       "MANU_VISITED_FLUFFY_DAY",
       FORAGE_KEY,
       CURIOSITY_KEY,

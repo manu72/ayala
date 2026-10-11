@@ -100,7 +100,8 @@ describe("buildSystemPrompt", () => {
   it("includes sectioned persona, scene facts, and human-like guidance for cats", () => {
     const req = baseReq();
     req.relationshipStage = 2;
-    req.gameDaysSinceLastTalk = 3;
+    req.isFirstConversation = false;
+    req.conversationRecency = { cadence: "long_absence" };
     req.gameState.recentEvents = ["Shared shade near the fountain."];
     const p = buildSystemPrompt("# Blacky\nCat.", req);
     expect(p).toContain("Blacky");
@@ -111,7 +112,8 @@ describe("buildSystemPrompt", () => {
     expect(p).toContain("## Relationship Context");
     expect(p).toContain("human-like English");
     expect(p).not.toContain("Cats use short cat-speak");
-    expect(p).toContain("Days since last talk: 3");
+    expect(p).toContain("apart across several game days");
+    expect(p).not.toContain("Days since last talk:");
     expect(p).toContain("Shared shade near the fountain.");
   });
 
@@ -169,18 +171,49 @@ describe("buildSystemPrompt", () => {
     req.speaker = "Jayco Jr";
     req.isFirstConversation = false;
     req.conversationRecency = {
-      cadence: "immediate_followup",
-      lastTalkElapsedSeconds: 12,
-      sameNpcTalksInRecentWindow: 3,
-      recentWindowSeconds: 60,
+      cadence: "continuing_conversation",
     };
 
     const p = buildSystemPrompt("# Jayco Jr\nPlayful.", req);
 
-    expect(p).toContain("## Conversation Timing");
-    expect(p).toContain("You spoke with Mamma Cat about 12 seconds ago.");
-    expect(p).toContain("Mamma Cat has engaged this same NPC 3 times in the last 60 seconds.");
-    expect(p).toContain("Treat rapid repeated engagement as deliberate continuity, not as a mistake or a new scene.");
+    expect(p).toContain("## Encounter context (game time only)");
+    expect(p).toContain("still in the same encounter");
+    expect(p).toContain("do not imply Mamma Cat has been away or greet her again");
+    expect(p).not.toMatch(/\b\d+\s+(?:seconds?|minutes?|times)\b/i);
+    expect(p).not.toContain("You spoke with Mamma Cat about");
+  });
+
+  it.each(["recent_return", "same_day_return", "previous_day_return", "long_absence"] as const)(
+    "keeps %s qualitative and makes acknowledgements optional",
+    (cadence) => {
+      const req = baseReq();
+      req.isFirstConversation = false;
+      req.conversationRecency = { cadence };
+      const p = buildSystemPrompt("# Blacky\nCat.", req);
+
+      expect(p).not.toMatch(/\b\d+\s+(?:seconds?|minutes?|times|game days)\b/i);
+      expect(p).toContain("Prefer the current subject");
+      expect(p).toContain("Avoid repeating the last beat, greeting, or return acknowledgement");
+      expect(p).toContain(cadence === "recent_return" ? "without commenting on a return or the gap" : "at the start of this visit");
+    },
+  );
+
+  it("does not prime return remarks or infer tiredness from repeated speech", () => {
+    const p = buildSystemPrompt("# Blacky\nCat.", baseReq());
+    expect(p).not.toContain('"You came back."');
+    expect(p).not.toContain('"label":"returned"');
+    expect(p).toContain("Only acknowledge a return or absence when the encounter context below permits it");
+    expect(p).toContain("advice to rest must follow her actual energy or visible condition");
+    expect(p).toContain("including stopwatch-style wording from earlier replies");
+  });
+
+  it("does not imply an absence on first contact even with stale recency context", () => {
+    const req = baseReq();
+    req.isFirstConversation = true;
+    req.conversationRecency = { cadence: "long_absence" };
+    const p = buildSystemPrompt("# Blacky\nCat.", req);
+    expect(p).toContain("FIRST CONVERSATION");
+    expect(p).not.toContain("## Encounter context");
   });
 
   it("includes first-conversation and memory context without inventing history", () => {
@@ -221,6 +254,17 @@ describe("buildSystemPrompt", () => {
 });
 
 describe("buildMessages", () => {
+  it("omits future exchanges from AI context without changing scripted branch selection", () => {
+    const req = baseReq();
+    req.isFirstConversation = false;
+    req.conversationHistory = [{ timestamp: 900_000, speaker: "Blacky", text: "Future exchange." }];
+    req.promptConversationHistory = [];
+
+    expect(buildMessages(req)).toHaveLength(1);
+    expect(buildMessages(req).some((message) => message.content.includes("Future exchange."))).toBe(false);
+    expect(matchScriptedResponse(req)?.event).toBe("blacky_return");
+  });
+
   it("includes history and final user turn", () => {
     const req = baseReq();
     req.conversationHistory = [{ timestamp: 1, speaker: "Blacky", text: "Earlier." }];
@@ -260,9 +304,10 @@ describe("buildMessages", () => {
     const m = buildMessages(req);
     expect(m[0]).toMatchObject({
       role: "user",
-      content: expect.stringContaining("Mamma Cat approaches"),
+      content: expect.stringContaining("Mamma Cat spoke with"),
     });
     expect(m[1]).toEqual({ role: "assistant", content: "Earlier line." });
+    expect(m[0]!.content).not.toContain("record 1");
     expect(m[m.length - 1]!.content).toContain("Respond in JSON");
   });
 
@@ -271,16 +316,14 @@ describe("buildMessages", () => {
     req.speaker = "Jayco Jr";
     req.isFirstConversation = false;
     req.conversationRecency = {
-      cadence: "immediate_followup",
-      lastTalkElapsedSeconds: 12,
-      sameNpcTalksInRecentWindow: 2,
-      recentWindowSeconds: 60,
+      cadence: "continuing_conversation",
     };
 
     const m = buildMessages(req);
 
-    expect(m[m.length - 1]!.content).toContain("This is a deliberate follow-up");
-    expect(m[m.length - 1]!.content).toContain("about 12 seconds after their previous exchange");
+    expect(m[m.length - 1]!.content).toContain("Continue the existing conversation naturally");
+    expect(m[m.length - 1]!.content).not.toContain("approaches");
+    expect(m[m.length - 1]!.content).not.toMatch(/\b\d+\s+(?:seconds?|minutes?|times)\b/i);
   });
 });
 

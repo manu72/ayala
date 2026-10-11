@@ -30,15 +30,15 @@ export interface DialogueRequest {
     recentEvents: string[];
   };
   conversationHistory: ConversationEntry[];
+  /** Optional snapshot-compatible history for AI context; scripted branch selection keeps the full history above. */
+  promptConversationHistory?: ConversationEntry[];
   /** Prompt-only context derived from existing first-meet logic. */
   isFirstConversation?: boolean;
   /** Relationship warmth stage for prompt tone. */
   relationshipStage?: 1 | 2 | 3 | 4;
   /** Per-NPC memories, already validated by ConversationStore. */
   npcMemories?: NpcMemory[];
-  /** Number of in-game days since this NPC last spoke to Mamma Cat. */
-  gameDaysSinceLastTalk?: number;
-  /** Same-speaker timing context for deliberate repeated engagement. */
+  /** Qualitative game-time and encounter context; never wall-clock durations. */
   conversationRecency?: DialogueRecencyContext;
   /**
    * Optional: name of a nearby cat the speaker is engaging (e.g. a feeder
