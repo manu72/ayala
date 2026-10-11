@@ -267,6 +267,7 @@ export class HUDScene extends Phaser.Scene {
             hideCloseButton: true,
           }
         : undefined,
+      () => (this.scene.get("GameScene") as GameScene | undefined)?.isPaused === true,
     );
 
     // ──── Pause menu ────

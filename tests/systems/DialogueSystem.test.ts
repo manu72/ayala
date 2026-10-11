@@ -466,6 +466,41 @@ describe('DialogueSystem.advance — via dialogue box tap', () => {
   })
 })
 
+describe('DialogueSystem — input blocked (game paused behind a menu)', () => {
+  it('ignores Space, box taps, backdrop and close clicks while blocked, then resumes where it was', () => {
+    let blocked = true
+    const h = makeSceneHarness()
+    const system = new DialogueSystem(h.scene, {}, () => blocked)
+    const [backdrop, background] = h.rectangles
+    const body = h.texts[0]!
+    const onComplete = vi.fn()
+    system.show(['One', 'Two'], onComplete, { completeOnClose: true })
+
+    h.keys[0]!.emit('down')
+    background!.emit('pointerdown', {}, 0, 0, { stopPropagation: vi.fn() })
+    backdrop!.emit('pointerdown', { wasTouch: true })
+    backdrop!.emit('pointerdown')
+    h.texts[2]!.emit('pointerdown', {}, 0, 0, { stopPropagation: vi.fn() })
+    expect(system.isActive).toBe(true)
+    expect(body.text).toBe('One')
+    expect(onComplete).not.toHaveBeenCalled()
+
+    blocked = false
+    h.keys[0]!.emit('down')
+    expect(body.text).toBe('Two')
+    h.keys[0]!.emit('down')
+    expect(onComplete).toHaveBeenCalledTimes(1)
+  })
+
+  it('dismiss() still tears the box down while blocked (scene teardown)', () => {
+    const h = makeSceneHarness()
+    const system = new DialogueSystem(h.scene, {}, () => true)
+    system.show(['One'])
+    system.dismiss()
+    expect(system.isActive).toBe(false)
+  })
+})
+
 describe('DialogueSystem.dismiss — early close never fires onComplete', () => {
   it('dismiss() hides the dialogue and does NOT invoke onComplete', () => {
     const onComplete = vi.fn()

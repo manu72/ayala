@@ -66,7 +66,12 @@ export class DialogueSystem {
   private hooks: DialogueHooks | null = null;
   private advanceKey: Phaser.Input.Keyboard.Key | null = null;
 
-  constructor(scene: Phaser.Scene, layout: DialogueLayoutOptions = {}) {
+  /** `inputBlocked`: while true, Space, taps and clicks leave the box alone (e.g. the game is paused behind a menu). */
+  constructor(
+    scene: Phaser.Scene,
+    layout: DialogueLayoutOptions = {},
+    private readonly inputBlocked: () => boolean = () => false,
+  ) {
     const { width, height } = scene.cameras.main;
     const gap = layout.horizontalGapPx ?? 0;
     const leftEdge = layout.reservedLeftPx !== undefined ? layout.reservedLeftPx + gap : DEFAULT_HORIZONTAL_MARGIN_PX;
@@ -198,14 +203,14 @@ export class DialogueSystem {
 
   /** Player closed the box early (click outside / x). Same as dismiss() unless the beat opted into completeOnClose. */
   private closeEarly(): void {
-    if (!this.active) return;
+    if (!this.active || this.inputBlocked()) return;
     const doneHook = this.hooks?.completeOnClose ? this.onComplete : null;
     this.hide(false);
     if (doneHook) doneHook();
   }
 
   advance(): void {
-    if (!this.active) return;
+    if (!this.active || this.inputBlocked()) return;
 
     this.currentLine++;
     if (this.currentLine >= this.lines.length) {

@@ -425,6 +425,7 @@ export class GameScene extends Phaser.Scene {
     this.lastInteractTapAt = Number.NEGATIVE_INFINITY;
     this.isPaused = false;
     this.time.paused = false; // Phaser keeps the clock's paused flag across restarts
+    this.journalOpenedFromPause = false;
     this.collapse = new CollapseSystem(this);
     this.collapse.resetTransient();
 
@@ -839,7 +840,11 @@ export class GameScene extends Phaser.Scene {
 
     if (!this.scene.isActive("HUDScene")) {
       this.scene.launch("HUDScene");
+    } else {
+      // A restart (snatcher capture) keeps the HUD running; drop any menu left over from before.
+      (this.scene.get("HUDScene") as HUDScene | undefined)?.hidePauseMenu?.();
     }
+    if (this.scene.isActive("JournalScene")) this.scene.stop("JournalScene");
 
     if (shouldPlayCinematic) {
       this.startIntroCinematic(spawnX, spawnY);
