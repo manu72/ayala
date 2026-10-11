@@ -7,25 +7,23 @@ import type { NPCCat } from "../sprites/NPCCat";
 import { AI_PERSONAS } from "../ai/personas";
 import {
   findUnplayedDialogueScript,
-  type ConversationEntry,
   type DialogueRequest,
+  type DialogueResponse,
 } from "../services/DialogueService";
-import { calculateRelationshipStage } from "../services/DialogueRelationship";
 import { FallbackDialogueService } from "../services/FallbackDialogueService";
 import { NPC_DIALOGUE_SCRIPTS } from "../data/npc-dialogue";
 import { StoryKeys } from "../registry/storyKeys";
 import {
   GP,
+  HUMAN_BUBBLE_WRAP_PX,
   STATIONARY_GREET_CAP,
   STATIONARY_MOVE_THRESHOLD_PX,
 } from "../config/gameplayConstants";
 import { shouldUseHumanAiBubble, shouldUseNamedHumanScriptedBubble } from "../utils/humanAiBubbleEligibility";
 import { getEffectiveHumanPhase } from "../utils/humanSpawnPolicy";
-import {
-  storeConversation,
-  getRecentConversations,
-  getConversationCount,
-} from "../services/ConversationStore";
+import { buildNpcStoryFacts, humanRelationshipStage } from "../utils/npcStoryFacts";
+import { addNpcMemory, storeConversation, type ConversationKind } from "../services/ConversationStore";
+import { buildConversationRecord, loadNpcContext, toConversationEntry, type NpcContext } from "../services/NpcContext";
 import type { GameScene } from "../scenes/GameScene";
 
 /** Per-human wait between AI ambient bubbles, ms. */
@@ -116,6 +114,8 @@ export class HumanPresenceSystem {
     manu: ["Hey, little one.", "You're okay.", "Hi there."],
     kish: ["OMG KITTY!", "Hi hi hi!", "Look at you!", "SO CUTE!"],
     feeder: ["Hi sweetie.", "Kamusta, pusa.", "There you are.", "Good kitty."],
+    // ben.md: a few plain words, no pet names
+    ben: ["There you go.", "Easy.", "Good cat.", "Eat up."],
   };
 
   constructor(scene: GameScene) {
@@ -340,8 +340,9 @@ export class HumanPresenceSystem {
       // dialogue, Manu/Kish while flanking her) must not enter the ambient
       // proximity-greeting branch — their encounter pause already sets
       // their pose, and firing a second greeting would clobber the crouch
-      // animation and spawn a duplicate bubble above their head.
-      if (human.isCatPerson && !human.isGreeting && !human.isEncounterPaused) {
+      // animation and spawn a duplicate bubble above their head. The same
+      // holds while a beat is being staged and during the beat-5 pickup.
+      if (human.isCatPerson && !human.isGreeting && !human.isEncounterPaused && !this.isGreetingHeld(human, false)) {
         let greeted = false;
 
         // Mamma Cat proximity greeting, capped per human per stationary
@@ -351,28 +352,14 @@ export class HumanPresenceSystem {
         // `updatePlayerStationaryAnchor`). The isGreeting cooldown (4-6s)
         // still prevents frame-spam during the N allowed attempts.
         const playerDist = Phaser.Math.Distance.Between(human.x, human.y, scene.player.x, scene.player.y);
-        if (playerDist < GP.CAT_PERSON_PLAYER_GREET_DIST && human.stationaryGreetCount < STATIONARY_GREET_CAP) {
-          let playerLine: string | undefined;
-          // Camille's canonical first-impression line is a one-shot per
-          // spawn. Without the latch the override fires on every
-          // proximity tick during the multi-day window between Encounter
-          // 1 ("A new human…" narrator beat) and Encounter 2, which made
-          // Camille parrot the same line over and over. After the line
-          // has played once on this spawn — or once Encounter 2 has
-          // landed — `playerLine` is left undefined so the existing
-          // AI/scripted greeting variety pool runs. The flag resets in
-          // HumanNPC.deactivate(), so each fresh evening visit gets the
-          // line again on first close approach (which reads naturally).
-          if (human.humanType === "camille") {
-            const enc = (scene.registry.get(StoryKeys.CAMILLE_ENCOUNTER) as number) ?? 0;
-            if (enc < 2 && !human.hasIntroducedToMammaCat) {
-              playerLine = "And who are you, sweetheart?";
-              human.markIntroducedToMammaCat();
-            }
-          }
+        if (
+          playerDist < GP.CAT_PERSON_PLAYER_GREET_DIST &&
+          human.stationaryGreetCount < STATIONARY_GREET_CAP &&
+          !this.isGreetingHeld(human, true)
+        ) {
           human.startGreeting(scene.player.x, scene.player.y);
           human.incrementStationaryGreet();
-          this.showGreetingBubble(human, { line: playerLine });
+          this.showGreetingBubble(human);
           scene.emotes.show(scene, human, "heart");
           scene.emotes.show(scene, scene.player, "heart");
           greeted = true;
@@ -404,8 +391,8 @@ export class HumanPresenceSystem {
       // human"); without this, her dialogue with Mamma Cat asks after
       // her human even when Manu has just walked past her on his
       // circuit. The day stamp is surfaced into Fluffy's AI prompt via
-      // CatDialogueController.buildRecentDialogueEvents so the LLM
-      // knows "Manu visited today / yesterday / N days ago".
+      // buildNpcStoryFacts so the LLM knows "Manu came by today /
+      // yesterday / N days ago".
       //
       // Deliberately OUTSIDE the `isCatPerson && !isGreeting &&
       // !isEncounterPaused` greet-guard above. Fluffy's awareness of
@@ -497,15 +484,11 @@ export class HumanPresenceSystem {
 
   /**
    * Show a single greeting bubble above `human` using the best available
-   * source in priority order: caller-forced line > unplayed named-human
-   * script > AI persona > scripted pool.
+   * source in priority order: unplayed named-human script > AI persona >
+   * scripted pool. Only greetings aimed at Mamma Cat take the named path
+   * (and are remembered); a greeting aimed at a nearby cat stays a pool line.
    */
-  showGreetingBubble(human: HumanNPC, opts?: { line?: string; nearNpcCat?: NPCCat }): void {
-    if (opts?.line) {
-      this.renderGreetingBubble(human, opts.line);
-      return;
-    }
-
+  showGreetingBubble(human: HumanNPC, opts?: { nearNpcCat?: NPCCat }): void {
     const scene = this.scene;
     const identity = human.identityName;
     const hasPersona = identity !== null && identity in AI_PERSONAS;
@@ -530,9 +513,7 @@ export class HumanPresenceSystem {
     });
 
     if (namedHumanDialogueEligible && identity !== null) {
-      void this.requestHumanBubbleLine(human, identity, opts?.nearNpcCat, { aiAllowed: aiEligible }).catch(() => {
-        /* fallbackLine branch inside already renders scripted on failure */
-      });
+      void this.requestHumanBubbleLine(human, identity, { aiAllowed: aiEligible });
       return;
     }
 
@@ -540,71 +521,40 @@ export class HumanPresenceSystem {
   }
 
   /**
-   * Render a named-human ambient line: first consume any unplayed authored
-   * script, then ask the AI service if eligible. Falls back to the local
-   * scripted pool on timeout, network failure, parse failure, or if the
-   * human becomes ineligible mid-flight.
+   * Render a named-human ambient line to Mamma Cat: first consume any
+   * unplayed authored script, then ask the AI service if eligible. Falls
+   * back to the local scripted pool on timeout, network failure or parse
+   * failure. Whatever renders is remembered as an ambient exchange; nothing
+   * renders once the human can no longer greet her (walked off, paused for
+   * a beat, the pickup started) or the request was aborted.
    */
-  private async requestHumanBubbleLine(
-    human: HumanNPC,
-    speaker: string,
-    nearNpcCat: NPCCat | undefined,
-    opts: { aiAllowed: boolean },
-  ): Promise<void> {
+  private async requestHumanBubbleLine(human: HumanNPC, speaker: string, opts: { aiAllowed: boolean }): Promise<void> {
     const scene = this.scene;
     let abort: AbortController | null = null;
 
+    const canSpeak = (): boolean => !abort?.signal.aborted && this.mayGreetMammaCat(human);
+    const say = (line: string, memoryNote?: DialogueResponse["memoryNote"]): void => {
+      this.renderGreetingBubble(human, line);
+      this.recordHumanLines(speaker, "ambient", [line], "Mamma Cat passed close by.", memoryNote);
+    };
     const renderFallback = (): void => {
-      if (!human.active || !human.visible || !this.isHumanCloseToMammaCat(human)) return;
-      this.renderGreetingBubble(human, this.pickScriptedGreeting(human, nearNpcCat));
+      if (canSpeak()) say(this.pickScriptedGreeting(human, undefined));
     };
 
     try {
-      const history = await getRecentConversations(speaker, 10);
-      const conversationHistory: ConversationEntry[] = history.map((r) => ({
-        timestamp: r.timestamp,
-        speaker: r.speaker,
-        mammaCatTurn: r.mammaCatTurn,
-        text: r.lines.join(" "),
-      }));
-      const conversationCount = await getConversationCount(speaker);
-      const isFirstConversation = conversationCount === 0;
-
-      const request: DialogueRequest = {
-        speaker,
-        speakerType: "human",
-        target: "Mamma Cat",
-        gameState: {
-          chapter: scene.chapters.chapter,
-          timeOfDay: scene.dayNight.currentPhase,
-          trustGlobal: scene.trust.global,
-          trustWithSpeaker: scene.trust.global,
-          hunger: scene.stats.hunger,
-          thirst: scene.stats.thirst,
-          energy: scene.stats.energy,
-          daysSurvived: scene.dayNight.dayCount,
-          knownCats: Array.from(scene.knownCats),
-          recentEvents: [],
-        },
-        conversationHistory,
-        isFirstConversation,
-        relationshipStage: calculateRelationshipStage({
-          isFirstConversation,
-          conversationCount,
-          trustWithSpeaker: scene.trust.global,
-        }),
-        nearbyCat: nearNpcCat?.npcName,
-      };
+      const context = await loadNpcContext(speaker, {
+        timestamp: scene.dayNight.totalGameTimeMs,
+        gameDay: scene.dayNight.dayCount,
+      });
+      if (!canSpeak()) return;
+      const request = this.humanDialogueRequest(speaker, context, "ambient");
 
       const scripted = findUnplayedDialogueScript(NPC_DIALOGUE_SCRIPTS, request);
       let line = scripted?.response.lines[0]?.trim();
+      let memoryNote: DialogueResponse["memoryNote"];
 
       if (!line) {
-        if (!opts.aiAllowed) {
-          renderFallback();
-          return;
-        }
-        if (this.humanAiBubbleInFlight || !(scene.dialogueService instanceof FallbackDialogueService)) {
+        if (!opts.aiAllowed || this.humanAiBubbleInFlight || !(scene.dialogueService instanceof FallbackDialogueService)) {
           renderFallback();
           return;
         }
@@ -615,52 +565,21 @@ export class HumanPresenceSystem {
         abort = new AbortController();
         this.humanAiBubbleAbort = abort;
         this.humanAiBubbleCooldownUntil.set(human, scene.time.now + HUMAN_AI_BUBBLE_COOLDOWN_MS);
-        const response = await (scene.dialogueService as FallbackDialogueService).getDialogue(request, {
+        const response = await scene.dialogueService.getDialogue(request, {
           timeoutMs: HUMAN_AI_BUBBLE_TIMEOUT_MS,
           signal: abort.signal,
         });
         line = response.lines[0]?.trim();
+        memoryNote = response.memoryNote;
       }
 
-      if (abort?.signal.aborted || !human.active || !human.visible || !this.isHumanCloseToMammaCat(human)) {
-        return;
-      }
+      if (!canSpeak()) return;
       if (!line || line === "...") {
         renderFallback();
         return;
       }
-      this.renderGreetingBubble(human, line);
-
-      // Persist for future bubbles. Store is keyed by speaker so per-human
-      // history stays consistent whether the player talks to this human via
-      // bubbles or via an encounter beat.
-      //
-      // Persist ONLY the line we actually rendered (`line`), not the whole
-      // `response.lines` payload. Ambient bubbles render a single bubble
-      // above the NPC, so any additional lines in response.lines were
-      // never seen by the player. Storing them would condition the next
-      // LLM call on dialogue the player never heard — see the matching
-      // lesson for Camille beats in WORKING_MEMORY.md.
-      const snapshotTrust = scene.trust.global;
-      await storeConversation({
-        speaker,
-        timestamp: scene.dayNight.totalGameTimeMs,
-        realTimestamp: Date.now(),
-        gameDay: scene.dayNight.dayCount,
-        lines: [line],
-        trustBefore: snapshotTrust,
-        trustAfter: snapshotTrust,
-        chapter: scene.chapters.chapter,
-        playerAction: "ambient_greeting",
-        gameStateSnapshot: {
-          trustWithSpeaker: snapshotTrust,
-          trustGlobal: scene.trust.global,
-          timeOfDay: scene.dayNight.currentPhase,
-          hunger: scene.stats.hunger,
-          thirst: scene.stats.thirst,
-          energy: scene.stats.energy,
-        },
-      });
+      // Ambient bubbles render one line; only that line is remembered.
+      say(line, memoryNote);
     } catch {
       renderFallback();
     } finally {
@@ -669,6 +588,82 @@ export class HumanPresenceSystem {
         if (this.humanAiBubbleAbort === abort) this.humanAiBubbleAbort = null;
       }
     }
+  }
+
+  /**
+   * A named human's dialogue request: everything it has said to Mamma Cat,
+   * the memories it has formed, and the story facts it knows.
+   */
+  humanDialogueRequest(speaker: string, context: NpcContext, interaction: "ambient" | "beat"): DialogueRequest {
+    const scene = this.scene;
+    const day = scene.dayNight.dayCount;
+    return {
+      speaker,
+      speakerType: "human",
+      target: "Mamma Cat",
+      interaction,
+      gameState: {
+        chapter: scene.chapters.chapter,
+        timeOfDay: scene.dayNight.currentPhase,
+        trustWithSpeaker: scene.trust.global,
+        hunger: scene.stats.hunger,
+        thirst: scene.stats.thirst,
+        energy: scene.stats.energy,
+        daysSurvived: day,
+        knownCats: Array.from(scene.knownCats),
+        recentEvents: buildNpcStoryFacts(speaker, "human", scene.registry, day),
+      },
+      conversationHistory: context.records.map(toConversationEntry),
+      promptConversationHistory: context.promptRecords.map(toConversationEntry),
+      // An encounter beat is never a first conversation.
+      isFirstConversation: interaction === "ambient" && context.records.length === 0,
+      // A restored older save can hide every record from the prompt, but any record means they
+      // have met, so the stage never says "first conversation" when the flag above doesn't.
+      relationshipStage: humanRelationshipStage(
+        speaker,
+        scene.registry,
+        Math.max(new Set(context.promptRecords.map((r) => r.gameDay)).size, context.records.length > 0 ? 1 : 0),
+      ),
+      npcMemories: context.memories,
+    };
+  }
+
+  /**
+   * Remember a line a named human was seen saying, as that human's history
+   * (`mammaCatTurn` is the game-authored fact of what Mamma Cat did), plus
+   * the AI's impression of her if it offered one. Fire-and-forget.
+   */
+  recordHumanLines(
+    speaker: string,
+    kind: ConversationKind,
+    lines: string[],
+    mammaCatTurn: string,
+    memoryNote?: DialogueResponse["memoryNote"],
+  ): void {
+    const scene = this.scene;
+    const gameDay = scene.dayNight.dayCount;
+    const timestamp = scene.dayNight.totalGameTimeMs;
+    void storeConversation(
+      buildConversationRecord(
+        {
+          timestamp,
+          realTimestamp: Date.now(),
+          gameDay,
+          chapter: scene.chapters.chapter,
+          timeOfDay: scene.dayNight.currentPhase,
+          hunger: scene.stats.hunger,
+          thirst: scene.stats.thirst,
+          energy: scene.stats.energy,
+        },
+        { speaker, kind, lines, mammaCatTurn },
+      ),
+    );
+    if (memoryNote) void addNpcMemory(speaker, { ...memoryNote, source: "ai", gameDay, timestamp });
+  }
+
+  /** Cancel an in-flight AI ambient bubble (a Camille beat is taking the stage). */
+  abortAmbientAi(): void {
+    this.humanAiBubbleAbort?.abort();
   }
 
   /** Pick a scripted line for a human greeting, honouring Camille's per-cat overrides. */
@@ -688,6 +683,22 @@ export class HumanPresenceSystem {
     );
   }
 
+  /** Story moments where humans keep quiet: a Camille beat armed or being staged, or the beat-5 pickup. */
+  private isGreetingHeld(human: HumanNPC, toMammaCat: boolean): boolean {
+    return this.scene.playerInputFrozen || this.scene.camille.holdsGreetingFrom(human, toMammaCat);
+  }
+
+  /** Re-checked when an async greeting line arrives: the scene may have moved on meanwhile. */
+  private mayGreetMammaCat(human: HumanNPC): boolean {
+    return (
+      human.active &&
+      human.visible &&
+      !human.isEncounterPaused &&
+      !this.isGreetingHeld(human, true) &&
+      this.isHumanCloseToMammaCat(human)
+    );
+  }
+
   /**
    * Record Manu's daily visit to Fluffy. Fluffy is attached to Manu in
    * her persona, so any close pass counts as "her human came by today"
@@ -696,7 +707,7 @@ export class HumanPresenceSystem {
    * so the per-frame call is O(1) once recorded; the registry write is
    * picked up by {@link SaveSystem} (the key is in TRACKED_KEYS) and
    * surfaced into Fluffy's AI prompt by
-   * {@link CatDialogueController.buildRecentDialogueEvents} so the LLM
+   * {@link buildNpcStoryFacts} so the LLM
    * stops making Fluffy ask after her human when he was just here.
    *
    * Defensive `readCount` semantics on the registry value match the
@@ -744,6 +755,10 @@ export class HumanPresenceSystem {
    * helper so the game never shows more than one visual style for
    * human speech.
    *
+   * Long lines wrap at {@link HUMAN_BUBBLE_WRAP_PX}; the bubble sits on
+   * its bottom edge just above the head, so extra lines grow upward and
+   * stay on screen.
+   *
    * Lifetime is controlled by `opts.persistent`:
    *  - `false` (default): auto-fades at ~2.5s and self-destroys; used
    *    for ambient greetings where the player keeps moving.
@@ -755,7 +770,7 @@ export class HumanPresenceSystem {
   renderHumanBubble(human: HumanNPC, line: string, opts?: { persistent?: boolean }): Phaser.GameObjects.Text {
     const scene = this.scene;
     const bubble = scene.add
-      .text(human.x, human.y - 30, line, {
+      .text(human.x, human.y - 22, line, {
         fontFamily: "Arial, Helvetica, sans-serif",
         fontSize: "10px",
         color: "#ffffff",
@@ -763,14 +778,16 @@ export class HumanPresenceSystem {
         strokeThickness: 2,
         backgroundColor: "#00000066",
         padding: { x: 4, y: 2 },
+        align: "center",
+        wordWrap: { width: HUMAN_BUBBLE_WRAP_PX },
       })
-      .setOrigin(0.5)
+      .setOrigin(0.5, 1)
       .setDepth(8);
 
     if (!opts?.persistent) {
       scene.tweens.add({
         targets: bubble,
-        y: human.y - 50,
+        y: human.y - 42,
         alpha: 0,
         delay: 2500,
         duration: 1000,

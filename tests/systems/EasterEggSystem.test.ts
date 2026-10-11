@@ -14,6 +14,9 @@ vi.mock("phaser", () => ({
   },
 }));
 
+const addNpcMemory = vi.hoisted(() => vi.fn(async () => {}));
+vi.mock("../../src/services/ConversationStore", () => ({ addNpcMemory }));
+
 import { EasterEggSystem, EGGS_KEY } from "../../src/systems/EasterEggSystem";
 import type { GameScene } from "../../src/scenes/GameScene";
 
@@ -34,13 +37,20 @@ const places = [
   { name: "egg_kitten_2", type: "egg_kitten", x: 1300, y: 100, props: {} },
 ];
 
+/** Her press shows the cat's story and she reads it to the end. */
+function hear(eggs: EasterEggSystem, cat: string): string[] | null {
+  const story = eggs.catStory(cat);
+  story?.heard();
+  return story?.lines ?? null;
+}
+
 function makeScene(reg = new Map<string, unknown>()) {
   let hour = 12;
   const shown: string[][] = [];
   const camille = { x: 2000, y: 100, visible: true, active: true };
   const scene = {
     registry: { get: (k: string) => reg.get(k), set: (k: string, v: unknown) => reg.set(k, v) },
-    dayNight: { dayCount: 4, currentPhase: "day" },
+    dayNight: { dayCount: 4, currentPhase: "day", totalGameTimeMs: 3_000 },
     sunday: { hour: () => hour },
     places,
     map: { findObject: () => null, tileWidth: 32 },
@@ -62,7 +72,7 @@ function makeScene(reg = new Map<string, unknown>()) {
     dialogue: { isActive: false, show: (lines: string[]) => shown.push(lines) },
     audio: { playKitten: vi.fn() },
     emotes: { show: vi.fn() },
-    humans: { renderHumanBubble: vi.fn() },
+    humans: { renderHumanBubble: vi.fn(), recordHumanLines: vi.fn() },
     camille: { activeCamilleNPC: camille, activeKishNPC: null, pendingEncounterNumber: 0 },
     trust: { global: 0, getCatTrust: () => 0 },
     npcs: [],
@@ -94,6 +104,12 @@ describe("EasterEggSystem", () => {
     expect(lines).toContain('"With all my love"');
     expect(lines).toContain('"your nom noms"');
     expect((reg.get(EGGS_KEY) as { letter: string }).letter).toBe("given");
+    // Camille says nothing, so she keeps it as a fact, not as a line she said
+    expect(addNpcMemory).toHaveBeenCalledWith(
+      "Camille",
+      expect.objectContaining({ kind: "event", source: "scripted", gameDay: 4, timestamp: 3_000, value: expect.stringMatching(/^On day 4, Mamma Cat brought you a folded letter/) }),
+    );
+    expect(scene.humans.recordHumanLines).not.toHaveBeenCalled();
   });
 
   it("a save made mid-carry puts the item back where it lay", () => {
@@ -110,7 +126,7 @@ describe("EasterEggSystem", () => {
   it("Pedigree's collar takes three digs, and only then does she thank Mamma Cat (once)", () => {
     const { scene, shown } = makeScene(new Map([["PEDIGREE_TALKS", 1]]));
     const eggs = new EasterEggSystem(scene);
-    expect(eggs.takeCatLines("Pedigree")).toBeNull();
+    expect(eggs.catStory("Pedigree")).toBeNull();
     scene.player.x = 700;
     scene.player.y = 110;
     eggs.tryInteract();
@@ -118,35 +134,48 @@ describe("EasterEggSystem", () => {
     expect(shown).toHaveLength(0);
     eggs.tryInteract();
     expect(shown[0]?.join(" ")).toMatch(/name on the tag is faded/);
-    expect(eggs.takeCatLines("Pedigree")?.join(" ")).toMatch(/never left her side/);
-    expect(eggs.takeCatLines("Pedigree")).toBeNull();
+    expect(hear(eggs, "Pedigree")?.join(" ")).toMatch(/never left her side/);
+    expect(eggs.catStory("Pedigree")).toBeNull();
+  });
+
+  it("a thanks closed before its end isn't spent: it plays again and the save still owes it", () => {
+    const { scene, reg } = makeScene(new Map<string, unknown>([["PEDIGREE_TALKS", 1]]));
+    const eggs = new EasterEggSystem(scene);
+    scene.player.x = 700;
+    scene.player.y = 110;
+    for (let i = 0; i < 3; i++) eggs.tryInteract();
+    expect(eggs.catStory("Pedigree")).not.toBeNull(); // shown, closed early
+    expect(eggs.catStory("Pedigree")?.lines.join(" ")).toMatch(/never left her side/);
+    expect((reg.get(EGGS_KEY) as { pedigreeThanked?: boolean }).pedigreeThanked).toBeUndefined();
+    eggs.catStory("Pedigree")?.heard();
+    expect((reg.get(EGGS_KEY) as { pedigreeThanked?: boolean }).pedigreeThanked).toBe(true);
   });
 
   it("Blacky's Midnight Story is told only around 3am, once", () => {
     const { scene, setHour } = makeScene(new Map([["MET_BLACKY", true]]));
     const eggs = new EasterEggSystem(scene);
     setHour(1);
-    expect(eggs.takeCatLines("Blacky")).toBeNull();
+    expect(eggs.catStory("Blacky")).toBeNull();
     setHour(3);
-    expect(eggs.takeCatLines("Blacky")?.[1]).toMatch(/one before you/);
-    expect(eggs.takeCatLines("Blacky")).toBeNull();
+    expect(hear(eggs, "Blacky")?.[1]).toMatch(/one before you/);
+    expect(eggs.catStory("Blacky")).toBeNull();
   });
 
   it("never takes the place of a first meeting: Blacky's story and Pedigree's thanks wait until they've met her", () => {
     const { scene, reg, setHour } = makeScene();
     const eggs = new EasterEggSystem(scene);
     setHour(3);
-    expect(eggs.takeCatLines("Blacky")).toBeNull();
+    expect(eggs.catStory("Blacky")).toBeNull();
     scene.player.x = 700;
     scene.player.y = 110;
     eggs.tryInteract();
     eggs.tryInteract();
     eggs.tryInteract();
-    expect(eggs.takeCatLines("Pedigree")).toBeNull();
+    expect(eggs.catStory("Pedigree")).toBeNull();
     reg.set("MET_BLACKY", true);
     reg.set("PEDIGREE_TALKS", 1);
-    expect(eggs.takeCatLines("Blacky")).not.toBeNull();
-    expect(eggs.takeCatLines("Pedigree")).not.toBeNull();
+    expect(eggs.catStory("Blacky")).not.toBeNull();
+    expect(eggs.catStory("Pedigree")).not.toBeNull();
   });
 
   it("once the plush is given to Kish it can't be picked up (and handed over) again", () => {
@@ -161,6 +190,13 @@ describe("EasterEggSystem", () => {
     scene.player.y = 400;
     expect(eggs.tryInteract()).toBe(true); // gives it to Kish
     expect((reg.get(EGGS_KEY) as { plush: string }).plush).toBe("given");
+    // Kish remembers what she said when Mamma Cat brought it
+    expect(scene.humans.recordHumanLines).toHaveBeenCalledWith(
+      "Kish",
+      "story",
+      ["OMG it's a TINY cat! Can we keep it?"],
+      "Mamma Cat brought Kish a tiny stuffed cat she had found.",
+    );
     scene.player.x = 400;
     scene.player.y = 105;
     expect(eggs.tryInteract()).toBe(false);
@@ -175,6 +211,33 @@ describe("EasterEggSystem", () => {
     const eggs = new EasterEggSystem(scene);
     eggs.update(0, 16);
     expect((reg.get(EGGS_KEY) as { gathered?: boolean }).gathered).toBeUndefined();
+  });
+
+  it("the gathering holds the last encounter on the scene clock, so a long pause can't cut it short", () => {
+    const { scene } = makeScene();
+    scene.dayNight.currentPhase = "evening";
+    (scene.camille as { pendingEncounterNumber: number }).pendingEncounterNumber = 5;
+    scene.trust.getCatTrust = () => 100;
+    const blacky = { npcName: "Blacky", active: true, x: 50, y: 50 };
+    (scene as { npcs: unknown[] }).npcs = [{ cat: blacky, indicator: { setHidden: vi.fn() } }];
+    Object.assign(scene, { hushCrowd: vi.fn(), colony: { knowsCat: () => false } });
+    const timers: Array<{ delay: number; fire: () => void }> = [];
+    scene.time.delayedCall = vi.fn((delay: number, fire: () => void) => {
+      timers.push({ delay, fire });
+      return { remove: vi.fn() };
+    }) as never;
+    const eggs = new EasterEggSystem(scene);
+
+    eggs.update(0, 16);
+    expect(eggs.holdingEncounter).toBe(true);
+
+    // paused behind a menu: time.now runs on, the scene's timers don't
+    scene.time.now = 10 * 60_000;
+    expect(eggs.holdingEncounter).toBe(true);
+
+    const hold = timers.reduce((a, b) => (b.delay > a.delay ? b : a));
+    hold.fire();
+    expect(eggs.holdingEncounter).toBe(false);
   });
 
   it("finds each hidden kitten once, when she comes close", () => {

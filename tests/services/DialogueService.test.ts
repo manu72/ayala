@@ -10,7 +10,7 @@ function makeRequest(overrides: Partial<DialogueRequest> = {}): DialogueRequest 
     gameState: {
       chapter: 1,
       timeOfDay: 'day',
-      trustGlobal: 0,
+     
       trustWithSpeaker: 0,
       hunger: 80,
       thirst: 80,
@@ -129,7 +129,7 @@ describe('ScriptedDialogueService', () => {
       gameState: {
         chapter: 1,
         timeOfDay: 'day',
-        trustGlobal: 20,
+       
         trustWithSpeaker: 20,
         hunger: 80,
         thirst: 80,
@@ -158,5 +158,60 @@ describe('ScriptedDialogueService', () => {
     const result = await svc.getUnplayedDialogue(req)
 
     expect(result).toBeNull()
+  })
+})
+
+describe('ScriptedDialogueService.getFallbackDialogue (AI failed)', () => {
+  const returnScript = (speakerPose?: DialogueResponse['speakerPose']): Record<string, DialogueScript[]> => ({
+    TestCat: [
+      {
+        id: 'test_return',
+        condition: () => true,
+        response: { lines: ['Welcome back.'], speakerPose, emote: 'heart', trustChange: 5, event: 'test_return' },
+      },
+    ],
+  })
+  const played = makeRequest({ conversationHistory: [{ timestamp: 1, speaker: 'TestCat', text: 'Welcome back.' }] })
+
+  it('plays an unplayed script verbatim', async () => {
+    const result = await new ScriptedDialogueService(returnScript('friendly')).getFallbackDialogue(makeRequest())
+    expect(result.lines).toEqual(['Welcome back.'])
+    expect(result.placeholder).toBeUndefined()
+  })
+
+  it.each([
+    ['friendly', '*TestCat blinks slowly at you.*'],
+    ['wary', '*TestCat watches you, tail low.*'],
+    ['hostile', "*TestCat's ears flatten.*"],
+    ['curious', '*TestCat tilts their head at you.*'],
+    ['submissive', '*TestCat tilts their head at you.*'],
+    ['sleeping', '*TestCat is half asleep.*'],
+    [undefined, '*TestCat regards you quietly.*'],
+  ] as const)('keeps a used-up script\'s event and trust behind a %s placeholder line', async (pose, line) => {
+    const result = await new ScriptedDialogueService(returnScript(pose)).getFallbackDialogue(played)
+    expect(result).toEqual({
+      lines: [line],
+      speakerPose: pose,
+      emote: 'heart',
+      trustChange: 5,
+      event: 'test_return',
+      placeholder: true,
+    })
+  })
+
+  it('leaves humans on the plain default line', async () => {
+    const svc = new ScriptedDialogueService({})
+    const result = await svc.getFallbackDialogue(makeRequest({ speaker: 'Rose', speakerType: 'human' }))
+    expect(result).toEqual({ lines: ['...'] })
+  })
+
+  it('does not replay a script that played 12 exchanges ago (full history, not a window)', async () => {
+    const svc = new ScriptedDialogueService(testScripts)
+    const history = [
+      { timestamp: 0, speaker: 'TestCat', text: 'Hello, newcomer!' },
+      { timestamp: 1, speaker: 'TestCat', text: 'Welcome back.' },
+      ...Array.from({ length: 11 }, (_, i) => ({ timestamp: i + 2, speaker: 'TestCat', text: `AI line ${i}` })),
+    ]
+    expect(await svc.getUnplayedDialogue(makeRequest({ conversationHistory: history }))).toBeNull()
   })
 })

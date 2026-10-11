@@ -14,6 +14,8 @@ import {
   CAMILLE_ENCOUNTER_5_JOURNEY_STEPS,
   CAMILLE_BEAT5_ACCEPT_LINE,
   CAMILLE_BEAT5_TIMEOUT_LINE,
+  CAMILLE_ENCOUNTER_MEMORY,
+  beatSpokenSlots,
   mergeCamilleBeatSteps,
   type EncounterStep,
 } from "../../src/data/camille-encounter-beats";
@@ -235,5 +237,33 @@ describe("mergeCamilleBeatSteps", () => {
     const before = JSON.parse(JSON.stringify(beat3Steps));
     mergeCamilleBeatSteps(beat3Steps, ["a", "b"]);
     expect(beat3Steps).toEqual(before);
+  });
+});
+
+describe("beat prompts and memory", () => {
+  it.each([2, 3, 4] as const)("beat %i's objective leaves the line count to the slot instructions", (n) => {
+    expect(CAMILLE_ENCOUNTER_BEATS[n].objective).not.toMatch(/Produce|lines/);
+  });
+
+  it("beat 4's objective does not put Kish on stage (she may be off-screen)", () => {
+    expect(CAMILLE_ENCOUNTER_BEATS[4].objective).not.toContain("Kish");
+  });
+
+  it("beatSpokenSlots returns the narrator text beside each authored spoken line, in order", () => {
+    expect(beatSpokenSlots(CAMILLE_ENCOUNTER_BEATS[3].steps)).toEqual([
+      "She closes her eyes. Slowly. Opens them again. That means... trust.",
+      "Slow blink back?",
+    ]);
+    for (const n of [2, 3, 4] as const) {
+      const { steps } = CAMILLE_ENCOUNTER_BEATS[n];
+      expect(beatSpokenSlots(steps)).toHaveLength(mergeCamilleBeatSteps(steps, null).spokenRendered.length);
+    }
+  });
+
+  it("has one second-person encounter fact for encounters 1-4 that claims no blink back", () => {
+    for (const n of [1, 2, 3, 4] as const) {
+      expect(CAMILLE_ENCOUNTER_MEMORY[n]).toMatch(new RegExp(`^Encounter ${n}: .*\\byour?\\b`));
+    }
+    expect(CAMILLE_ENCOUNTER_MEMORY[3]).not.toMatch(/blinked back/);
   });
 });

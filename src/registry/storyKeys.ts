@@ -15,9 +15,10 @@ export const StoryKeys = {
    * Last in-game day Manu came within {@link CAT_PERSON_GREET_DIST} of
    * Fluffy. Recorded one-shot per game day from {@link HumanPresenceSystem.tick}
    * regardless of Manu's `shouldDeferManuGreet` skip, because Fluffy is
-   * attached to Manu (see `src/ai/personas/fluffy.md`) and notices him on
-   * every close pass. Surfaced into Fluffy's AI prompt via `recentEvents`
-   * by {@link CatDialogueController.buildRecentDialogueEvents} so Fluffy
+   * attached to Manu — he is her human (see `src/ai/personas/fluffy.md`) —
+   * and she notices him on every close pass. Surfaced into Fluffy's AI
+   * prompt via `recentEvents` by
+   * {@link buildNpcStoryFacts} so Fluffy
    * stops asking after Manu when he has just visited. Default `undefined` /
    * 0 → message omitted (existing saves and pre-Chapter-5 runs).
    */
@@ -25,6 +26,8 @@ export const StoryKeys = {
   /** Per named cat: observed game-time departure/reunion, consumed on the first displayed exchange of a visit. */
   CAT_DIALOGUE_SEPARATIONS: "CAT_DIALOGUE_SEPARATIONS",
   DUMPING_EVENTS_SEEN: "DUMPING_EVENTS_SEEN",
+  /** EasterEggSystem's saved state (collar dug, Pedigree thanked, Blacky's story told, …). */
+  EGGS: "EGGS",
   ENCOUNTER_5_COMPLETE: "ENCOUNTER_5_COMPLETE",
   NEW_GAME_PLUS: "NEW_GAME_PLUS",
   GAME_COMPLETED: "GAME_COMPLETED",

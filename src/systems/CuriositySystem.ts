@@ -186,18 +186,21 @@ export class CuriositySystem {
 
   /**
    * A rumour this cat has for her right now, if any: it takes this Space press (her usual
-   * conversation is the next one) and never touches trust.
+   * conversation is the next one) and never touches trust. It counts as heard only once she has
+   * heard it out (`heard`); until then it plays again on her next press.
    */
-  takeRumour(catName: string): string[] | null {
+  rumour(catName: string): { lines: string[]; heard: () => void } | null {
     const day = this.scene.dayNight.dayCount;
     const talkedKey = TALKED[catName];
     if (!talkedKey || !this.scene.registry.get(talkedKey)) return null;
     const r = RUMOURS.find((x) => x.cat === catName && this.state.heard[x.id] === undefined && x.when(this.state, day));
     if (!r) return null;
-    this.state.heard[r.id] = day;
-    r.then?.(this.state, day);
-    this.persist();
-    return r.lines;
+    const heard = (): void => {
+      this.state.heard[r.id] = day;
+      r.then?.(this.state, day);
+      this.persist();
+    };
+    return { lines: r.lines, heard };
   }
 
   /** Space at the empty shop's glass. False when she isn't there. */

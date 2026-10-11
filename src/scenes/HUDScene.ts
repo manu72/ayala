@@ -267,6 +267,7 @@ export class HUDScene extends Phaser.Scene {
             hideCloseButton: true,
           }
         : undefined,
+      () => (this.scene.get("GameScene") as GameScene | undefined)?.isPaused === true,
     );
 
     // ──── Pause menu ────
@@ -650,9 +651,8 @@ export class HUDScene extends Phaser.Scene {
       this.pauseContainer.setVisible(false);
       const gameScene = this.scene.get("GameScene") as GameScene;
       if (!this.scene.isActive("JournalScene")) {
-        gameScene.isPaused = true;
+        gameScene.pauseWorld(true);
         gameScene.journalOpenedFromPause = true;
-        gameScene.physics.pause();
         this.scene.launch("JournalScene", { fromPauseMenu: true });
       }
     });

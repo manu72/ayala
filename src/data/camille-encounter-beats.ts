@@ -42,7 +42,7 @@ export interface AIEncounterBeat {
 export const CAMILLE_ENCOUNTER_BEATS: Record<2 | 3 | 4, AIEncounterBeat> = {
   2: {
     objective:
-      "Second meeting. She recognises Mamma Cat. She stays a respectful distance, crouches, and places a treat on the ground between them. She does not reach; she waits. Produce 1–2 short spoken lines in Camille's voice only — no narration.",
+      "Second meeting. She recognises Mamma Cat. She stays a respectful distance, crouches, and places a treat on the ground between them. She does not reach; she waits.",
     steps: [
       {
         narrator: "She sees you. She's not coming closer. She's... waiting. For you.",
@@ -56,7 +56,7 @@ export const CAMILLE_ENCOUNTER_BEATS: Record<2 | 3 | 4, AIEncounterBeat> = {
   },
   3: {
     objective:
-      "Third meeting. She slow-blinks at Mamma Cat — cat trust language she's learnt — and invites a slow blink back. Produce 2 short spoken lines in Camille's voice only — no narration.",
+      "Third meeting. She slow-blinks at Mamma Cat — cat trust language she's learnt — and invites a slow blink back.",
     steps: [
       {
         narrator: "She closes her eyes. Slowly. Opens them again. That means... trust.",
@@ -73,8 +73,9 @@ export const CAMILLE_ENCOUNTER_BEATS: Record<2 | 3 | 4, AIEncounterBeat> = {
     ],
   },
   4: {
+    // No Kish clause: she may be off-screen when the beat plays.
     objective:
-      "Fourth meeting. Mamma Cat finally lets her fingers touch — first physical contact. Her niece Kish is loud nearby; Camille keeps her steady. Produce 1–2 short spoken lines in Camille's voice only — no narration.",
+      "Fourth meeting. Mamma Cat finally lets her fingers touch — first physical contact.",
     steps: [
       {
         narrator: "Her hand smells like fish treats and soap. And something else. Home.",
@@ -87,6 +88,24 @@ export const CAMILLE_ENCOUNTER_BEATS: Record<2 | 3 | 4, AIEncounterBeat> = {
     ],
   },
 };
+
+/**
+ * What happened in each completed encounter, in the second person for
+ * Camille. Authored from the narrator and HUD lines only (beat 2's HUD says
+ * "She watches you eat"; beat 3 never confirms a blink back). Used as her
+ * story facts and as the Mamma Cat side of the stored beat records.
+ */
+export const CAMILLE_ENCOUNTER_MEMORY: Record<1 | 2 | 3 | 4, string> = {
+  1: "Encounter 1: you first crossed paths with her on your evening rounds, moving slowly and gently.",
+  2: "Encounter 2: you crouched at a distance and set a treat on the ground between you, then waited. She ate while you watched, and you didn't reach for her.",
+  3: "Encounter 3: you slow-blinked at her, the way cats show trust, and something shifted between you.",
+  4: "Encounter 4: she let your fingers touch her for the first time and pushed her head against them.",
+};
+
+/** Narrator text shown beside each authored spoken slot, in order (the AI fills these slots). */
+export function beatSpokenSlots(steps: ReadonlyArray<EncounterStep>): string[] {
+  return steps.filter((s) => s.spoken !== undefined).map((s) => s.narrator);
+}
 
 /**
  * Phase A of beat 5: Camille asks. Runs before the player decision window.

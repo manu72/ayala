@@ -3,9 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("phaser", () => ({
   default: { Math: { Distance: { Between: (ax: number, ay: number, bx: number, by: number) => Math.hypot(ax - bx, ay - by) } } },
 }));
-vi.mock("../../src/services/ConversationStore", () => ({
-  getRecentConversations: vi.fn(), getConversationCount: vi.fn(), getNpcMemories: vi.fn(),
-  storeConversation: vi.fn(), addNpcMemory: vi.fn(),
+vi.mock("../../src/services/ConversationStore", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/services/ConversationStore")>()),
+  getRecentConversations: vi.fn(), getNpcMemories: vi.fn(), storeConversation: vi.fn(), addNpcMemory: vi.fn(),
 }));
 
 import { CatDialogueController } from "../../src/systems/CatDialogueController";
@@ -13,13 +13,53 @@ import { GP } from "../../src/config/gameplayConstants";
 import { StoryKeys } from "../../src/registry/storyKeys";
 import { RECENT_DIALOGUE_WINDOW_MS } from "../../src/utils/dialogueRecency";
 import { matchScriptedResponse } from "../../src/services/AIDialogueService";
-import { getRecentConversations, getConversationCount, getNpcMemories, storeConversation, addNpcMemory, type ConversationRecord } from "../../src/services/ConversationStore";
+import { FallbackDialogueService } from "../../src/services/FallbackDialogueService";
+import { ScriptedDialogueService } from "../../src/services/DialogueService";
+import { NPC_DIALOGUE_SCRIPTS } from "../../src/data/npc-dialogue";
+import { getRecentConversations, getNpcMemories, storeConversation, addNpcMemory, type ConversationRecord, type NpcMemory } from "../../src/services/ConversationStore";
 import type { DialogueRequest, DialogueResponse } from "../../src/services/DialogueService";
+import type { DialogueHooks } from "../../src/systems/DialogueSystem";
 import type { GameScene } from "../../src/scenes/GameScene";
 import type { NPCCat } from "../../src/sprites/NPCCat";
 
 function cat(name: string, x = 0): NPCCat {
   return { npcName: name, x, y: 0, active: true, state: "idle", engageDialogue: vi.fn(), disengageDialogue: vi.fn() } as unknown as NPCCat;
+}
+
+/** DialogueSystem's contract: onHide(completed) on every hide, true only past the last line; onComplete past the last line, or on an early close with completeOnClose. */
+function fakeDialogue() {
+  let open: { lines: string[]; line: number; onComplete?: () => void; hooks?: DialogueHooks } | null = null;
+  const hide = (completed: boolean) => {
+    const hooks = open?.hooks;
+    open = null;
+    dialogue.isActive = false;
+    hooks?.onHide?.(completed);
+  };
+  const dialogue = {
+    isActive: false,
+    show: vi.fn((lines: string[], onComplete?: () => void, hooks?: DialogueHooks) => {
+      if (dialogue.isActive) return;
+      open = { lines, line: 0, onComplete, hooks };
+      dialogue.isActive = true;
+      hooks?.onLineShown?.(0);
+    }),
+    advance() {
+      const current = open;
+      if (!current) return;
+      current.line++;
+      if (current.line < current.lines.length) return current.hooks?.onLineShown?.(current.line);
+      hide(true);
+      current.onComplete?.();
+    },
+    /** Click outside the box / the x. */
+    closeEarly() {
+      const done = open?.hooks?.completeOnClose ? open.onComplete : undefined;
+      if (open) hide(false);
+      done?.();
+    },
+    dismiss: vi.fn(() => { if (open) hide(false); }),
+  };
+  return dialogue;
 }
 
 function fixture() {
@@ -28,17 +68,11 @@ function fixture() {
     lines: ["There is shade here."], trustBefore: 20, trustAfter: 20, chapter: 2,
   }));
   vi.mocked(getRecentConversations).mockImplementation(async (name, limit) => history.filter((r) => r.speaker === name).slice(-(limit ?? 20)));
-  vi.mocked(getConversationCount).mockImplementation(async (name) => history.filter((r) => r.speaker === name).length);
   vi.mocked(getNpcMemories).mockResolvedValue([]);
   vi.mocked(storeConversation).mockImplementation(async (record) => { history.push(record); });
   vi.mocked(addNpcMemory).mockResolvedValue(undefined);
 
-  let completion: (() => void) | undefined;
-  const dialogue = {
-    isActive: false,
-    show: vi.fn((_lines: string[], onComplete?: () => void) => { dialogue.isActive = true; completion = onComplete; }),
-    dismiss: vi.fn(() => { dialogue.isActive = false; completion = undefined; }),
-  };
+  const dialogue = fakeDialogue();
   const getDialogue = vi.fn<(request: DialogueRequest) => Promise<DialogueResponse>>().mockResolvedValue({ lines: ["Tell me more."] });
   const removeThinking = vi.fn();
   const registryData = new Map<string, unknown>();
@@ -48,17 +82,23 @@ function fixture() {
     dayNight: { totalGameTimeMs: 10_000, dayCount: 1, currentPhase: "dawn" },
     chapters: { chapter: 2 },
     stats: { hunger: 70, thirst: 70, energy: 90 },
-    trust: { global: 20, getCatTrust: vi.fn(() => 20), returnConversation: vi.fn() },
+    trust: { global: 20, getCatTrust: vi.fn(() => 20), returnConversation: vi.fn(), firstConversation: vi.fn() },
     knownCats: new Set(["Blacky", "Tiger"]),
     player: { x: 0, y: 0, faceToward: vi.fn() },
+    playerInputFrozen: false,
     time: { now: 10_000, delayedCall: vi.fn(() => ({ remove: removeThinking })) },
     emotes: { show: vi.fn() },
+    audio: { playCatGrowl: vi.fn() },
+    narrateIfPerceivable: vi.fn(),
     hasLineOfSight: vi.fn(() => true),
     registry: {
       get: vi.fn((key: string) => registryData.get(key)),
       set: vi.fn((key: string, value: unknown) => registryData.set(key, value)),
     },
-    curiosity: { takeRumour: vi.fn<() => string[] | null>().mockReturnValue(null) },
+    curiosity: { rumour: vi.fn<() => { lines: string[]; heard: () => void } | null>().mockReturnValue(null) },
+    npcs: [],
+    addKnownCat: vi.fn(),
+    autoSave: vi.fn(),
     syncTrustDisposition: vi.fn(),
     scene: { get: vi.fn(() => ({ showNarration: vi.fn() })) },
   };
@@ -73,10 +113,9 @@ function fixture() {
     scene.player.x = distance;
     controller.refreshLastPartner(blacky, distance, scene.time.now);
   }
+  /** Read the open dialogue through to the end. */
   function close() {
-    dialogue.isActive = false;
-    completion?.();
-    completion = undefined;
+    while (dialogue.isActive) dialogue.advance();
     controller.tickEngagement();
   }
   function reload() {
@@ -86,17 +125,22 @@ function fixture() {
     for (const [key, value] of Object.entries(variables)) registryData.set(key, value);
     controller = new CatDialogueController(scene as unknown as GameScene);
   }
-  async function speak(speaker = blacky): Promise<DialogueRequest> {
+  /** Space on the cat; the reply is on screen when this resolves. */
+  async function open(speaker = blacky): Promise<DialogueRequest> {
     const previousDisplays = dialogue.show.mock.calls.length;
     const requestIndex = getDialogue.mock.calls.length;
     controller.show(speaker);
     await vi.waitFor(() => expect(dialogue.show).toHaveBeenCalledTimes(previousDisplays + 1));
     const request = getDialogue.mock.calls[requestIndex]?.[0];
     if (!request) throw new Error("Expected an AI dialogue request");
+    return request;
+  }
+  async function speak(speaker = blacky): Promise<DialogueRequest> {
+    const request = await open(speaker);
     close();
     return request;
   }
-  return { get controller() { return controller; }, blacky, scene, history, registryData, getDialogue, removeThinking, advanceGame, observe, close, reload, speak };
+  return { get controller() { return controller; }, blacky, scene, history, registryData, getDialogue, removeThinking, advanceGame, observe, close, reload, open, speak };
 }
 
 beforeEach(() => vi.resetAllMocks());
@@ -240,7 +284,7 @@ describe("CatDialogueController — encounter continuity", () => {
     f.observe(GP.DIALOGUE_BREAK_DIST + 1);
     f.advanceGame(RECENT_DIALOGUE_WINDOW_MS + 1);
     f.observe(0);
-    f.scene.curiosity.takeRumour.mockReturnValueOnce(["Look under the bench."]);
+    f.scene.curiosity.rumour.mockReturnValueOnce({ lines: ["Look under the bench."], heard: vi.fn() });
     f.controller.show(f.blacky);
     f.close();
     expect((await f.speak()).conversationRecency).toEqual({ cadence: "continuing_conversation" });
@@ -270,5 +314,215 @@ describe("CatDialogueController — encounter continuity", () => {
     expect(request.promptConversationHistory).toEqual([]);
     expect(request.conversationRecency).toBeUndefined();
     expect(matchScriptedResponse(request)?.event).toBe(event);
+  });
+});
+
+describe("CatDialogueController — what a cat remembers", () => {
+  const blackyReturn = NPC_DIALOGUE_SCRIPTS.Blacky?.find((s) => s.id === "blacky_return")?.response.lines.join(" ");
+
+  it("never replays a used-up return line, however many talks follow (talk 13)", async () => {
+    const f = fixture();
+    f.history.splice(0);
+    const ai = vi.fn(async (request: DialogueRequest): Promise<DialogueResponse> => ({
+      lines: [`New thought ${ai.mock.calls.length}.`],
+      event: matchScriptedResponse(request)?.event,
+    }));
+    const service = new FallbackDialogueService({ getDialogue: ai }, new ScriptedDialogueService(NPC_DIALOGUE_SCRIPTS));
+    f.getDialogue.mockImplementation((request) => service.getDialogue(request));
+    for (let talk = 0; talk < 13; talk++) await f.speak();
+    const shown = f.scene.dialogue.show.mock.calls.map(([lines]) => lines.join(" "));
+    expect(shown.filter((text) => text === blackyReturn)).toHaveLength(1);
+    expect(ai).toHaveBeenCalledTimes(11); // talks 3-13; talks 1-2 are blacky_first and blacky_return
+  });
+
+  it("New Game+ (cats met in the registry, history wiped) replays no first meeting and awards no first trust", async () => {
+    const f = fixture();
+    f.history.splice(0);
+    // As GameScene's New Game+ setup seeds them.
+    const seeded = { MET_BLACKY: true, TIGER_TALKS: 2, JAYCO_TALKS: 1, JAYCO_JR_TALKS: 1, FLUFFY_TALKS: 1, PEDIGREE_TALKS: 1, MET_GINGER_A: true, MET_GINGER_B: true };
+    for (const [key, value] of Object.entries(seeded)) f.registryData.set(key, value);
+    f.getDialogue.mockImplementation(async (request) => matchScriptedResponse(request) ?? { lines: ["..."] });
+    const names = ["Blacky", "Tiger", "Jayco", "Jayco Jr", "Fluffy", "Pedigree", "Ginger", "Ginger B"];
+    for (const name of names) {
+      const request = await f.speak(name === "Blacky" ? f.blacky : cat(name));
+      expect(request.isFirstConversation, name).toBe(false);
+      expect(matchScriptedResponse(request)?.event ?? "", name).not.toMatch(/_first$/);
+      if (name === "Tiger") expect(matchScriptedResponse(request)?.event).toBe("tiger_return");
+    }
+    expect(f.scene.trust.firstConversation).not.toHaveBeenCalled();
+    expect(f.registryData.get("TIGER_TALKS")).toBe(2);
+  });
+
+  it("without stored history (no IndexedDB) the registry still moves Tiger on, awarding first trust once", async () => {
+    const f = fixture();
+    f.history.splice(0);
+    vi.mocked(storeConversation).mockResolvedValue(undefined);
+    f.getDialogue.mockImplementation(async (request) => matchScriptedResponse(request) ?? { lines: ["..."] });
+    const tiger = cat("Tiger");
+    const events = [];
+    for (let talk = 0; talk < 3; talk++) events.push(matchScriptedResponse(await f.speak(tiger))?.event);
+    expect(events).toEqual(["tiger_first", "tiger_warmup", "tiger_return"]);
+    expect(f.scene.trust.firstConversation).toHaveBeenCalledTimes(1);
+  });
+
+  it("stores a rumour as a story record that the cat's scripts don't count as a talk", async () => {
+    const f = fixture();
+    const tiger = cat("Tiger");
+    const heard = vi.fn();
+    f.scene.curiosity.rumour.mockReturnValueOnce({ lines: ["There's a tabby in the empty shop."], heard });
+    f.controller.show(tiger);
+    f.close();
+    expect(heard).toHaveBeenCalledTimes(1);
+    expect(storeConversation).toHaveBeenCalledWith(expect.objectContaining({
+      speaker: "Tiger", kind: "story", lines: ["There's a tabby in the empty shop."], mammaCatTurn: "Mamma Cat came over and listened.",
+    }));
+
+    const request = await f.speak(tiger);
+    expect(request.conversationHistory).toHaveLength(1);
+    expect(request.promptConversationHistory?.map((entry) => entry.text)).toEqual(["There is shade here.", "There's a tabby in the empty shop."]);
+    expect(matchScriptedResponse(request)?.event).toBe("tiger_warmup");
+  });
+
+  it("leaves a rumour closed before its last line untold: not marked heard, not stored", () => {
+    const f = fixture();
+    const heard = vi.fn();
+    f.scene.curiosity.rumour.mockReturnValueOnce({ lines: ["One.", "Two."], heard });
+    f.controller.show(f.blacky);
+    f.scene.dialogue.closeEarly();
+    expect(heard).not.toHaveBeenCalled();
+    expect(storeConversation).not.toHaveBeenCalled();
+    expect(f.blacky.disengageDialogue).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["closes the box", (f: ReturnType<typeof fixture>) => f.scene.dialogue.closeEarly()],
+    ["walks away", (f: ReturnType<typeof fixture>) => {
+      f.scene.player.x = GP.DIALOGUE_BREAK_DIST + 1;
+      f.controller.tickEngagement();
+    }],
+  ])("finishes an exchange whose last line was read when the player %s", async (_how, leave) => {
+    const f = fixture();
+    f.getDialogue.mockResolvedValue({ lines: ["One.", "Two."], event: "blacky_return" });
+    await f.open();
+    f.scene.dialogue.advance();
+    leave(f);
+    expect(f.scene.dialogue.isActive).toBe(false);
+    expect(f.scene.trust.returnConversation).toHaveBeenCalledTimes(1);
+    expect(storeConversation).toHaveBeenCalledWith(expect.objectContaining({ speaker: "Blacky", kind: "talk", lines: ["One.", "Two."] }));
+    expect(f.controller.isSkippedPartner(f.blacky)).toBe(true);
+  });
+
+  it.each([
+    ["closes the box", (f: ReturnType<typeof fixture>) => f.scene.dialogue.closeEarly()],
+    ["walks away", (f: ReturnType<typeof fixture>) => {
+      f.scene.player.x = GP.DIALOGUE_BREAK_DIST + 1;
+      f.controller.tickEngagement();
+    }],
+    ["is interrupted by a story cut-in", (f: ReturnType<typeof fixture>) => f.scene.dialogue.dismiss()],
+  ])("leaves no trace when the player %s before the last line", async (_how, leave) => {
+    const f = fixture();
+    f.getDialogue.mockResolvedValue({ lines: ["One.", "Two."], event: "blacky_return" });
+    await f.open();
+    leave(f);
+    expect(f.blacky.disengageDialogue).toHaveBeenCalledTimes(1);
+    expect(f.scene.trust.returnConversation).not.toHaveBeenCalled();
+    expect(storeConversation).not.toHaveBeenCalled();
+  });
+
+  it("does not finish an exchange when the scene tears its dialogue down", async () => {
+    const f = fixture();
+    f.getDialogue.mockResolvedValue({ lines: ["Only line."], event: "blacky_return" });
+    await f.open();
+    f.scene.dialogue.dismiss();
+    f.controller.shutdown();
+    expect(f.scene.trust.returnConversation).not.toHaveBeenCalled();
+    expect(storeConversation).not.toHaveBeenCalled();
+  });
+
+  it("applies a placeholder's scripted event and trust but doesn't store it as speech", async () => {
+    const f = fixture();
+    f.getDialogue.mockResolvedValue({ lines: ["*Blacky blinks slowly at you.*"], event: "blacky_return", placeholder: true });
+    await f.speak();
+    expect(f.scene.trust.returnConversation).toHaveBeenCalledTimes(1);
+    expect(storeConversation).not.toHaveBeenCalled();
+  });
+
+  it("stores a talk with Mamma Cat's side in words, and remembers only milestones", async () => {
+    const f = fixture();
+    f.history.splice(0);
+    f.scene.stats.hunger = 20;
+    f.getDialogue.mockResolvedValueOnce({ lines: ["New here?"], event: "blacky_first" }).mockResolvedValueOnce({ lines: ["Still here."], event: "blacky_return" });
+    await f.speak();
+    await f.speak();
+    expect(vi.mocked(storeConversation).mock.calls.map(([record]) => [record.kind, record.mammaCatTurn])).toEqual([
+      ["talk", "Mamma Cat came over to talk. She was very hungry."],
+      ["talk", "Mamma Cat came over to talk. She was very hungry."],
+    ]);
+    expect(vi.mocked(addNpcMemory).mock.calls).toEqual([
+      ["Blacky", { kind: "event", source: "scripted", gameDay: 1, timestamp: 10_000, label: "first_meeting", value: "You first met Mamma Cat on day 1, at dawn." }],
+    ]);
+  });
+
+  it("builds prompt history from every row at the restored time, not just the newest ten", async () => {
+    const f = fixture();
+    const row = (timestamp: number, gameDay: number, text: string): ConversationRecord => ({
+      speaker: "Blacky", timestamp, gameDay, lines: [text], trustBefore: 20, trustAfter: 20, chapter: 2,
+    });
+    f.history.splice(0, f.history.length,
+      ...[1, 2, 3, 4, 5].map((n) => row(n * 1_000, 1, `Past ${n}.`)),
+      ...Array.from({ length: 12 }, (_, n) => row(900_000 + n, 2, `Abandoned ${n}.`)),
+    );
+    const request = await f.speak();
+    expect(request.conversationHistory).toHaveLength(17);
+    expect(request.promptConversationHistory?.map((entry) => entry.text)).toEqual(["Past 1.", "Past 2.", "Past 3.", "Past 4.", "Past 5."]);
+  });
+
+  it("passes only memories formed by the current game day, without legacy daily filler", async () => {
+    const f = fixture();
+    const memory = (gameDay: number, label: string, source: NpcMemory["source"]): NpcMemory => ({
+      npc: "Blacky", kind: "event", label, value: label, dedupeKey: label, source, createdAt: 0, gameDay,
+    });
+    vi.mocked(getNpcMemories).mockResolvedValue([
+      memory(1, "first_meeting", "scripted"), memory(1, "blacky_return", "scripted"), memory(3, "from_a_later_day", "ai"),
+    ]);
+    const request = await f.speak();
+    expect(request.npcMemories?.map((m) => m.label)).toEqual(["first_meeting"]);
+  });
+
+  it("tells a cat the story so far: Fluffy hears about Manu's visit, every cat about Camille", async () => {
+    const f = fixture();
+    f.registryData.set(StoryKeys.CAMILLE_ENCOUNTER, 1);
+    f.registryData.set(StoryKeys.MANU_VISITED_FLUFFY_DAY, 1);
+    const request = await f.speak(cat("Fluffy"));
+    expect(request.interaction).toBe("talk");
+    expect(request.gameState.recentEvents).toEqual([
+      "Mamma Cat has met Camille, the quiet woman who walks the evening rounds.",
+      "Manu came by to see you today.",
+    ]);
+  });
+
+  it("drops a reply that lands after a story moment froze input", async () => {
+    const f = fixture();
+    let reply: (response: DialogueResponse) => void = () => {};
+    f.getDialogue.mockReturnValue(new Promise((resolve) => { reply = resolve; }));
+    f.controller.show(f.blacky);
+    await vi.waitFor(() => expect(f.getDialogue).toHaveBeenCalledTimes(1));
+    f.scene.playerInputFrozen = true;
+    reply({ lines: ["Too late."] });
+    await vi.waitFor(() => expect(f.removeThinking).toHaveBeenCalledTimes(1));
+    expect(f.scene.dialogue.show).not.toHaveBeenCalled();
+    expect(f.blacky.engageDialogue).not.toHaveBeenCalled();
+  });
+
+  it("releases the cat with her own modal, so walking off never closes another system's dialogue", async () => {
+    const f = fixture();
+    await f.open();
+    f.scene.dialogue.closeEarly();
+    f.scene.dialogue.show(["Camille crouches."]);
+    f.scene.player.x = GP.DIALOGUE_BREAK_DIST + 1;
+    f.controller.tickEngagement();
+    expect(f.scene.dialogue.isActive).toBe(true);
+    expect(f.scene.dialogue.dismiss).not.toHaveBeenCalled();
+    expect(f.blacky.disengageDialogue).toHaveBeenCalledTimes(1);
   });
 });

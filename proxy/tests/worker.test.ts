@@ -47,7 +47,7 @@ describe("validateChatBody", () => {
   it("accepts a minimal valid body", () => {
     const r = validateChatBody({
       provider: "deepseek",
-      messages: [{ role: "user", content: "hi" }],
+      messages: [{ role: "system", content: "sys" }, { role: "user", content: "hi" }],
       temperature: 0.8,
       max_tokens: 150,
     });
@@ -58,26 +58,62 @@ describe("validateChatBody", () => {
   it("rejects bad provider", () => {
     const r = validateChatBody({
       provider: "evil",
-      messages: [{ role: "user", content: "x" }],
+      messages: [{ role: "system", content: "sys" }, { role: "user", content: "x" }],
     });
-    expect(r.ok).toBe(false);
+    expect(r).toMatchObject({ ok: false, error: 'provider must be "deepseek" or "openai"' });
   });
 
   it("rejects oversized messages", () => {
     const r = validateChatBody({
       provider: "openai",
-      messages: [{ role: "user", content: "x".repeat(20_000) }],
+      messages: [{ role: "system", content: "sys" }, { role: "user", content: "x".repeat(40_000) }],
     });
-    expect(r.ok).toBe(false);
+    expect(r).toMatchObject({ ok: false, error: "messages exceed size limit" });
   });
 
   it("rejects max_tokens above cap", () => {
     const r = validateChatBody({
       provider: "deepseek",
-      messages: [{ role: "user", content: "a" }],
+      messages: [{ role: "system", content: "sys" }, { role: "user", content: "a" }],
       max_tokens: 9999,
     });
-    expect(r.ok).toBe(false);
+    expect(r).toMatchObject({ ok: false, error: "max_tokens out of range" });
+  });
+});
+
+describe("validateChatBody request shape", () => {
+  const sys = { role: "system", content: "s" };
+  const u = { role: "user", content: "u" };
+  const a = { role: "assistant", content: "a" };
+  const check = (messages: unknown[], extra: Record<string, unknown> = {}) =>
+    validateChatBody({ provider: "deepseek", messages, temperature: 0.8, max_tokens: 220, ...extra });
+
+  it("accepts the game's shape: system, (user, assistant)*, user", () => {
+    expect(check([sys, u]).ok).toBe(true);
+    expect(check([sys, u, a, u, a, u]).ok).toBe(true);
+  });
+
+  it("requires exactly one system message, first, and a trailing user turn", () => {
+    for (const messages of [[u], [u, sys, u], [sys, sys, u], [sys, u, sys, u], [sys], [sys, u, a]]) {
+      expect(check(messages)).toMatchObject({ ok: false, error: "unexpected message order" });
+    }
+  });
+
+  it("caps the message count at 202 (1 system + 100 exchanges + 1 current turn)", () => {
+    const exchanges = (n: number) => Array.from({ length: n }, () => [u, a]).flat();
+    expect(check([sys, ...exchanges(100), u]).ok).toBe(true);
+    expect(check([sys, ...exchanges(101), u])).toMatchObject({ ok: false, error: "too many messages" });
+  });
+
+  it("caps total content at 32,000 characters", () => {
+    const sized = (n: number) => [sys, { role: "user", content: "x".repeat(n - 1) }];
+    expect(check(sized(32_000)).ok).toBe(true);
+    expect(check(sized(32_001))).toMatchObject({ ok: false, error: "messages exceed size limit" });
+  });
+
+  it("caps max_tokens at 256 (the client sends 220)", () => {
+    expect(check([sys, u], { max_tokens: 256 }).ok).toBe(true);
+    expect(check([sys, u], { max_tokens: 257 })).toMatchObject({ ok: false, error: "max_tokens out of range" });
   });
 });
 
@@ -88,7 +124,7 @@ describe("handleRequest", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         provider: "deepseek",
-        messages: [{ role: "user", content: "hi" }],
+        messages: [{ role: "system", content: "sys" }, { role: "user", content: "hi" }],
       }),
     });
     const res = await handleRequest(req, {});
@@ -117,12 +153,59 @@ describe("handleRequest", () => {
       },
       body: JSON.stringify({
         provider: "deepseek",
-        messages: [{ role: "user", content: "hi" }],
+        messages: [{ role: "system", content: "sys" }, { role: "user", content: "hi" }],
         max_tokens: 50,
       }),
     });
     const res = await handleRequest(req, {});
     expect(res.status).toBe(500);
+  });
+
+  it("returns 413 with CORS when the body exceeds 65,536 bytes (multi-byte chars counted as bytes)", async () => {
+    // ~35k chars but ~70k UTF-8 bytes: a char-length check would let it through to JSON.parse.
+    const body = JSON.stringify({
+      provider: "deepseek",
+      messages: [{ role: "system", content: "sys" }, { role: "user", content: "é".repeat(35_000) }],
+    });
+    expect(body.length).toBeLessThan(65_536);
+    const req = new Request("https://example.com/api/ai/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: "http://localhost:5173" },
+      body,
+    });
+    const res = await handleRequest(req, {});
+    expect(res.status).toBe(413);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe("http://localhost:5173");
+    expect(await res.json()).toEqual({ error: "body too large" });
+  });
+
+  it("stops reading a chunked body with no Content-Length as soon as it passes the cap", async () => {
+    const chunk = new Uint8Array(16_384).fill(0x20);
+    let sent = 0;
+    let cancelled = false;
+    const endless = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        sent += chunk.byteLength;
+        controller.enqueue(chunk);
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const req = new Request("https://example.com/api/ai/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: "http://localhost:5173" },
+      body: endless,
+      duplex: "half",
+    } as RequestInit);
+    expect(req.headers.get("Content-Length")).toBeNull();
+
+    const res = await handleRequest(req, {});
+
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ error: "body too large" });
+    await vi.waitFor(() => expect(cancelled).toBe(true));
+    expect(sent).toBeLessThan(65_536 + 4 * chunk.byteLength);
   });
 });
 
@@ -210,7 +293,7 @@ describe("CORS", () => {
       headers: { Origin: "https://evil.test", "Content-Type": "application/json" },
       body: JSON.stringify({
         provider: "deepseek",
-        messages: [{ role: "user", content: "hi" }],
+        messages: [{ role: "system", content: "sys" }, { role: "user", content: "hi" }],
       }),
     });
     const res = await handleRequest(req, env);
@@ -269,7 +352,7 @@ describe("upstream failure semantics", () => {
       headers: { Origin: ALLOWED, "Content-Type": "application/json" },
       body: JSON.stringify({
         provider: "deepseek",
-        messages: [{ role: "user", content: "hi" }],
+        messages: [{ role: "system", content: "sys" }, { role: "user", content: "hi" }],
         max_tokens: 16,
       }),
     });
@@ -295,5 +378,49 @@ describe("upstream failure semantics", () => {
     expect(res.headers.get("Access-Control-Allow-Origin")).toBe(ALLOWED);
     const body = (await res.json()) as { error: string };
     expect(body.error).toBe("upstream timeout");
+  });
+});
+
+describe("upstream request body", () => {
+  const ALLOWED = "http://localhost:5173";
+  const env = { ALLOWED_ORIGINS: ALLOWED, DEEPSEEK_API_KEY: "test-key", OPENAI_API_KEY: "test-key" };
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  async function upstreamBodyFor(provider: "deepseek" | "openai", e: Record<string, string> = env) {
+    const fetchMock = vi.fn(async (_url: string, _init: RequestInit) => new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const req = new Request("https://example.com/api/ai/chat", {
+      method: "POST",
+      headers: { Origin: ALLOWED, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        provider,
+        messages: [{ role: "system", content: "sys" }, { role: "user", content: "hi" }],
+        max_tokens: 220,
+      }),
+    });
+    expect((await handleRequest(req, e)).status).toBe(200);
+    const init = fetchMock.mock.calls[0]?.[1];
+    return JSON.parse(String(init?.body)) as Record<string, unknown>;
+  }
+
+  it("sends deepseek-flash with thinking disabled by default", async () => {
+    const body = await upstreamBodyFor("deepseek");
+    expect(body["model"]).toBe("deepseek-flash");
+    expect(body["thinking"]).toEqual({ type: "disabled" });
+    expect(body["max_tokens"]).toBe(220);
+  });
+
+  it("honours DEEPSEEK_MODEL and still disables thinking", async () => {
+    const body = await upstreamBodyFor("deepseek", { ...env, DEEPSEEK_MODEL: "deepseek-v4-pro" });
+    expect(body["model"]).toBe("deepseek-v4-pro");
+    expect(body["thinking"]).toEqual({ type: "disabled" });
+  });
+
+  it("never sends the DeepSeek-only thinking field to OpenAI", async () => {
+    const body = await upstreamBodyFor("openai");
+    expect(body).not.toHaveProperty("thinking");
   });
 });

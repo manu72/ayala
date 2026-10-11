@@ -23,10 +23,10 @@ export interface DialogueLayoutOptions {
  *  - `onLineShown(index)` fires once each time a new line becomes visible,
  *    including the very first line at `show()` time. It fires BEFORE the
  *    player can advance, and before `onComplete`.
- *  - `onHide()` fires on every hide path (completion, Space-past-end, or
- *    `dismiss()`), after internal state is cleared. Use it to tear down
- *    any caller-owned bubbles or side-channels, regardless of whether
- *    the beat completed cleanly.
+ *  - `onHide(completed)` fires on every hide path (completion, Space-past-end,
+ *    or `dismiss()`), after internal state is cleared and before `onComplete`.
+ *    `completed` is true only when the player advanced past the last line.
+ *    Use it to tear down any caller-owned bubbles or side-channels.
  *  - `completeOnClose` runs `onComplete` even when the player closes the
  *    box early (click outside / x). For beats that would otherwise
  *    soft-lock (fade-to-black finales, overlays torn down in onComplete).
@@ -34,7 +34,8 @@ export interface DialogueLayoutOptions {
  */
 export interface DialogueHooks {
   onLineShown?: (index: number) => void;
-  onHide?: () => void;
+  /** DialogueSystem always passes `completed`; it is optional only so wrappers can forward the hook. */
+  onHide?: (completed?: boolean) => void;
   completeOnClose?: boolean;
 }
 
@@ -65,7 +66,12 @@ export class DialogueSystem {
   private hooks: DialogueHooks | null = null;
   private advanceKey: Phaser.Input.Keyboard.Key | null = null;
 
-  constructor(scene: Phaser.Scene, layout: DialogueLayoutOptions = {}) {
+  /** `inputBlocked`: while true, Space, taps and clicks leave the box alone (e.g. the game is paused behind a menu). */
+  constructor(
+    scene: Phaser.Scene,
+    layout: DialogueLayoutOptions = {},
+    private readonly inputBlocked: () => boolean = () => false,
+  ) {
     const { width, height } = scene.cameras.main;
     const gap = layout.horizontalGapPx ?? 0;
     const leftEdge = layout.reservedLeftPx !== undefined ? layout.reservedLeftPx + gap : DEFAULT_HORIZONTAL_MARGIN_PX;
@@ -187,29 +193,29 @@ export class DialogueSystem {
   /**
    * Close dialogue early without firing onComplete.
    *
-   * Still fires `hooks.onHide()` so callers can tear down paired surfaces
+   * Still fires `hooks.onHide(false)` so callers can tear down paired surfaces
    * (e.g. a persistent spoken bubble above an NPC).
    */
   dismiss(): void {
     if (!this.active) return;
-    this.hide();
+    this.hide(false);
   }
 
   /** Player closed the box early (click outside / x). Same as dismiss() unless the beat opted into completeOnClose. */
   private closeEarly(): void {
-    if (!this.active) return;
+    if (!this.active || this.inputBlocked()) return;
     const doneHook = this.hooks?.completeOnClose ? this.onComplete : null;
-    this.hide();
+    this.hide(false);
     if (doneHook) doneHook();
   }
 
   advance(): void {
-    if (!this.active) return;
+    if (!this.active || this.inputBlocked()) return;
 
     this.currentLine++;
     if (this.currentLine >= this.lines.length) {
       const doneHook = this.onComplete;
-      this.hide();
+      this.hide(true);
       if (doneHook) doneHook();
     } else {
       this.text.setText(this.lines[this.currentLine] ?? "");
@@ -217,7 +223,7 @@ export class DialogueSystem {
     }
   }
 
-  private hide(): void {
+  private hide(completed: boolean): void {
     this.container.setVisible(false);
     this.backdrop.setVisible(false);
     if (this.backdrop.input) this.backdrop.input.enabled = false;
@@ -226,6 +232,6 @@ export class DialogueSystem {
     // install new hooks without being overwritten by us.
     const hideHook = this.hooks?.onHide;
     this.hooks = null;
-    if (hideHook) hideHook();
+    if (hideHook) hideHook(completed);
   }
 }

@@ -22,25 +22,38 @@ const MEMORY_DEDUPE_INDEX = "byDedupe";
 
 const VALID_MEMORY_SOURCES = ["ai", "scripted"] as const;
 
+/** Records kept per speaker. The Worker accepts 1 system + 2 × this + 1 messages. */
+export const CONVERSATION_KEEP = 100;
+
+/**
+ * talk: engaged cat dialogue, the only kind that advances a cat's scripts.
+ * ambient: a named human's greeting bubble aimed at Mamma Cat.
+ * story: authored story lines (rumours, egg lines, Camille's beats, ...).
+ */
+export type ConversationKind = "talk" | "ambient" | "story";
+
 export interface ConversationRecord {
   id?: number;
   speaker: string;
+  /** Missing on legacy rows; read through {@link recordKind}. */
+  kind?: ConversationKind;
   /** Game-time ms (DayNightCycle). */
   timestamp: number;
   /** Wall clock for debugging / ordering. */
   realTimestamp?: number;
   gameDay: number;
-  /** The Mamma Cat side of the prior exchange, if captured. */
+  /** Short factual sentence about what Mamma Cat did / what happened (game-authored). */
   mammaCatTurn?: string;
   lines: string[];
-  trustBefore: number;
-  trustAfter: number;
+  /** Per-speaker trust; humans have none. */
+  trustBefore?: number;
+  trustAfter?: number;
   chapter: number;
   /** Optional label for what Mamma Cat did this beat (future use). */
   playerAction?: string;
   gameStateSnapshot?: {
-    trustWithSpeaker: number;
-    trustGlobal: number;
+    trustWithSpeaker?: number;
+    trustGlobal?: number;
     timeOfDay: string;
     hunger: number;
     thirst: number;
@@ -61,11 +74,25 @@ export interface NpcMemory {
   source: NpcMemorySource;
   createdAt: number;
   gameDay: number;
+  /** Game time (`totalGameTimeMs`) it was formed; absent on rows from older builds. */
+  timestamp?: number;
 }
 
 export type NewNpcMemory = Omit<NpcMemory, "id" | "npc" | "createdAt" | "dedupeKey"> & {
   createdAt?: number;
 };
+
+/** Legacy rows have no kind: ambient greetings and Camille beats are told apart by `playerAction`. */
+export function recordKind(record: Pick<ConversationRecord, "kind" | "playerAction">): ConversationKind {
+  if (record.kind) return record.kind;
+  if (record.playerAction === "ambient_greeting") return "ambient";
+  return record.playerAction?.startsWith("camille_encounter_") ? "story" : "talk";
+}
+
+/** Per-day "Shared a <cat> return exchange" rows written by older builds; nothing reads them. */
+export function isLegacyReturnFiller(memory: Pick<NpcMemory, "source" | "label">): boolean {
+  return memory.source === "scripted" && (memory.label?.endsWith("_return") ?? false);
+}
 
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -112,25 +139,37 @@ function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
   });
 }
 
+/** Settles on commit, error or abort; a plain `abort()` has a null `tx.error`, so reject with a real Error. */
 function transactionComplete(tx: IDBTransaction): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-    tx.onabort = () => reject(tx.error);
+    tx.onerror = () => reject(tx.error ?? new Error("IndexedDB transaction failed"));
+    tx.onabort = () => reject(tx.error ?? new Error("IndexedDB transaction aborted"));
   });
+}
+
+/** Runs `work` in one transaction, resolves once it commits, and always closes the connection. */
+async function withTransaction<T>(
+  stores: string | string[],
+  mode: IDBTransactionMode,
+  work: (tx: IDBTransaction) => T | Promise<T>,
+): Promise<T> {
+  const db = await openDB();
+  try {
+    const tx = db.transaction(stores, mode);
+    const [result] = await Promise.all([work(tx), transactionComplete(tx)]);
+    return result;
+  } finally {
+    db.close();
+  }
 }
 
 export async function storeConversation(record: ConversationRecord): Promise<void> {
   try {
-    const db = await openDB();
-    const tx = db.transaction(CONVERSATIONS_STORE, "readwrite");
-    tx.objectStore(CONVERSATIONS_STORE).add(record);
-    await new Promise<void>((resolve, reject) => {
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
+    await withTransaction(CONVERSATIONS_STORE, "readwrite", (tx) => {
+      tx.objectStore(CONVERSATIONS_STORE).add(record);
     });
-    db.close();
-    await pruneConversations(record.speaker, 100);
+    await pruneConversations(record.speaker, CONVERSATION_KEEP);
   } catch {
     // IndexedDB may be unavailable in some contexts (private browsing, etc.)
     // Fail silently — conversation storage is non-critical for gameplay.
@@ -138,61 +177,37 @@ export async function storeConversation(record: ConversationRecord): Promise<voi
 }
 
 /** Keeps at most `maxKeep` newest records per speaker by INSERTION order. */
-export async function pruneConversations(speaker: string, maxKeep = 100): Promise<void> {
+export async function pruneConversations(speaker: string, maxKeep = CONVERSATION_KEEP): Promise<void> {
   try {
-    const db = await openDB();
-    const tx = db.transaction(CONVERSATIONS_STORE, "readonly");
-    const index = tx.objectStore(CONVERSATIONS_STORE).index("speaker");
-    const request = index.getAll(speaker);
-    const records = await new Promise<ConversationRecord[]>((resolve, reject) => {
-      request.onsuccess = () => resolve(request.result as ConversationRecord[]);
-      request.onerror = () => reject(request.error);
-    });
-    db.close();
-    if (records.length <= maxKeep) return;
-    // Sort by auto-increment `id` (reliable write-order key) rather than game
+    // Sorted by auto-increment `id` (reliable write-order key) rather than game
     // `timestamp`, which can run backwards relative to insertion — e.g. after
     // New Game+ the game clock resets to 0 while prior-run records persist in
-    // IDB. Falling back to `timestamp` preserves ordering for any legacy rows
-    // written before the schema assigned ids (shouldn't occur, defensive).
-    const sorted = [...records].sort((a, b) => {
-      const aKey = a.id ?? a.timestamp ?? 0;
-      const bKey = b.id ?? b.timestamp ?? 0;
-      return aKey - bKey;
+    // IDB.
+    const records = await getRecentConversations(speaker);
+    if (records.length <= maxKeep) return;
+    const toDrop = records.slice(0, records.length - maxKeep);
+    await withTransaction(CONVERSATIONS_STORE, "readwrite", (tx) => {
+      const store = tx.objectStore(CONVERSATIONS_STORE);
+      for (const r of toDrop) {
+        if (r.id !== undefined) store.delete(r.id);
+      }
     });
-    const toDrop = sorted.slice(0, sorted.length - maxKeep).filter((r) => r.id !== undefined);
-    const db2 = await openDB();
-    const tx2 = db2.transaction(CONVERSATIONS_STORE, "readwrite");
-    const store = tx2.objectStore(CONVERSATIONS_STORE);
-    for (const r of toDrop) {
-      store.delete(r.id!);
-    }
-    await new Promise<void>((resolve, reject) => {
-      tx2.oncomplete = () => resolve();
-      tx2.onerror = () => reject(tx2.error);
-    });
-    db2.close();
   } catch {
     // Non-critical
   }
 }
 
+/** The speaker's records in insertion order; only the newest `limit` when given. */
 export async function getRecentConversations(
   speaker: string,
-  limit = 20,
+  limit?: number,
 ): Promise<ConversationRecord[]> {
   try {
-    const db = await openDB();
-    const tx = db.transaction(CONVERSATIONS_STORE, "readonly");
-    const index = tx.objectStore(CONVERSATIONS_STORE).index("speaker");
-    const request = index.getAll(speaker);
-
-    const records = await new Promise<ConversationRecord[]>((resolve, reject) => {
-      request.onsuccess = () => resolve(request.result as ConversationRecord[]);
-      request.onerror = () => reject(request.error);
-    });
-    db.close();
-    return sortByInsertion(records).slice(-limit);
+    const records = await withTransaction(CONVERSATIONS_STORE, "readonly", (tx) =>
+      requestToPromise(tx.objectStore(CONVERSATIONS_STORE).index("speaker").getAll(speaker)),
+    );
+    const sorted = sortByInsertion(records as ConversationRecord[]);
+    return limit === undefined ? sorted : sorted.slice(-limit);
   } catch {
     return [];
   }
@@ -200,17 +215,9 @@ export async function getRecentConversations(
 
 export async function getConversationCount(speaker: string): Promise<number> {
   try {
-    const db = await openDB();
-    const tx = db.transaction(CONVERSATIONS_STORE, "readonly");
-    const index = tx.objectStore(CONVERSATIONS_STORE).index("speaker");
-    const request = index.count(speaker);
-
-    const count = await new Promise<number>((resolve, reject) => {
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
-    db.close();
-    return count;
+    return await withTransaction(CONVERSATIONS_STORE, "readonly", (tx) =>
+      requestToPromise(tx.objectStore(CONVERSATIONS_STORE).index("speaker").count(speaker)),
+    );
   } catch {
     return 0;
   }
@@ -218,19 +225,10 @@ export async function getConversationCount(speaker: string): Promise<number> {
 
 export async function clearAllConversations(): Promise<void> {
   try {
-    const db = await openDB();
-    const stores = [CONVERSATIONS_STORE, MEMORIES_STORE].filter((store) =>
-      db.objectStoreNames.contains(store),
-    );
-    const tx = db.transaction(stores, "readwrite");
-    for (const store of stores) {
-      tx.objectStore(store).clear();
-    }
-    await new Promise<void>((resolve, reject) => {
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
+    await withTransaction([CONVERSATIONS_STORE, MEMORIES_STORE], "readwrite", (tx) => {
+      tx.objectStore(CONVERSATIONS_STORE).clear();
+      tx.objectStore(MEMORIES_STORE).clear();
     });
-    db.close();
   } catch {
     // Fail silently
   }
@@ -244,25 +242,13 @@ export async function addNpcMemory(
     const normalized = normalizeMemory(npc, memory);
     if (!normalized) return;
 
-    const db = await openDB();
-    let inserted = false;
-    try {
-      const tx = db.transaction(MEMORIES_STORE, "readwrite");
+    const inserted = await withTransaction(MEMORIES_STORE, "readwrite", async (tx) => {
       const store = tx.objectStore(MEMORIES_STORE);
-      const existingRequest = store.index(MEMORY_DEDUPE_INDEX).get(normalized.dedupeKey);
-      const existing = await requestToPromise<NpcMemory | undefined>(
-        existingRequest as IDBRequest<NpcMemory | undefined>,
-      );
-
-      if (!existing) {
-        await requestToPromise(store.add(normalized));
-        inserted = true;
-      }
-
-      await transactionComplete(tx);
-    } finally {
-      db.close();
-    }
+      const existing = await requestToPromise(store.index(MEMORY_DEDUPE_INDEX).get(normalized.dedupeKey));
+      if (existing) return false;
+      await requestToPromise(store.add(normalized));
+      return true;
+    });
 
     if (inserted) await pruneNpcMemories(normalized.npc, 20);
   } catch {
@@ -270,44 +256,42 @@ export async function addNpcMemory(
   }
 }
 
+/** The NPC's memories in insertion order; only the newest `limit` when given. */
 export async function getNpcMemories(
   npc: string,
-  limit = 20,
+  limit?: number,
 ): Promise<NpcMemory[]> {
   try {
-    const db = await openDB();
-    const tx = db.transaction(MEMORIES_STORE, "readonly");
-    const index = tx.objectStore(MEMORIES_STORE).index("npc");
-    const request = index.getAll(npc);
-    const memories = await new Promise<NpcMemory[]>((resolve, reject) => {
-      request.onsuccess = () => resolve(request.result as NpcMemory[]);
-      request.onerror = () => reject(request.error);
-    });
-    db.close();
-    return sortByInsertion(memories).slice(-limit);
+    const memories = await withTransaction(MEMORIES_STORE, "readonly", (tx) =>
+      requestToPromise(tx.objectStore(MEMORIES_STORE).index("npc").getAll(npc)),
+    );
+    const sorted = sortByInsertion(memories as NpcMemory[]);
+    return limit === undefined ? sorted : sorted.slice(-limit);
   } catch {
     return [];
   }
 }
 
+/**
+ * Keeps at most `maxKeep` memories. Legacy `_return` filler goes first (nothing
+ * reads it), then the model's own impressions, oldest first, so scripted
+ * milestones such as the first meeting survive longest.
+ */
 export async function pruneNpcMemories(npc: string, maxKeep = 20): Promise<void> {
   try {
-    const memories = await getNpcMemories(npc, 1000);
+    const memories = await getNpcMemories(npc);
     if (memories.length <= maxKeep) return;
-    const toDrop = sortByInsertion(memories)
-      .slice(0, memories.length - maxKeep)
-      .filter((memory) => memory.id !== undefined);
-    const db = await openDB();
-    const tx = db.transaction(MEMORIES_STORE, "readwrite");
-    const store = tx.objectStore(MEMORIES_STORE);
-    for (const memory of toDrop) {
-      store.delete(memory.id!);
-    }
-    await new Promise<void>((resolve, reject) => {
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
+    const evictionRank = (m: NpcMemory): number => (isLegacyReturnFiller(m) ? 0 : m.source === "ai" ? 1 : 2);
+    // Stable sort: insertion order (oldest first) is kept within each rank.
+    const toDrop = [...memories]
+      .sort((a, b) => evictionRank(a) - evictionRank(b))
+      .slice(0, memories.length - maxKeep);
+    await withTransaction(MEMORIES_STORE, "readwrite", (tx) => {
+      const store = tx.objectStore(MEMORIES_STORE);
+      for (const memory of toDrop) {
+        if (memory.id !== undefined) store.delete(memory.id);
+      }
     });
-    db.close();
   } catch {
     // Non-critical
   }
@@ -370,6 +354,7 @@ function normalizeMemory(npc: string, memory: NewNpcMemory): NpcMemory | null {
     source: memory.source,
     createdAt: memory.createdAt ?? Date.now(),
     gameDay: memory.gameDay,
+    timestamp: memory.timestamp,
   };
 }
 

@@ -3,8 +3,8 @@ import { buildManuVisitedFluffyMessage } from '../../src/utils/manuVisitMessage'
 
 /**
  * `buildManuVisitedFluffyMessage` is the pure surface-text helper
- * driving Fluffy's AI prompt context for "Manu was here today /
- * yesterday / N days ago". The CatDialogueController reads the raw
+ * driving Fluffy's AI prompt context for "Manu came by today /
+ * yesterday / N days ago", in the second person because Fluffy reads it. The CatDialogueController reads the raw
  * Phaser registry value for `MANU_VISITED_FLUFFY_DAY` and the current
  * `dayNight.dayCount` and feeds them straight into this helper, so
  * defensive handling of corrupt / missing / non-numeric registry reads
@@ -14,19 +14,19 @@ import { buildManuVisitedFluffyMessage } from '../../src/utils/manuVisitMessage'
 describe('buildManuVisitedFluffyMessage — happy path', () => {
   it('returns the "today" line when Manu visited on the current game day', () => {
     expect(buildManuVisitedFluffyMessage(7, 7)).toBe(
-      "Manu (Fluffy's favourite human) visited Fluffy today.",
+      "Manu came by to see you today.",
     )
   })
 
   it('returns the "yesterday" line when the gap is exactly one day', () => {
     expect(buildManuVisitedFluffyMessage(6, 7)).toBe(
-      "Manu (Fluffy's favourite human) last visited Fluffy yesterday.",
+      "Manu came by to see you yesterday.",
     )
   })
 
   it('returns the explicit days-ago line for gaps of two or more', () => {
     expect(buildManuVisitedFluffyMessage(2, 7)).toBe(
-      "Manu (Fluffy's favourite human) last visited Fluffy 5 game days ago.",
+      "Manu came by to see you 5 days ago.",
     )
   })
 
@@ -35,11 +35,11 @@ describe('buildManuVisitedFluffyMessage — happy path', () => {
     // fractional day stamp slipping through (manual save edits, schema
     // drift). Math.floor(6.9) === 6, so day 7 reads as "yesterday".
     expect(buildManuVisitedFluffyMessage(6.9, 7)).toBe(
-      "Manu (Fluffy's favourite human) last visited Fluffy yesterday.",
+      "Manu came by to see you yesterday.",
     )
     // Same-day floor — visited at fractional-day 7.4 on day 7 is "today".
     expect(buildManuVisitedFluffyMessage(7.4, 7)).toBe(
-      "Manu (Fluffy's favourite human) visited Fluffy today.",
+      "Manu came by to see you today.",
     )
   })
 
@@ -47,7 +47,7 @@ describe('buildManuVisitedFluffyMessage — happy path', () => {
     // Defensive: a save-time-travel edge case (e.g. day rolled back via
     // dev console) must never produce a negative-days-ago string.
     expect(buildManuVisitedFluffyMessage(10, 7)).toBe(
-      "Manu (Fluffy's favourite human) visited Fluffy today.",
+      "Manu came by to see you today.",
     )
   })
 })

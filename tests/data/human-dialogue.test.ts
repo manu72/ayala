@@ -10,7 +10,7 @@ function makeRequest(overrides: Partial<DialogueRequest> & { speaker: string }):
     gameState: {
       chapter: 5,
       timeOfDay: "evening",
-      trustGlobal: 40,
+     
       trustWithSpeaker: 40,
       hunger: 80,
       thirst: 80,
@@ -40,23 +40,38 @@ describe("human-dialogue", () => {
     const match = findUnplayedDialogueScript(HUMAN_DIALOGUE_SCRIPTS, makeRequest({ speaker: "Camille" }));
 
     expect(match?.id).toBe("camille_first");
+    expect(match?.response.lines).toEqual(["And who are you, sweetheart?"]);
   });
 
-  it("uses a named human return script once and then exhausts authored scripts", () => {
-    const firstSeen = makeRequest({
-      speaker: "Rose",
-      conversationHistory: [{ timestamp: 1, speaker: "Rose", text: "Hello, sweetie. Food is here." }],
-    });
-    const returnMatch = findUnplayedDialogueScript(HUMAN_DIALOGUE_SCRIPTS, firstSeen);
-    expect(returnMatch?.id).toBe("rose_return");
+  it("Camille's return line promises nothing she doesn't give", () => {
+    const camilleReturn = HUMAN_DIALOGUE_SCRIPTS["Camille"]?.find((script) => script.id === "camille_return");
+    expect(camilleReturn?.response.lines).toEqual(["There you are. I hoped you'd come."]);
+  });
+
+  it("uses a named human return script once, on a later game day, and then exhausts authored scripts", () => {
+    const firstSeen = { timestamp: 1, gameDay: 3, speaker: "Rose", text: "Hello, sweetie. Food is here." };
+    const sameVisit = makeRequest({ speaker: "Rose", conversationHistory: [firstSeen] });
+    sameVisit.gameState.daysSurvived = 3;
+    expect(findUnplayedDialogueScript(HUMAN_DIALOGUE_SCRIPTS, sameVisit)).toBeNull();
+
+    const nextDay = makeRequest({ speaker: "Rose", conversationHistory: [firstSeen] });
+    expect(findUnplayedDialogueScript(HUMAN_DIALOGUE_SCRIPTS, nextDay)?.id).toBe("rose_return");
 
     const bothSeen = makeRequest({
       speaker: "Rose",
       conversationHistory: [
-        { timestamp: 1, speaker: "Rose", text: "Hello, sweetie. Food is here." },
-        { timestamp: 2, speaker: "Rose", text: "Come eat when you're ready." },
+        firstSeen,
+        { timestamp: 2, gameDay: 4, speaker: "Rose", text: "Come eat when you're ready." },
       ],
     });
     expect(findUnplayedDialogueScript(HUMAN_DIALOGUE_SCRIPTS, bothSeen)).toBeNull();
+  });
+
+  it("does not let a same-visit second greeting claim Mamma Cat came back", () => {
+    const request = makeRequest({
+      speaker: "Kish",
+      conversationHistory: [{ timestamp: 1, gameDay: 4, speaker: "Kish", text: "Hi, kitty. I'll be gentle." }],
+    });
+    expect(findUnplayedDialogueScript(HUMAN_DIALOGUE_SCRIPTS, request)).toBeNull();
   });
 });

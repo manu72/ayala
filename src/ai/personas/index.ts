@@ -44,26 +44,3 @@ export const AI_PERSONAS: Record<string, string> = {
 };
 
 export const CAT_PERSONAS: Record<string, string> = AI_PERSONAS;
-
-/**
- * Persona depth tier — drives conversation-history window size in
- * `buildMessages`. Tier 1 personas get richer context (20 turns), Tier 2
- * a shorter window (10 turns). Unknown speakers default to Tier 1.
- */
-export type PersonaTier = "tier1" | "tier2";
-
-export const PERSONA_TIER: Record<string, PersonaTier> = {
-  Blacky: "tier1",
-  Tiger: "tier1",
-  Jayco: "tier1",
-  Camille: "tier1",
-  "Jayco Jr": "tier2",
-  Fluffy: "tier2",
-  Pedigree: "tier2",
-  Ginger: "tier2",
-  "Ginger B": "tier2",
-  Manu: "tier2",
-  Kish: "tier2",
-  Rose: "tier2",
-  Ben: "tier2",
-};
