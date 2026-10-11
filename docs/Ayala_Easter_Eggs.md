@@ -8,7 +8,7 @@
 - 💭 **Idea** — parked for v2 or later
 - ✅ **Built** — implemented
 
-_Last updated: 10 October 2026_
+_Last updated: 11 October 2026_
 
 ---
 
@@ -25,7 +25,7 @@ If she brings it to Camille during an encounter, Camille "reads" it — the scre
 **Payoff:** Deeply personal moment between Manu and Camille. The kind of thing that makes the game a true gift, not just a game.
 
 
-**Built (`EasterEggSystem`):** The letter (map place `egg_letter`, by a bush near Blackbird) is picked up with Space and carried in her mouth; Space beside Camille (an encounter or a care visit) gives it to her, and a paper card reads "nom noms" while she reads it. Space anywhere else sets it down; it stays where she left it.
+**Built (`EasterEggSystem`):** The letter (map place `egg_letter`, by a bush near Blackbird) is picked up with Space and carried in her mouth; Space beside Camille (an encounter or a care visit) gives it to her, and a paper card shows the letter while she reads it line by line: "To my Corazon / You are the only one for me / With all my love / your nom noms". Space anywhere else sets it down; it stays where she left it.
 ---
 
 ### ✅ The Sunset Viewpoint

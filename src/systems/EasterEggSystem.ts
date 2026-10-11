@@ -307,15 +307,28 @@ export class EasterEggSystem {
     this.carryIcon = null;
     this.state.letter = "given";
     this.persist();
+    const letterLines = ["To my Corazon", "You are the only one for me", "With all my love", "your nom noms"];
     const cam = this.scene.cameras.main;
     const card = this.scene.add.container(cam.width / 2, cam.height / 2 - 40).setScrollFactor(0).setDepth(450).setAlpha(0);
     const dim = this.scene.add.rectangle(0, 40, cam.width * 2, cam.height * 2, 0x000000, 0.55);
-    const paper = this.scene.add.rectangle(0, 0, 220, 130, 0xf6efdc).setStrokeStyle(2, 0xc8b89a);
-    const fold = this.scene.add.rectangle(0, 0, 220, 1, 0xd8c8a8);
-    const words = this.scene.add.text(0, -4, "nom noms", { fontFamily: "Georgia, 'Times New Roman', serif", fontSize: "26px", fontStyle: "italic", color: "#3a2a5a", resolution: 2 }).setOrigin(0.5);
+    const paperW = 360;
+    const paperH = 176;
+    const paper = this.scene.add.rectangle(0, 0, paperW, paperH, 0xf6efdc).setStrokeStyle(2, 0xc8b89a);
+    const fold = this.scene.add.rectangle(0, -paperH / 2 + 16, paperW, 1, 0xd8c8a8);
+    const words = this.scene.add
+      .text(0, 8, letterLines.join("\n"), {
+        fontFamily: "Georgia, 'Times New Roman', serif",
+        fontSize: "18px",
+        fontStyle: "italic",
+        color: "#3a2a5a",
+        align: "center",
+        lineSpacing: 8,
+        resolution: 2,
+      })
+      .setOrigin(0.5);
     card.add([dim, paper, fold, words]);
     this.scene.tweens.add({ targets: card, alpha: 1, duration: 600 });
-    this.scene.dialogue.show(["Camille unfolds the paper. She reads it once, and laughs, and reads it again.", "\"nom noms\"", "She holds it to her chest for a long moment."], () => {
+    this.scene.dialogue.show(["Camille unfolds the paper. She reads it once, and laughs, and reads it again.", ...letterLines.map((line) => `"${line}"`), "She holds it to her chest for a long moment."], () => {
       this.scene.tweens.add({ targets: card, alpha: 0, duration: 500, onComplete: () => card.destroy() });
       this.scene.autoSave();
     }, { completeOnClose: true }); // the card and its dim overlay only go away here

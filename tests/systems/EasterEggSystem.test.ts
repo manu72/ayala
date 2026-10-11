@@ -64,7 +64,7 @@ function makeScene(reg = new Map<string, unknown>()) {
 }
 
 describe("EasterEggSystem", () => {
-  it("the Hidden Letter: picked up where it lies, carried to Camille, and read: nom noms", () => {
+  it("the Hidden Letter: picked up where it lies, carried to Camille, and read aloud", () => {
     const { scene, shown, reg } = makeScene();
     const eggs = new EasterEggSystem(scene);
     scene.player.x = 100;
@@ -73,7 +73,11 @@ describe("EasterEggSystem", () => {
     expect((reg.get(EGGS_KEY) as { letter: string }).letter).toBe("carried");
     scene.player.x = 1990;
     expect(eggs.tryInteract()).toBe(true); // gives it to Camille
-    expect(shown[shown.length - 1]).toContain("\"nom noms\"");
+    const lines = shown[shown.length - 1] ?? [];
+    expect(lines).toContain("\"To my Corazon\"");
+    expect(lines).toContain("\"You are the only one for me\"");
+    expect(lines).toContain("\"With all my love\"");
+    expect(lines).toContain("\"your nom noms\"");
     expect((reg.get(EGGS_KEY) as { letter: string }).letter).toBe("given");
   });
 

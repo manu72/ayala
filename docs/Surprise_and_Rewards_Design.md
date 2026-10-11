@@ -856,7 +856,7 @@ The world retells what she did, which gives Camille and Kish something to tell e
 | Pedigree's Collar | Built on the dig verb (D5) |
 | Blacky's Midnight Story | Built as D9 |
 | Hidden Kittens | Becomes the vacant-shop kittens (D4, MVP-lite). Sniff-only kittens in shrubs are P4, with "Kittens n/5". |
-| Hidden Letter, Stuffed Cat, Balloon | Become buildable once carry exists (P2–3). **The Letter reads "nom noms" (Q10).** |
+| Hidden Letter, Stuffed Cat, Balloon | Become buildable once carry exists (P2–3). **The Letter reads "To my Corazon / You are the only one for me / With all my love / your nom noms" (Q10).** |
 | The Sunday Lights (formerly the parked Festival of Lights idea) | Ships as §12, every real Sunday, with a 10 Nov–15 Jan upgrade. Simbang Gabi is not in the egg doc; it is Q20. |
 | The Sunday Market on Paseo (was Car-Free Sunday) | Ships as §12, as the Paseo Sunday market (Manu's account replaced the Ayala Ave closure; §12.1) |
 | Title Screen Accumulation, Extended Credits | Now consistent with visible totals (§4.6.5). Extended Credits' "all named cats" means the park cats, so 100% never needs a live-road crossing. |
@@ -1037,7 +1037,7 @@ Calling a mechanic "dark" because a slot machine also uses it is not a useful te
 
 - Put welfare facts inside anticipation windows and payoffs, as clearly marked "Real cats:" lines, never in her inner voice.
 - Have Kishdale review every Filipino line (Q6), with spot checks from guards and visitors.
-- Keep personal content (the Letter, "nom noms"; the dream fragments) Manu's to write.
+- Keep personal content (the Letter to Corazon; the dream fragments) Manu's to write.
 - Offer a natural stopping point every in-game night. Shelter rest already autosaves (`GameScene.ts:1398`, verified). That stopping point also carries one true reason to come back.
 
 ### 11.6 How rewards keep their value
@@ -1975,7 +1975,7 @@ The earlier "Puppy Daycare across Makati Ave" inset is cut, because it would be 
 1. **Revision 1 substituted its own objective.** It judged each mechanic against "not playing" instead of against Roblox and Fortnite, and hard-wired that into caps, a stop rule and an acceptance gate with no retention metric. Manu's objective now governs (§11). The real risk is not that Ayala is too sticky. It is that it is thinner than Roblox: two players, about 200 authored lines in the MVP, no social layer. Content volume, not mechanics, is the weakness.
 2. **Loot won't fix the structural flatness.** Trust saturates through passive proximity ticks, Chapter 4 waits on `dayCount ≥ 5`, and Chapter 5 hangs on a 60% roll. The lounge loop, rumours and Ch5-only tales target that stretch, but the gates themselves are a separate decision. **Manu chose a separate pacing pass (Q9);** it is out of scope for this design.
 3. **Forage is nearly irrelevant to survival, on purpose.** Needs are trivial by day 2. Making forage matter would mean harsher baselines, for example stations cut from +40 to +30. I have not proposed that, because of the realism and no-smoothing rules. The bet is on knowledge and relationships. Manu's call (Q8): stations stay unchanged and forage tops up at most about half a day's food (cap 20/day).
-4. **Authoring, not code, is the bottleneck.** About 170 authored lines in the revision-1 MVP, about 200 or more once favours and Sunday lines are added, and about 400 by Phase 3. The personal pieces (the dream fragments, Q3) are yours, and the dream loop must not ship without them. The Letter reads "nom noms" (Q10), and Pedigree's tag has no name (Q1).
+4. **Authoring, not code, is the bottleneck.** About 170 authored lines in the revision-1 MVP, about 200 or more once favours and Sunday lines are added, and about 400 by Phase 3. The personal pieces (the dream fragments, Q3) are yours, and the dream loop must not ship without them. The Letter reads "To my Corazon / You are the only one for me / With all my love / your nom noms" (Q10), and Pedigree's tag has no name (Q1).
 5. **The Act button is overloaded on iPad.** It handles food, water, cat, beat 5, morsel, paw, dig, back-away, window, sniff and greet. From Phase 2 it also handles set-down, give and the door. Placement rules and a fixed order help, and Z is deliberately left alone, but a touch playtest is mandatory.
 6. **The zombie loop still rewards crossing a lethal-in-reality road once.**
    - The design now tells the truth in-world: Blacky's _"They don't always stop for us"_ and a real-world Field Note in the payoff.
@@ -2018,7 +2018,7 @@ The earlier "Puppy Daycare across Makati Ave" inset is cut, because it would be 
 | 7 | `MANU_VISITED_FLUFFY_DAY` leak | "yes" | Fixed in the MVP prerequisites (§14.1) |
 | 8 | Forage hunger | "Snacks top up a little" (chosen when the question was re-asked in plain words) | Stations unchanged; forage hunger capped at 20 per in-game day (§5.6, §13) |
 | 9 | Chapter pacing | Separate task (chosen when re-asked in plain words) | Out of scope here; a separate pacing pass |
-| 10 | Hidden Letter | "letter simply says \"nom noms\"" | §9.4 |
+| 10 | Hidden Letter | "To my Corazon / You are the only one for me / With all my love / your nom noms" | §9.4 |
 | 11 | Space priority | "cats and humans win" | The existing order stands; a paw waits for nearby cats and humans (§5.2) |
 | 12 | Dusk lookout zombie | "yes" | `ZOMBIE_DUSK_LOOKOUT` ships on (§8.2, §13) |
 | 13 | Curtain portal | "yes waterfall is good" | The McMicking curtain opens the first dream (§6.6) |
