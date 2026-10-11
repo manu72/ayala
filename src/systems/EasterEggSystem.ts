@@ -154,25 +154,28 @@ export class EasterEggSystem {
   /** Space with no cat in reach: give, pick up, dig, bat, or set down. False when there's nothing here for it. */
   tryInteract(): boolean {
     const { player } = this.scene;
-    const near = (p: Pt | undefined | null, r = REACH_PX) => !!p && Phaser.Math.Distance.Between(player.x, player.y, p.x, p.y) <= r;
+    const near = (p: Pt | undefined | null, r = REACH_PX) =>
+      !!p && Phaser.Math.Distance.Between(player.x, player.y, p.x, p.y) <= r;
 
     if (this.carrying === "letter") {
       const camille = this.scene.camille.activeCamilleNPC;
-      if (camille?.visible && near(camille, GIVE_PX)) return this.giveLetter(camille), true;
+      if (camille?.visible && near(camille, GIVE_PX)) return (this.giveLetter(camille), true);
     }
     if (this.carrying === "plush") {
       const kish = this.scene.camille.activeKishNPC;
-      if (kish?.visible && near(kish, GIVE_PX)) return this.givePlush(kish), true;
+      if (kish?.visible && near(kish, GIVE_PX)) return (this.givePlush(kish), true);
     }
     if (!this.carrying) {
-      if (this.state.letter !== "given" && this.state.letter !== "carried" && near(this.letterSpot())) return this.pickUp("letter"), true;
-      if (this.state.plush !== "given" && this.state.plush !== "carried" && near(this.plushSpot())) return this.pickUp("plush"), true;
+      if (this.state.letter !== "given" && this.state.letter !== "carried" && near(this.letterSpot()))
+        return (this.pickUp("letter"), true);
+      if (this.state.plush !== "given" && this.state.plush !== "carried" && near(this.plushSpot()))
+        return (this.pickUp("plush"), true);
     }
     const collar = placeNamed(this.scene.places, "egg_collar");
-    if (this.state.collar === undefined && near(collar)) return this.digCollar(collar!), true;
+    if (this.state.collar === undefined && near(collar)) return (this.digCollar(collar!), true);
     const tree = placeNamed(this.scene.places, "egg_balloon_tree");
-    if (!this.state.balloon && near(tree, 44)) return this.releaseBalloon(), true;
-    if (this.carrying) return this.setDown(), true;
+    if (!this.state.balloon && near(tree, 44)) return (this.releaseBalloon(), true);
+    if (this.carrying) return (this.setDown(), true);
     return false;
   }
 
@@ -181,12 +184,23 @@ export class EasterEggSystem {
     const h = this.scene.sunday.hour();
     // never in place of a first meeting (same rule as CuriositySystem's rumours)
     const met = (key: string) => !!this.scene.registry.get(key);
-    if (catName === "Blacky" && met("MET_BLACKY") && !this.state.blackyStory && h >= STORY_HOURS[0] && h < STORY_HOURS[1]) {
+    if (
+      catName === "Blacky" &&
+      met("MET_BLACKY") &&
+      !this.state.blackyStory &&
+      h >= STORY_HOURS[0] &&
+      h < STORY_HOURS[1]
+    ) {
       this.state.blackyStory = true;
       this.persist();
       return BLACKY_STORY;
     }
-    if (catName === "Pedigree" && met("PEDIGREE_TALKS") && this.state.collar !== undefined && !this.state.pedigreeThanked) {
+    if (
+      catName === "Pedigree" &&
+      met("PEDIGREE_TALKS") &&
+      this.state.collar !== undefined &&
+      !this.state.pedigreeThanked
+    ) {
       this.state.pedigreeThanked = true;
       this.persist();
       return PEDIGREE_THANKS;
@@ -214,14 +228,21 @@ export class EasterEggSystem {
 
     const body = player.body as Phaser.Physics.Arcade.Body | null;
     const still = (body?.velocity.length() ?? 1) < 1;
-    if (still && this.stillAt && Phaser.Math.Distance.Between(player.x, player.y, this.stillAt.x, this.stillAt.y) < 4) this.stillMs += delta;
+    if (still && this.stillAt && Phaser.Math.Distance.Between(player.x, player.y, this.stillAt.x, this.stillAt.y) < 4)
+      this.stillMs += delta;
     else {
       this.stillMs = 0;
       this.stillAt = { x: player.x, y: player.y };
     }
 
     // The Sunset Viewpoint: on the pyramid steps as evening turns to night
-    if (!this.state.sunset && this.prevPhase === "evening" && phase === "night" && this.at("poi_pyramid_steps", SUNSET_TILE_PX)) this.sunset();
+    if (
+      !this.state.sunset &&
+      this.prevPhase === "evening" &&
+      phase === "night" &&
+      this.at("poi_pyramid_steps", SUNSET_TILE_PX)
+    )
+      this.sunset();
     this.prevPhase = phase;
 
     // The Developer's Note: a full minute of stillness in the quiet corner
@@ -233,7 +254,14 @@ export class EasterEggSystem {
 
     // The Ghost of Mamma Cat's Past: sitting at the fountain's edge at midnight
     const midnight = h >= MIDNIGHT[0] || h < MIDNIGHT[1];
-    if (!this.state.ghost && !this.ghostOn && midnight && this.stillMs > 1200 && this.atPlace("egg_ghost", GHOST_TILE_PX)) this.ghost();
+    if (
+      !this.state.ghost &&
+      !this.ghostOn &&
+      midnight &&
+      this.stillMs > 1200 &&
+      this.atPlace("egg_ghost", GHOST_TILE_PX)
+    )
+      this.ghost();
 
     // Blacky's Midnight Story: he's awake at 3am
     if (!this.state.blackyStory && h >= STORY_HOURS[0] && h < STORY_HOURS[1]) {
@@ -246,7 +274,8 @@ export class EasterEggSystem {
 
     // The Kittens Are Coming: resting by the hidden bush, once, when the colony trusts her
     if (player.isResting && !this.restWasOn && this.state.birth === undefined) {
-      if (this.atPlace("egg_birth", 56) && this.scene.trust.global >= BIRTH_TRUST && Math.random() < BIRTH_CHANCE) this.birth();
+      if (this.atPlace("egg_birth", 56) && this.scene.trust.global >= BIRTH_TRUST && Math.random() < BIRTH_CHANCE)
+        this.birth();
     }
     this.restWasOn = player.isResting;
 
@@ -267,8 +296,21 @@ export class EasterEggSystem {
       this.state.letter = "carried";
       this.letterProp?.destroy();
       this.letterProp = null;
-      this.carryIcon = this.scene.add.text(player.x, player.y, "✉", { fontSize: "9px", color: "#f6f0d8", stroke: "#3a2a1a", strokeThickness: 2, resolution: 2 }).setOrigin(0.5).setDepth(6);
-      this.float(player.x, player.y - 24, this.state.letterAt ? "The letter again." : "A folded piece of paper. It smells of someone kind.");
+      this.carryIcon = this.scene.add
+        .text(player.x, player.y, "✉", {
+          fontSize: "9px",
+          color: "#f6f0d8",
+          stroke: "#3a2a1a",
+          strokeThickness: 2,
+          resolution: 2,
+        })
+        .setOrigin(0.5)
+        .setDepth(6);
+      this.float(
+        player.x,
+        player.y - 24,
+        this.state.letterAt ? "The letter again." : "A folded piece of paper. It smells of someone kind.",
+      );
     } else {
       this.state.plush = "carried";
       this.plushProp?.destroy();
@@ -289,8 +331,10 @@ export class EasterEggSystem {
     } else if (this.carrying === "plush") {
       this.state.plush = "dropped";
       this.state.plushAt = at;
-      if (this.at("poi_pyramid_steps", 220)) this.float(at.x, at.y - 20, "The little cat keeps watch on your steps now.");
-      else if (this.at("poi_playground", 220)) this.float(at.x, at.y - 20, "Back on the playground, for the next kid to find.");
+      if (this.at("poi_pyramid_steps", 220))
+        this.float(at.x, at.y - 20, "The little cat keeps watch on your steps now.");
+      else if (this.at("poi_playground", 220))
+        this.float(at.x, at.y - 20, "Back on the playground, for the next kid to find.");
     }
     this.carryIcon?.destroy();
     this.carryIcon = null;
@@ -307,18 +351,43 @@ export class EasterEggSystem {
     this.carryIcon = null;
     this.state.letter = "given";
     this.persist();
+    const letterLines = ["To my Corazon", "You are the only one for me", "With all my love", "your nom noms"];
     const cam = this.scene.cameras.main;
-    const card = this.scene.add.container(cam.width / 2, cam.height / 2 - 40).setScrollFactor(0).setDepth(450).setAlpha(0);
+    const card = this.scene.add
+      .container(cam.width / 2, cam.height / 2 - 40)
+      .setScrollFactor(0)
+      .setDepth(450)
+      .setAlpha(0);
     const dim = this.scene.add.rectangle(0, 40, cam.width * 2, cam.height * 2, 0x000000, 0.55);
-    const paper = this.scene.add.rectangle(0, 0, 220, 130, 0xf6efdc).setStrokeStyle(2, 0xc8b89a);
-    const fold = this.scene.add.rectangle(0, 0, 220, 1, 0xd8c8a8);
-    const words = this.scene.add.text(0, -4, "nom noms", { fontFamily: "Georgia, 'Times New Roman', serif", fontSize: "26px", fontStyle: "italic", color: "#3a2a5a", resolution: 2 }).setOrigin(0.5);
+    const paperW = 360;
+    const paperH = 176;
+    const paper = this.scene.add.rectangle(0, 0, paperW, paperH, 0xf6efdc).setStrokeStyle(2, 0xc8b89a);
+    const fold = this.scene.add.rectangle(0, -paperH / 2 + 16, paperW, 1, 0xd8c8a8);
+    const words = this.scene.add
+      .text(0, 8, letterLines.join("\n"), {
+        fontFamily: "Georgia, 'Times New Roman', serif",
+        fontSize: "18px",
+        fontStyle: "italic",
+        color: "#3a2a5a",
+        align: "center",
+        lineSpacing: 8,
+        resolution: 2,
+      })
+      .setOrigin(0.5);
     card.add([dim, paper, fold, words]);
     this.scene.tweens.add({ targets: card, alpha: 1, duration: 600 });
-    this.scene.dialogue.show(["Camille unfolds the paper. She reads it once, and laughs, and reads it again.", "\"nom noms\"", "She holds it to her chest for a long moment."], () => {
-      this.scene.tweens.add({ targets: card, alpha: 0, duration: 500, onComplete: () => card.destroy() });
-      this.scene.autoSave();
-    }, { completeOnClose: true }); // the card and its dim overlay only go away here
+    this.scene.dialogue.show(
+      [
+        "Camille unfolds the paper. She reads it once, and laughs, and reads it again.",
+        ...letterLines.map((line) => `"${line}"`),
+        "She holds it to her chest for a long moment.",
+      ],
+      () => {
+        this.scene.tweens.add({ targets: card, alpha: 0, duration: 500, onComplete: () => card.destroy() });
+        this.scene.autoSave();
+      },
+      { completeOnClose: true },
+    ); // the card and its dim overlay only go away here
   }
 
   private givePlush(kish: HumanNPC): void {
@@ -336,7 +405,11 @@ export class EasterEggSystem {
     const camille = this.scene.camille.activeCamilleNPC;
     if (camille?.visible) {
       this.scene.time.delayedCall(2600, () => {
-        if (camille.active) humans.renderHumanBubble(camille, "It belongs to some other kid, Kish. Let's put it back where they'll find it.");
+        if (camille.active)
+          humans.renderHumanBubble(
+            camille,
+            "It belongs to some other kid, Kish. Let's put it back where they'll find it.",
+          );
       });
     }
     this.scene.time.delayedCall(5000, () => this.placeProps());
@@ -355,7 +428,10 @@ export class EasterEggSystem {
     this.collarGlyph?.destroy();
     this.collarGlyph = null;
     this.persist();
-    this.scene.dialogue.show(["An old collar, the leather gone soft. A little bell, and a tag worn smooth.", "The name on the tag is faded. But someone called her this, once. Before they left."]);
+    this.scene.dialogue.show([
+      "An old collar, the leather gone soft. A little bell, and a tag worn smooth.",
+      "The name on the tag is faded. But someone called her this, once. Before they left.",
+    ]);
   }
 
   private releaseBalloon(): void {
@@ -366,7 +442,15 @@ export class EasterEggSystem {
     if (!b) return;
     this.balloon = null;
     const reduced = this.scene.registry.get("MOTION_REDUCED") === true;
-    this.scene.tweens.add({ targets: b.body, y: b.body.y - 420, x: b.body.x + 60, alpha: 0, duration: reduced ? 1500 : 7000, ease: "Sine.easeIn", onComplete: () => b.body.destroy() });
+    this.scene.tweens.add({
+      targets: b.body,
+      y: b.body.y - 420,
+      x: b.body.x + 60,
+      alpha: 0,
+      duration: reduced ? 1500 : 7000,
+      ease: "Sine.easeIn",
+      onComplete: () => b.body.destroy(),
+    });
     const kish = this.scene.camille.activeKishNPC;
     if (kish?.visible && Phaser.Math.Distance.Between(this.scene.player.x, this.scene.player.y, kish.x, kish.y) < 320) {
       this.scene.humans.renderHumanBubble(kish, "Oh! There's a balloon! Bye balloon!");
@@ -424,7 +508,12 @@ export class EasterEggSystem {
       for (let dx = -4; dx <= 4; dx++) {
         if (!scene.isWaterAt(px + dx, py + dy)) continue;
         const c = { x: (px + dx) * ts + ts / 2, y: (py + dy) * ts + ts / 2 };
-        if (!best || Phaser.Math.Distance.Between(player.x, player.y, c.x, c.y) < Phaser.Math.Distance.Between(player.x, player.y, best.x, best.y)) best = c;
+        if (
+          !best ||
+          Phaser.Math.Distance.Between(player.x, player.y, c.x, c.y) <
+            Phaser.Math.Distance.Between(player.x, player.y, best.x, best.y)
+        )
+          best = c;
       }
     if (!best) {
       this.ghostOn = false;
@@ -432,13 +521,30 @@ export class EasterEggSystem {
     }
     const rx = best.x;
     const ry = best.y;
-    const self = scene.add.sprite(rx, ry, player.texture.key, player.frame.name).setScale(player.scaleX, -player.scaleY).setTint(0x9fb8d8).setAlpha(0).setDepth(2);
-    const kitten = scene.add.sprite(rx + 18, ry + 2, "mammacat", 0).setScale(0.55, -0.55).setTint(0xc8d8f0).setAlpha(0).setDepth(2);
-    scene.tweens.add({ targets: [self, kitten], alpha: { from: 0, to: 0.42 }, duration: 2200, yoyo: true, hold: 6000, onComplete: () => {
-      self.destroy();
-      kitten.destroy();
-      this.ghostOn = false;
-    } });
+    const self = scene.add
+      .sprite(rx, ry, player.texture.key, player.frame.name)
+      .setScale(player.scaleX, -player.scaleY)
+      .setTint(0x9fb8d8)
+      .setAlpha(0)
+      .setDepth(2);
+    const kitten = scene.add
+      .sprite(rx + 18, ry + 2, "mammacat", 0)
+      .setScale(0.55, -0.55)
+      .setTint(0xc8d8f0)
+      .setAlpha(0)
+      .setDepth(2);
+    scene.tweens.add({
+      targets: [self, kitten],
+      alpha: { from: 0, to: 0.42 },
+      duration: 2200,
+      yoyo: true,
+      hold: 6000,
+      onComplete: () => {
+        self.destroy();
+        kitten.destroy();
+        this.ghostOn = false;
+      },
+    });
     scene.time.delayedCall(2600, () => this.narrate("You don't remember being that small. But something in you does."));
     this.state.ghost = true;
     this.persist();
@@ -464,19 +570,29 @@ export class EasterEggSystem {
 
   private spawnLitter(spot: Pt): void {
     if (!this.birthMother) this.birthMother = this.catSprite("tiger", spot.x - 14, spot.y - 4, 0.95);
-    [[-2, 8], [6, 10], [12, 6]].forEach(([dx, dy], i) => this.catSprite(KITTEN_TEXTURES[i % KITTEN_TEXTURES.length]!, spot.x + dx!, spot.y + dy!, 0.45));
+    [
+      [-2, 8],
+      [6, 10],
+      [12, 6],
+    ].forEach(([dx, dy], i) =>
+      this.catSprite(KITTEN_TEXTURES[i % KITTEN_TEXTURES.length]!, spot.x + dx!, spot.y + dy!, 0.45),
+    );
   }
 
   private gather(time: number): void {
     const scene = this.scene;
-    const named = NAMED_CATS.map((n) => scene.npcs.find((e) => e.cat.npcName === n)?.cat).filter((c): c is NonNullable<typeof c> => !!c?.active);
+    const named = NAMED_CATS.map((n) => scene.npcs.find((e) => e.cat.npcName === n)?.cat).filter(
+      (c): c is NonNullable<typeof c> => !!c?.active,
+    );
     if (named.length === 0) return;
     this.state.gathered = true;
     this.persist();
     const { player } = scene;
     const centre = { x: player.x, y: player.y };
     // every other cat she knows by name: the colony she greeted, Cat cat and Mittens, settled newcomers, the street cats
-    const fringe = scene.npcs.map((e) => e.cat).filter((c) => c.active && !named.includes(c) && scene.colony.knowsCat(c));
+    const fringe = scene.npcs
+      .map((e) => e.cat)
+      .filter((c) => c.active && !named.includes(c) && scene.colony.knowsCat(c));
     const rng = seededRng(mixSeed(scene.dayNight.dayCount, 5150));
     const slots = gatheringSlots(centre, named.length, fringe.length, rng);
     this.hush = { ...centre, r: HUSH_RADIUS_PX, until: time + HUSH_MS, guests: new Set([...named, ...fringe]) };
@@ -488,7 +604,9 @@ export class EasterEggSystem {
 
     // no names, no moods over anyone: just the cats
     for (const e of scene.npcs) if (named.includes(e.cat) || fringe.includes(e.cat)) e.indicator.setHidden(true);
-    named.forEach((cat, i) => scene.time.delayedCall(i * NAMED_GAP_MS, () => this.comeTo(cat, slots.inner[i]!, centre, GATHER_WALK_PX)));
+    named.forEach((cat, i) =>
+      scene.time.delayedCall(i * NAMED_GAP_MS, () => this.comeTo(cat, slots.inner[i]!, centre, GATHER_WALK_PX)),
+    );
     // the rest come slowly, almost shyly: from further off, at a creep, stopping once on the way to look at her
     fringe.forEach((cat, i) =>
       scene.time.delayedCall(fringeAt[i]!, () => {
@@ -501,7 +619,12 @@ export class EasterEggSystem {
     const zoom = cam.zoom;
     scene.time.delayedCall(settledMs, () => {
       // wide enough to take in the fringe, so she can see them all
-      cam.zoomTo(Math.max(fringe.length > 0 ? 1.05 : 1.4, zoom * (fringe.length > 0 ? 0.42 : 0.6)), 2400, "Sine.easeInOut", true);
+      cam.zoomTo(
+        Math.max(fringe.length > 0 ? 1.05 : 1.4, zoom * (fringe.length > 0 ? 0.42 : 0.6)),
+        2400,
+        "Sine.easeInOut",
+        true,
+      );
       this.narrate("They came. All of them. To say goodbye.");
       scene.time.delayedCall(GATHER_HOLD_MS, () => cam.zoomTo(zoom, 2000, "Sine.easeInOut", true));
     });
@@ -585,14 +708,26 @@ export class EasterEggSystem {
     this.plushProp = null;
     const letter = this.letterSpot();
     if (letter && this.state.letter !== "carried" && this.state.letter !== "given") {
-      this.letterProp = scene.add.text(letter.x, letter.y, "✉", { fontSize: "8px", color: "#f6f0d8", stroke: "#3a2a1a", strokeThickness: 2, resolution: 2 }).setOrigin(0.5).setDepth(2.5).setAngle(-12);
+      this.letterProp = scene.add
+        .text(letter.x, letter.y, "✉", {
+          fontSize: "8px",
+          color: "#f6f0d8",
+          stroke: "#3a2a1a",
+          strokeThickness: 2,
+          resolution: 2,
+        })
+        .setOrigin(0.5)
+        .setDepth(2.5)
+        .setAngle(-12);
     }
     const plush = this.plushSpot();
     if (plush && this.state.plush !== "carried") this.plushProp = this.plushSprite(plush.x, plush.y).setDepth(2.5);
 
     if (this.kittens.length === 0) {
       placesOfType(scene.places, "egg_kitten").forEach((p, i) => {
-        const sprite = this.catSprite(KITTEN_TEXTURES[i % KITTEN_TEXTURES.length]!, p.x, p.y, 0.45).setAlpha(this.state.kittens.includes(i) ? 0.9 : 0);
+        const sprite = this.catSprite(KITTEN_TEXTURES[i % KITTEN_TEXTURES.length]!, p.x, p.y, 0.45).setAlpha(
+          this.state.kittens.includes(i) ? 0.9 : 0,
+        );
         this.kittens.push({ index: i, x: p.x, y: p.y, sprite });
       });
     }
@@ -634,7 +769,16 @@ export class EasterEggSystem {
     if (!collar || this.state.collar !== undefined) return;
     const near = Phaser.Math.Distance.Between(this.scene.player.x, this.scene.player.y, collar.x, collar.y) < 70;
     if (near && !this.collarGlyph) {
-      this.collarGlyph = this.scene.add.text(collar.x, collar.y, "∴", { fontSize: "11px", color: "#c8a070", stroke: "#000000", strokeThickness: 2, resolution: 2 }).setOrigin(0.5).setDepth(12);
+      this.collarGlyph = this.scene.add
+        .text(collar.x, collar.y, "∴", {
+          fontSize: "11px",
+          color: "#c8a070",
+          stroke: "#000000",
+          strokeThickness: 2,
+          resolution: 2,
+        })
+        .setOrigin(0.5)
+        .setDepth(12);
     } else if (!near && this.collarGlyph) {
       this.collarGlyph.destroy();
       this.collarGlyph = null;
@@ -684,10 +828,27 @@ export class EasterEggSystem {
 
   private float(x: number, y: number, text: string, color = "#f6f0d8"): void {
     const t = this.scene.add
-      .text(x, y, text, { fontFamily: "Arial, Helvetica, sans-serif", fontSize: "9px", fontStyle: "bold", color, stroke: "#000000", strokeThickness: 2, align: "center", wordWrap: { width: 170 }, resolution: 2 })
+      .text(x, y, text, {
+        fontFamily: "Arial, Helvetica, sans-serif",
+        fontSize: "9px",
+        fontStyle: "bold",
+        color,
+        stroke: "#000000",
+        strokeThickness: 2,
+        align: "center",
+        wordWrap: { width: 170 },
+        resolution: 2,
+      })
       .setOrigin(0.5)
       .setDepth(100);
-    this.scene.tweens.add({ targets: t, alpha: 0, y: y - 14, delay: 2200, duration: 900, onComplete: () => t.destroy() });
+    this.scene.tweens.add({
+      targets: t,
+      alpha: 0,
+      y: y - 14,
+      delay: 2200,
+      duration: 900,
+      onComplete: () => t.destroy(),
+    });
   }
 
   private narrate(line: string): void {

@@ -8,7 +8,7 @@
 - 💭 **Idea** — parked for v2 or later
 - ✅ **Built** — implemented
 
-_Last updated: 10 October 2026_
+_Last updated: 11 October 2026_
 
 ---
 
@@ -24,9 +24,7 @@ If she brings it to Camille during an encounter, Camille "reads" it — the scre
 
 **Payoff:** Deeply personal moment between Manu and Camille. The kind of thing that makes the game a true gift, not just a game.
 
-
-**Built (`EasterEggSystem`):** The letter (map place `egg_letter`, by a bush near Blackbird) is picked up with Space and carried in her mouth; Space beside Camille (an encounter or a care visit) gives it to her, and a paper card reads "nom noms" while she reads it. Space anywhere else sets it down; it stays where she left it.
----
+## **Built (`EasterEggSystem`):** The letter (map place `egg_letter`, by a bush near Blackbird) is picked up with Space and carried in her mouth; Space beside Camille (an encounter or a care visit) gives it to her, and a paper card shows the letter while she reads it line by line: "To my Corazon / You are the only one for me / With all my love / your nom noms". Space anywhere else sets it down; it stays where she left it.
 
 ### ✅ The Sunset Viewpoint
 
@@ -40,9 +38,7 @@ Auto-saves the moment. Plays exactly once per save file — feels like a rare mo
 
 **Payoff:** Reinforces ATG as a real place Camille knows. Cinematic moment rewarding careful observation.
 
-
-**Built (`EasterEggSystem`):** On the pyramid steps (`poi_pyramid_steps`, within 40 px) at the moment evening turns to night: the camera pulls back, the Makati skyline stands black against the sunset, and "You will remember this." Once per save; autosaves.
----
+## **Built (`EasterEggSystem`):** On the pyramid steps (`poi_pyramid_steps`, within 40 px) at the moment evening turns to night: the camera pulls back, the Makati skyline stands black against the sunset, and "You will remember this." Once per save; autosaves.
 
 ### ✅ The Complete Colony Gathering ❤️❤️❤️ LOVE THIS!!
 
@@ -58,9 +54,7 @@ Then the final encounter with Camille proceeds as normal, but with the colony wa
 
 **Payoff:** Rewards the player who has truly earned the colony's love. Makes the ending even more emotional — Mamma Cat isn't just chosen, she's _blessed_ by her community.
 
-
-**Built (`EasterEggSystem`):** When Camille's last encounter is waiting and every named cat's trust is 80+, the eight named cats walk in one by one and sit in a close ring round Mamma Cat, facing her. Every other cat she knows by name (the colony cats she greeted, Cat cat and Mittens, settled newcomers, the street cats) comes too, slowly, almost shyly: from further off, at a creep, stopping once on the way to look at her, then sitting on a loose, uneven fringe further out. No names or mood icons over anyone. When they are all there the camera pulls back wide enough to take in the fringe and the line plays. The encounter waits for them; beat 5 itself is unchanged.
----
+## **Built (`EasterEggSystem`):** When Camille's last encounter is waiting and every named cat's trust is 80+, the eight named cats walk in one by one and sit in a close ring round Mamma Cat, facing her. Every other cat she knows by name (the colony cats she greeted, Cat cat and Mittens, settled newcomers, the street cats) comes too, slowly, almost shyly: from further off, at a creep, stopping once on the way to look at her, then sitting on a loose, uneven fringe further out. No names or mood icons over anyone. When they are all there the camera pulls back wide enough to take in the fringe and the line plays. The encounter waits for them; beat 5 itself is unchanged.
 
 ### ✅ The Developer's Note
 
@@ -74,9 +68,7 @@ Plays once per save. Very subtle. Easy to miss.
 
 **Payoff:** A quiet moment of authorship. Cam finding this without being told would be special.
 
-
-**Built (`EasterEggSystem`):** A full minute of stillness at `egg_dev_corner` (the park's west tip, by the monument). Once per save.
----
+## **Built (`EasterEggSystem`):** A full minute of stillness at `egg_dev_corner` (the park's west tip, by the monument). Once per save.
 
 ### ✅ The Ghost of Mamma Cat's Past
 
@@ -88,9 +80,7 @@ Narration: _"You don't remember being that small. But something in you does."_
 
 **Payoff:** A melancholy moment tying to the game's themes of loss and recovery.
 
-
-**Built (`EasterEggSystem`):** Sitting still at `egg_ghost` (the Exchange Plaza fountain) around midnight (23:36–00:24): a faded, upside-down Mamma Cat and a small kitten appear in the nearest water. Once per save.
----
+## **Built (`EasterEggSystem`):** Sitting still at `egg_ghost` (the Exchange Plaza fountain) around midnight (23:36–00:24): a faded, upside-down Mamma Cat and a small kitten appear in the nearest water. Once per save.
 
 ## FOR KISH
 
@@ -104,9 +94,7 @@ If Kish is nearby (during Encounter 4 or 5), she exclaims: _"Oh! There's a ballo
 
 **Payoff:** Kid-friendly moment. Small, silly, memorable.
 
-
-**Built (`EasterEggSystem`):** A red balloon in the big central tree (`egg_balloon_tree`); Space beneath it sets it free. If Kish is within ~10 m she calls "Oh! There's a balloon! Bye balloon!"
----
+## **Built (`EasterEggSystem`):** A red balloon in the big central tree (`egg_balloon_tree`); Space beneath it sets it free. If Kish is within ~10 m she calls "Oh! There's a balloon! Bye balloon!"
 
 ### ✅ The Stuffed Cat
 
@@ -122,9 +110,7 @@ The toy can be placed on the playground for another child to find, or carried ba
 
 **Payoff:** Kish gets a moment that's hers. Shows her character without making her annoying.
 
-
-**Built (`EasterEggSystem`):** A tiny pink plush cat by the carabao (`egg_plush`): picked up and carried like the letter. Space beside Kish: "OMG it's a TINY cat! Can we keep it?", Camille answers, and it goes back on the playground. Set down on her steps or the playground, it gets a line of its own.
----
+## **Built (`EasterEggSystem`):** A tiny pink plush cat by the carabao (`egg_plush`): picked up and carried like the letter. Space beside Kish: "OMG it's a TINY cat! Can we keep it?", Camille answers, and it goes back on the playground. Set down on her steps or the playground, it gets a line of its own.
 
 ### ✅ The Hidden Kittens
 
@@ -136,9 +122,7 @@ There are 5-7 to find in total. Kish would love the treasure hunt aspect.
 
 **Payoff:** Collection mechanic for Kish. Also reinforces that the colony has more cats than just the named ones.
 
-
-**Built (`EasterEggSystem`):** Six (`egg_kitten_1`–`6`, one per colony zone and two more), invisible until she is close, then a pair of small sitting kittens; finding one plays a mew and the line, and the Journal counts "Hidden kittens: n/6".
----
+## **Built (`EasterEggSystem`):** Six (`egg_kitten_1`–`6`, one per colony zone and two more), invisible until she is close, then a pair of small sitting kittens; finding one plays a mew and the line, and the Journal counts "Hidden kittens: n/6".
 
 ## COLONY-BASED
 
@@ -152,9 +136,7 @@ Narration sequence, no choices. Builds the colony lore.
 
 **Payoff:** Deepens a named character, adds weight to the snatcher threat.
 
-
-**Built (`EasterEggSystem`):** Between 02:30 and 03:30 Blacky is awake; talking to him then tells the story of the grey cat with the torn ear who taught him the roads. Once per save.
----
+## **Built (`EasterEggSystem`):** Between 02:30 and 03:30 Blacky is awake; talking to him then tells the story of the grey cat with the torn ear who taught him the roads. Once per save.
 
 ### ✅ Pedigree Cat's Collar
 
@@ -168,9 +150,7 @@ Pedigree Cat's dialogue changes slightly afterwards — she thanks Mamma Cat for
 
 **Payoff:** Environmental storytelling. Ties to the dumped pet theme.
 
-
-**Built (`EasterEggSystem`):** A disturbed-earth glyph shows near `egg_collar` (Pedigree's spot) when she is close; three digs uncover the collar. Pedigree's next conversation thanks her: the friend was old and sick, and Pedigree never left her side (Manu: no name, no resolution).
----
+## **Built (`EasterEggSystem`):** A disturbed-earth glyph shows near `egg_collar` (Pedigree's spot) when she is close; three digs uncover the collar. Pedigree's next conversation thanks her: the friend was old and sick, and Pedigree never left her side (Manu: no name, no resolution).
 
 ### ✅ The Kittens Are Coming
 
@@ -184,9 +164,7 @@ Narration: _"Life goes on here. Even now. Even with all this."_
 
 **Payoff:** The colony is a living ecosystem. Hopeful contrast to the dumping events.
 
-
-**Built (`EasterEggSystem`):** Resting by the hidden bush (`egg_birth`) with global trust 50+: a 40% chance per rest, once per playthrough. A tabby settles, the screen fades, and three kittens are beside her; they stay there for the rest of the run.
----
+## **Built (`EasterEggSystem`):** Resting by the hidden bush (`egg_birth`) with global trust 50+: a 40% chance per rest, once per playthrough. A tabby settles, the screen fades, and three kittens are beside her; they stay there for the rest of the run.
 
 ## LOCATION-BASED (ATG LANDMARKS)
 
@@ -240,9 +218,7 @@ On every real-world Sunday (the device's date, any hour), the in-game dawn close
 
 **Payoff:** A weekly reason to come back, Sunday Book entries, and the city as Camille knows it on Sunday mornings. Design: `Surprise_and_Rewards_Design.md` §12.3.
 
-
-**Built (`SundaySystem`):** the closure, 70 stalls, browsers, the busker, vendors who shoo her from the food stalls, market finds, a kid who wants to pet her, the five rotating programmes on the closed westbound carriageway (one a week; preview with `?programme=`), and the 09:30 whistle and pack-up. Not yet: dogs on leads at the market, Blacky's Sunday errand (needs the favours system).
----
+## **Built (`SundaySystem`):** the closure, 70 stalls, browsers, the busker, vendors who shoo her from the food stalls, market finds, a kid who wants to pet her, the five rotating programmes on the closed westbound carriageway (one a week; preview with `?programme=`), and the 09:30 whistle and pack-up. Not yet: dogs on leads at the market, Blacky's Sunday errand (needs the favours system).
 
 ### ✅ The Sunday Lights (Festival of Lights)
 
@@ -252,9 +228,7 @@ On every real-world Sunday, and only on Sundays, all year, the in-game evening a
 
 **Payoff:** The park's most famous spectacle, every week. Design: `Surprise_and_Rewards_Design.md` §12.4.
 
-
-**Built (`SundaySystem`):** fairy lights in the trees round the Exchange Plaza fountain, the crowd, shows at 18:00 and 19:00 and the 20:00 finale, light butterflies she can't catch, a wish when she sits by the lit fountain, and the Christmas palette and parol stars from 10 Nov to 15 Jan. The music is a generated placeholder for a licensed track. Not yet: projections on the Exchange Plaza canopy and Tower One.
----
+## **Built (`SundaySystem`):** fairy lights in the trees round the Exchange Plaza fountain, the crowd, shows at 18:00 and 19:00 and the 20:00 finale, light butterflies she can't catch, a wish when she sits by the lit fountain, and the Christmas palette and parol stars from 10 Nov to 15 Jan. The music is a generated placeholder for a licensed track. Not yet: projections on the Exchange Plaza canopy and Tower One.
 
 ## META EASTER EGGS
 

@@ -44,7 +44,16 @@ function makeScene(reg = new Map<string, unknown>()) {
     sunday: { hour: () => hour },
     places,
     map: { findObject: () => null, tileWidth: 32 },
-    player: { x: 0, y: 0, active: true, flipX: false, isResting: false, body: { velocity: { length: () => 0 } }, faceToward: vi.fn(), startGreeting: vi.fn() },
+    player: {
+      x: 0,
+      y: 0,
+      active: true,
+      flipX: false,
+      isResting: false,
+      body: { velocity: { length: () => 0 } },
+      faceToward: vi.fn(),
+      startGreeting: vi.fn(),
+    },
     add: { text: stub, sprite: stub, graphics: stub, container: stub, rectangle: stub },
     anims: { exists: () => false },
     tweens: { add: vi.fn() },
@@ -60,11 +69,17 @@ function makeScene(reg = new Map<string, unknown>()) {
     scene: { get: () => ({ showNarration: vi.fn() }) },
     autoSave: vi.fn(),
   };
-  return { scene: scene as unknown as GameScene & typeof scene, reg, shown, setHour: (h: number) => (hour = h), camille };
+  return {
+    scene: scene as unknown as GameScene & typeof scene,
+    reg,
+    shown,
+    setHour: (h: number) => (hour = h),
+    camille,
+  };
 }
 
 describe("EasterEggSystem", () => {
-  it("the Hidden Letter: picked up where it lies, carried to Camille, and read: nom noms", () => {
+  it("the Hidden Letter: picked up where it lies, carried to Camille, and read aloud", () => {
     const { scene, shown, reg } = makeScene();
     const eggs = new EasterEggSystem(scene);
     scene.player.x = 100;
@@ -73,12 +88,18 @@ describe("EasterEggSystem", () => {
     expect((reg.get(EGGS_KEY) as { letter: string }).letter).toBe("carried");
     scene.player.x = 1990;
     expect(eggs.tryInteract()).toBe(true); // gives it to Camille
-    expect(shown[shown.length - 1]).toContain("\"nom noms\"");
+    const lines = shown[shown.length - 1] ?? [];
+    expect(lines).toContain('"To my Corazon"');
+    expect(lines).toContain('"You are the only one for me"');
+    expect(lines).toContain('"With all my love"');
+    expect(lines).toContain('"your nom noms"');
     expect((reg.get(EGGS_KEY) as { letter: string }).letter).toBe("given");
   });
 
   it("a save made mid-carry puts the item back where it lay", () => {
-    const reg = new Map<string, unknown>([[EGGS_KEY, { letter: "carried", plush: "carried", plushAt: { x: 5, y: 6 }, kittens: [] }]]);
+    const reg = new Map<string, unknown>([
+      [EGGS_KEY, { letter: "carried", plush: "carried", plushAt: { x: 5, y: 6 }, kittens: [] }],
+    ]);
     const { scene } = makeScene(reg);
     new EasterEggSystem(scene);
     const s = reg.get(EGGS_KEY) as { letter: string; plush: string };
