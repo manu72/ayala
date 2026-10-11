@@ -1479,6 +1479,7 @@ export class GameScene extends Phaser.Scene {
       !this.dialogue.isActive &&
       !this.player.isGreeting &&
       !this.player.isConsuming &&
+      !this.player.isSwiping &&
       !this.playerInputFrozen
     ) {
       this.restHoldTimer += delta;
@@ -1512,7 +1513,8 @@ export class GameScene extends Phaser.Scene {
         !this.dialogue.isActive &&
         !this.player.isMoving &&
         !this.player.isGreeting &&
-        !this.player.isConsuming
+        !this.player.isConsuming &&
+        !this.player.isSwiping
       ) {
         if (this.player.isCatloaf) {
           this.player.exitCatloaf();
