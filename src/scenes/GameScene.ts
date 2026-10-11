@@ -94,6 +94,8 @@ const PEEK_ZOOM = 0.5;
 const ZOOM_DURATION = 500;
 /** A second Tab this soon after the first shows the whole map. */
 const FULL_MAP_DOUBLE_TAP_MS = 300;
+/** A second Space tap this soon after the last one is Mamma Cat's secret paw swipe (ATG-008). */
+const PAW_SWIPE_DOUBLE_TAP_MS = 300;
 /** A cat's walk to the water ends with up to this many tiles walked straight from where the nav grid stops. */
 const LAST_HOP_TILES = 3;
 /** Top-down story cars from the `vehicles` atlas, drawn at native (real) scale; nose east, rotation = heading. */
@@ -131,6 +133,8 @@ export class GameScene extends Phaser.Scene {
   /** Colony cats' walks to the pond, fountain pool and waterfall to drink. */
   private waterTrips?: CatWaterTrips<NPCCat>;
   private lastPeekTapAt = Number.NEGATIVE_INFINITY;
+  private lastInteractTapAt = Number.NEGATIVE_INFINITY;
+  private swipeKey!: Phaser.Input.Keyboard.Key;
   isPaused = false;
   cinematicActive = false;
 
@@ -150,6 +154,9 @@ export class GameScene extends Phaser.Scene {
   private journalKey!: Phaser.Input.Keyboard.Key;
   private touchMovementIntent: MovementIntent = { ...EMPTY_MOVEMENT_INTENT };
   private touchInteractQueued = false;
+  /** A paw flick on Mamma Cat (HUDScene), consumed next frame; facing null keeps her facing. */
+  private touchSwipeQueued = false;
+  private touchSwipeFacing: "e" | "w" | null = null;
   private touchRestDown = false;
   private touchRestPressedQueued = false;
   private touchRestReleased = false;
@@ -415,6 +422,7 @@ export class GameScene extends Phaser.Scene {
     this.isPeeking = false;
     this.showingFullMap = false;
     this.lastPeekTapAt = Number.NEGATIVE_INFINITY;
+    this.lastInteractTapAt = Number.NEGATIVE_INFINITY;
     this.isPaused = false;
     this.collapse = new CollapseSystem(this);
     this.collapse.resetTransient();
@@ -727,6 +735,7 @@ export class GameScene extends Phaser.Scene {
       this.tabKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.TAB);
       this.escapeKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
       this.journalKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.J);
+      this.swipeKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.X);
 
       // Prevent Tab from leaving the game canvas
       this.input.keyboard.addCapture("TAB");
@@ -1133,6 +1142,7 @@ export class GameScene extends Phaser.Scene {
     this.touchRestReleased = false;
     if (clearQueues) {
       this.touchInteractQueued = false;
+      this.touchSwipeQueued = false;
       this.touchPeekQueued = false;
       this.touchJournalQueued = false;
       this.touchPauseQueued = false;
@@ -1156,6 +1166,18 @@ export class GameScene extends Phaser.Scene {
 
   queueTouchInteract(): void {
     this.touchInteractQueued = true;
+  }
+
+  /** Touch paw swipe (ATG-008): HUDScene saw a flick start on Mamma Cat. */
+  queueTouchSwipe(facing: "e" | "w" | null): void {
+    this.touchSwipeQueued = true;
+    this.touchSwipeFacing = facing;
+  }
+
+  /** Mamma Cat's position in canvas pixels, for touch gestures aimed at her. */
+  playerScreenPoint(): { x: number; y: number } {
+    const cam = this.cameras.main;
+    return { x: (this.player.x - cam.worldView.x) * cam.zoom, y: (this.player.y - cam.worldView.y) * cam.zoom };
   }
 
   beginTouchRest(): void {
@@ -1269,7 +1291,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private tryPrimaryInteract(time: number): void {
-    if (this.dialogue.isActive || this.playerInputFrozen) return;
+    if (this.dialogue.isActive || this.playerInputFrozen || this.player.isSwiping) return;
 
     const usedSource = this.foodSources.tryInteract(
       this.player.x,
@@ -1302,6 +1324,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   update(time: number, delta: number): void {
+    // Taken every frame so a flick made during a pause / cinematic / nap is dropped, not replayed later.
+    const touchSwipe = this.touchSwipeQueued;
+    this.touchSwipeQueued = false;
     this.roadMarkings?.update(); // camera culling only; runs during cinematics too
     // Story moments need the camera back on her.
     if (this.showingFullMap && (this.cinematicActive || this.playerInputFrozen)) {
@@ -1420,13 +1445,24 @@ export class GameScene extends Phaser.Scene {
       this.dialogue.advance();
       dialogueAdvanced = true;
     }
+    const swipeKeyJust = this.swipeKey && Phaser.Input.Keyboard.JustDown(this.swipeKey);
     if (
-      (spaceJust || (touchInteract && !dialogueWasActiveForTouch)) &&
+      (spaceJust || (touchInteract && !dialogueWasActiveForTouch) || swipeKeyJust || touchSwipe) &&
       !dialogueAdvanced &&
       !this.dialogue.isActive &&
       !this.playerInputFrozen
     ) {
-      this.tryPrimaryInteract(time);
+      // Secret paw swipe: X, a flick across Mamma Cat on touch, or a quick double tap of
+      // Space (the first tap still interacts as normal; mashing keeps swiping). A first
+      // tap that opened a conversation leaves the second to the dialogue, so cats need X.
+      const doubleTap = spaceJust && time - this.lastInteractTapAt < PAW_SWIPE_DOUBLE_TAP_MS;
+      if (spaceJust) this.lastInteractTapAt = time;
+      if (swipeKeyJust || touchSwipe || doubleTap) {
+        const facing = touchSwipe ? (this.touchSwipeFacing ?? undefined) : undefined;
+        if (this.player.startSwipe(facing)) this.audio.playPawSlap();
+      } else {
+        this.tryPrimaryInteract(time);
+      }
     }
 
     // ──── Z key: tap toggles catloaf, hold enters sleep ────
@@ -1443,6 +1479,7 @@ export class GameScene extends Phaser.Scene {
       !this.dialogue.isActive &&
       !this.player.isGreeting &&
       !this.player.isConsuming &&
+      !this.player.isSwiping &&
       !this.playerInputFrozen
     ) {
       this.restHoldTimer += delta;
@@ -1476,7 +1513,8 @@ export class GameScene extends Phaser.Scene {
         !this.dialogue.isActive &&
         !this.player.isMoving &&
         !this.player.isGreeting &&
-        !this.player.isConsuming
+        !this.player.isConsuming &&
+        !this.player.isSwiping
       ) {
         if (this.player.isCatloaf) {
           this.player.exitCatloaf();

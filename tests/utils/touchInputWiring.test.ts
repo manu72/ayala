@@ -633,6 +633,53 @@ describe("touch input scene wiring", () => {
     expect(gameScene.setTouchRun).toHaveBeenNthCalledWith(2, false);
   });
 
+  describe("paw flick on Mamma Cat (ATG-008)", () => {
+    function setup() {
+      const scene = new HUDScene() as unknown as AnyScene;
+      const gameScene = {
+        clearTouchInputState: vi.fn(),
+        playerScreenPoint: vi.fn(() => ({ x: 400, y: 300 })),
+        queueTouchInteract: vi.fn(),
+        queueTouchSwipe: vi.fn(),
+      };
+      scene.scene.get.mockImplementation((key: unknown) => (key === "GameScene" ? gameScene : undefined));
+      scene.time.now = 1000;
+      scene["buildTouchControls"](816, 624);
+      return { scene, gameScene };
+    }
+
+    it("queues a swipe facing the way a quick flick across her went", () => {
+      const { scene, gameScene } = setup();
+      scene.input.emit("pointerdown", { id: 3, x: 410, y: 300, wasTouch: true });
+      scene.time.now = 1100;
+      scene.input.emit("pointermove", { id: 3, x: 370, y: 305 });
+      expect(gameScene.queueTouchSwipe).toHaveBeenCalledExactlyOnceWith("w");
+      scene.input.emit("pointermove", { id: 3, x: 330, y: 305 }); // one swipe per flick
+      expect(gameScene.queueTouchSwipe).toHaveBeenCalledOnce();
+    });
+
+    it("ignores slow drags, touches away from her, and the mouse", () => {
+      const { scene, gameScene } = setup();
+      scene.input.emit("pointerdown", { id: 3, x: 400, y: 300, wasTouch: true });
+      scene.time.now = 1500;
+      scene.input.emit("pointermove", { id: 3, x: 460, y: 300 });
+      scene.input.emit("pointerup", { id: 3 });
+      scene.input.emit("pointerdown", { id: 4, x: 600, y: 300, wasTouch: true });
+      scene.input.emit("pointermove", { id: 4, x: 700, y: 300 });
+      scene.input.emit("pointerdown", { id: 0, x: 400, y: 300, wasTouch: false });
+      scene.input.emit("pointermove", { id: 0, x: 460, y: 300 });
+      expect(gameScene.queueTouchSwipe).not.toHaveBeenCalled();
+    });
+
+    it("forgets a pending flick when the game loses focus", () => {
+      const { scene, gameScene } = setup();
+      scene.input.emit("pointerdown", { id: 3, x: 400, y: 300, wasTouch: true });
+      scene.game.events.emit("blur");
+      scene.input.emit("pointermove", { id: 3, x: 460, y: 300 });
+      expect(gameScene.queueTouchSwipe).not.toHaveBeenCalled();
+    });
+  });
+
   it("keeps touch Run active until the owning touch ends", () => {
     const scene = new HUDScene() as unknown as AnyScene;
     const gameScene = {

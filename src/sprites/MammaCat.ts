@@ -29,6 +29,8 @@ const MC_GREET_E = "mc_greet_e";
 const MC_GREET_W = "mc_greet_w";
 const MC_DRINK_E = "mc_drink_e";
 const MC_DRINK_W = "mc_drink_w";
+const MC_SWIPE_E = "mc_swipe_e";
+const MC_SWIPE_W = "mc_swipe_w";
 const MC_SLEEP = "mc_sleep";
 const MC_CATLOAF = "mc_catloaf";
 
@@ -49,6 +51,8 @@ const ANIM_GREET_E = "mc-greet-e";
 const ANIM_GREET_W = "mc-greet-w";
 const ANIM_DRINK_E = "mc-drink-e";
 const ANIM_DRINK_W = "mc-drink-w";
+const ANIM_SWIPE_E = "mc-swipe-e";
+const ANIM_SWIPE_W = "mc-swipe-w";
 
 // Greeting plays once per press. 11 frames at 8 fps ≈ 1.375 s.
 const GREET_FPS = 8;
@@ -58,6 +62,10 @@ const GREET_FPS = 8;
 // without stalling traversal through bug-dense areas (10 s bug cooldown).
 const CONSUME_FPS = 8;
 const CONSUME_FRAMES = 6;
+
+// Paw swipe (ATG-008): reference pose + 6 swat frames, fast enough to mash.
+const SWIPE_FPS = 14;
+const SWIPE_FRAMES = 7;
 
 // ── 8-direction stand frame indices (S, SW, W, NW, N, NE, E, SE) ──
 type Direction8 = "s" | "sw" | "w" | "nw" | "n" | "ne" | "e" | "se";
@@ -99,7 +107,7 @@ const LABEL_OFFSET_Y = -12;
 
 const CROUCH_WALK_FPS = 4;
 
-export type PlayerState = "normal" | "crouching" | "catloaf" | "resting" | "waking" | "greeting" | "consuming";
+export type PlayerState = "normal" | "crouching" | "catloaf" | "resting" | "waking" | "greeting" | "consuming" | "swiping";
 
 export class MammaCat extends Phaser.Physics.Arcade.Sprite {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
@@ -170,6 +178,10 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
 
   get isConsuming(): boolean {
     return this.playerState === "consuming";
+  }
+
+  get isSwiping(): boolean {
+    return this.playerState === "swiping";
   }
 
   get isMoving(): boolean {
@@ -261,7 +273,7 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
    * state machine stuck in that state and the player permanently frozen.
    */
   faceToward(worldX: number, worldY: number): void {
-    if (this.playerState === "greeting" || this.playerState === "consuming") return;
+    if (this.playerState === "greeting" || this.playerState === "consuming" || this.playerState === "swiping") return;
     const dx = worldX - this.x;
     const dy = worldY - this.y;
     if (dx === 0 && dy === 0) return;
@@ -293,7 +305,7 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
    * inherit the same invariant.
    */
   enterRest(): void {
-    if (this.playerState === "greeting" || this.playerState === "consuming") return;
+    if (this.playerState === "greeting" || this.playerState === "consuming" || this.playerState === "swiping") return;
     this.playerState = "resting";
     this.crouchLatched = false;
     this.crouchKeyDownTime = 0;
@@ -335,7 +347,8 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
       this.playerState === "resting" ||
       this.playerState === "waking" ||
       this.playerState === "greeting" ||
-      this.playerState === "consuming"
+      this.playerState === "consuming" ||
+      this.playerState === "swiping"
     ) {
       return;
     }
@@ -372,7 +385,8 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
       this.playerState === "resting" ||
       this.playerState === "waking" ||
       this.playerState === "greeting" ||
-      this.playerState === "consuming"
+      this.playerState === "consuming" ||
+      this.playerState === "swiping"
     ) {
       return;
     }
@@ -411,7 +425,8 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
       this.playerState === "resting" ||
       this.playerState === "waking" ||
       this.playerState === "greeting" ||
-      this.playerState === "consuming"
+      this.playerState === "consuming" ||
+      this.playerState === "swiping"
     ) {
       return false;
     }
@@ -467,7 +482,8 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
       this.playerState === "resting" ||
       this.playerState === "waking" ||
       this.playerState === "greeting" ||
-      this.playerState === "consuming"
+      this.playerState === "consuming" ||
+      this.playerState === "swiping"
     ) {
       return false;
     }
@@ -507,6 +523,51 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
     this.showStandFrame();
   }
 
+  /**
+   * The secret paw swipe (ATG-008): a quick playful swat in her facing
+   * direction (or `facing`, for a touch flick). Unlike greeting it can be mashed — a re-press restarts it —
+   * and it may cut a greeting short (the first tap of a double tap greets).
+   * Each path drops the outstanding ANIMATION_COMPLETE listener before
+   * replaying so none is orphaned. No-op while resting, waking or consuming.
+   */
+  startSwipe(facing?: Horizontal): boolean {
+    if (this.playerState === "resting" || this.playerState === "waking" || this.playerState === "consuming") {
+      return false;
+    }
+    if (facing) {
+      this.lastDir8 = facing;
+      this.lastHorizontal = facing;
+    }
+    this.off(Phaser.Animations.Events.ANIMATION_COMPLETE_KEY + ANIM_GREET_E, this.stopGreeting, this);
+    this.off(Phaser.Animations.Events.ANIMATION_COMPLETE_KEY + ANIM_GREET_W, this.stopGreeting, this);
+    this.off(Phaser.Animations.Events.ANIMATION_COMPLETE_KEY + ANIM_SWIPE_E, this.stopSwipe, this);
+    this.off(Phaser.Animations.Events.ANIMATION_COMPLETE_KEY + ANIM_SWIPE_W, this.stopSwipe, this);
+
+    if (this.playerState === "catloaf") {
+      this.setScale(NORMAL_SCALE);
+      const body = this.body as Phaser.Physics.Arcade.Body;
+      body.setOffset(BODY_OFFSET_X, BODY_OFFSET_Y);
+    }
+    this.crouchLatched = false;
+    this.crouchKeyDownTime = 0;
+    this.crouchHoldActive = false;
+
+    this.playerState = "swiping";
+    this.setVelocity(0);
+
+    const anim = this.isFacingEast() ? ANIM_SWIPE_E : ANIM_SWIPE_W;
+    this.anims.play(anim, false);
+    this.once(Phaser.Animations.Events.ANIMATION_COMPLETE_KEY + anim, this.stopSwipe, this);
+    return true;
+  }
+
+  /** End the swipe and return to normal. Safe to call multiple times. */
+  stopSwipe(): void {
+    if (this.playerState !== "swiping") return;
+    this.playerState = "normal";
+    this.showStandFrame();
+  }
+
   update(canRun = true, delta = 0): void {
     if (this.playerState === "waking") {
       this.setVelocity(0);
@@ -540,7 +601,7 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
       return;
     }
 
-    if (this.playerState === "consuming") {
+    if (this.playerState === "consuming" || this.playerState === "swiping") {
       // Same lock-in contract as greeting — the drink/eat anim owns the
       // sprite until ANIMATION_COMPLETE fires in stopConsuming().
       this.setVelocity(0);
@@ -851,6 +912,20 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
         end: CONSUME_FRAMES - 1,
       }),
       frameRate: CONSUME_FPS,
+      repeat: 0,
+    });
+
+    // Paw swipe (plays once per press, restartable)
+    scene.anims.create({
+      key: ANIM_SWIPE_E,
+      frames: scene.anims.generateFrameNumbers(MC_SWIPE_E, { start: 0, end: SWIPE_FRAMES - 1 }),
+      frameRate: SWIPE_FPS,
+      repeat: 0,
+    });
+    scene.anims.create({
+      key: ANIM_SWIPE_W,
+      frames: scene.anims.generateFrameNumbers(MC_SWIPE_W, { start: 0, end: SWIPE_FRAMES - 1 }),
+      frameRate: SWIPE_FPS,
       repeat: 0,
     });
 

@@ -20,6 +20,7 @@ const VOLUMES = {
 const FADE_MS = 600;
 const MEOW_VOLUME = 0.6;
 const CAT_GROWL_VOLUME = 0.7;
+const PAW_SLAP_VOLUME = 0.6;
 
 /**
  * Minimum gap (ms) between cat-growl plays. Prevents a stack of overlapping
@@ -144,6 +145,12 @@ export class AudioSystem {
   playMeow(): void {
     if (this.muted || !this.scene || !this.scene.cache.audio.exists("sfx_meow_happy")) return;
     this.scene.sound.play("sfx_meow_happy", { volume: MEOW_VOLUME });
+  }
+
+  /** The paw-slap "goink" (ATG-008). Fresh instance per call so mashing overlaps like the meow. */
+  playPawSlap(): void {
+    if (this.muted || !this.scene || !this.scene.cache.audio.exists("sfx_paw_slap")) return;
+    this.scene.sound.play("sfx_paw_slap", { volume: PAW_SLAP_VOLUME });
   }
 
   /**

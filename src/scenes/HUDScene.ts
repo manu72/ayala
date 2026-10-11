@@ -15,6 +15,7 @@ import {
   vectorToMovementIntent,
   type MovementIntent,
 } from "../input/playerIntent";
+import { flickStartsOnCat, isPawFlick, PAW_FLICK, pawFlickFacing } from "../utils/pawFlick";
 
 const PANEL_X = 8;
 const PANEL_Y = 8;
@@ -82,6 +83,9 @@ export class HUDScene extends Phaser.Scene {
   private touchStickOriginY = 0;
   private touchPointerMoveHandler: ((pointer: Phaser.Input.Pointer) => void) | null = null;
   private touchPointerUpHandler: ((pointer: Phaser.Input.Pointer) => void) | null = null;
+  private touchPointerDownHandler: ((pointer: Phaser.Input.Pointer) => void) | null = null;
+  /** A touch that landed on Mamma Cat and may become a paw flick (ATG-008). */
+  private pawFlick: { id: number; x: number; y: number; at: number } | null = null;
   private touchCancelHandler: (() => void) | null = null;
   private touchButtonResetHandlers: Array<() => void> = [];
 
@@ -371,12 +375,29 @@ export class HUDScene extends Phaser.Scene {
       },
     );
 
+    // Paw flick: scene-level pointerdown only fires for touches that missed the stick and buttons
+    // (they stopPropagation), so a flick can never steal a control's touch.
+    const gameScene = this.scene.get("GameScene") as GameScene;
+    this.touchPointerDownHandler = (pointer: Phaser.Input.Pointer) => {
+      if (!pointer.wasTouch || this.pawFlick || !this.touchControlsContainer.visible) return;
+      if (!flickStartsOnCat(gameScene.playerScreenPoint(), pointer)) return;
+      this.pawFlick = { id: pointer.id, x: pointer.x, y: pointer.y, at: this.time.now };
+    };
+
     this.touchPointerMoveHandler = (pointer: Phaser.Input.Pointer) => {
+      const flick = this.pawFlick;
+      if (flick?.id === pointer.id) {
+        const elapsed = this.time.now - flick.at;
+        const flicked = isPawFlick(flick, pointer, elapsed);
+        if (flicked) gameScene.queueTouchSwipe(pawFlickFacing(flick, pointer));
+        if (flicked || elapsed > PAW_FLICK.MAX_MS) this.pawFlick = null;
+      }
       if (this.touchStickPointerId !== pointer.id) return;
       this.updateTouchStick(pointer);
     };
 
     this.touchPointerUpHandler = (pointer: Phaser.Input.Pointer) => {
+      if (this.pawFlick?.id === pointer.id) this.pawFlick = null;
       if (this.touchStickPointerId !== pointer.id) return;
       this.touchStickPointerId = null;
       this.touchMovementIntent = { ...EMPTY_MOVEMENT_INTENT };
@@ -384,6 +405,7 @@ export class HUDScene extends Phaser.Scene {
       this.syncTouchMovementIntent();
     };
 
+    this.input.on("pointerdown", this.touchPointerDownHandler);
     this.input.on("pointermove", this.touchPointerMoveHandler);
     this.input.on("pointerup", this.touchPointerUpHandler);
     this.input.on("pointerupoutside", this.touchPointerUpHandler);
@@ -394,7 +416,6 @@ export class HUDScene extends Phaser.Scene {
     const bottom = height - TOUCH_EDGE_MARGIN_PX - TOUCH_BUTTON_SIZE_PX / 2;
     const step = TOUCH_BUTTON_SIZE_PX + TOUCH_BUTTON_GAP_PX;
     const left = right - step;
-    const gameScene = this.scene.get("GameScene") as GameScene;
 
     const buttons = [
       this.createTouchButton(right, bottom, "Act", {
@@ -433,6 +454,7 @@ export class HUDScene extends Phaser.Scene {
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       gameScene?.clearTouchInputState();
       this.touchStickPointerId = null;
+      this.pawFlick = null;
       this.touchRunActive = false;
       this.touchMovementIntent = { ...EMPTY_MOVEMENT_INTENT };
       this.resetActiveTouchButtons();
@@ -440,6 +462,10 @@ export class HUDScene extends Phaser.Scene {
       if (this.touchPointerMoveHandler) {
         this.input.off("pointermove", this.touchPointerMoveHandler);
         this.touchPointerMoveHandler = null;
+      }
+      if (this.touchPointerDownHandler) {
+        this.input.off("pointerdown", this.touchPointerDownHandler);
+        this.touchPointerDownHandler = null;
       }
       if (this.touchPointerUpHandler) {
         this.input.off("pointerup", this.touchPointerUpHandler);
@@ -557,6 +583,7 @@ export class HUDScene extends Phaser.Scene {
 
     if (!visible && this.touchControlsContainer.visible) {
       this.touchStickPointerId = null;
+      this.pawFlick = null;
       this.touchRunActive = false;
       this.touchMovementIntent = { ...EMPTY_MOVEMENT_INTENT };
       this.touchStickKnob?.setPosition(this.touchStickOriginX, this.touchStickOriginY);
@@ -570,6 +597,7 @@ export class HUDScene extends Phaser.Scene {
 
   private cancelActiveTouchControls(): void {
     this.touchStickPointerId = null;
+    this.pawFlick = null;
     this.touchRunActive = false;
     this.touchMovementIntent = { ...EMPTY_MOVEMENT_INTENT };
     this.touchStickKnob?.setPosition(this.touchStickOriginX, this.touchStickOriginY);

@@ -5,6 +5,10 @@
  *   public/assets/sounds/tyre_screech.wav  rubber squeal of a hard stop
  *   public/assets/sounds/car_horn.wav      two-tone "beep-beeep"
  *
+ * and Mamma Cat's secret paw slap (AudioSystem.playPawSlap, ATG-008):
+ *
+ *   public/assets/sounds/paw_slap.wav      dry slap + cartoon "goink"
+ *
  * Pure synthesis: no samples, no dependencies, 16-bit PCM mono WAV written by
  * hand. All randomness comes from a seeded PRNG, so output is byte-identical
  * on every run. The WAVs are committed; never hand-edit them, change this
@@ -327,6 +331,32 @@ function sundayLights() {
   return out
 }
 
+// ──────────── paw slap ────────────
+
+/**
+ * A comic paw slap: 25 ms of dry noise for the smack, then a "goink" whose
+ * pitch drops 780 → 190 Hz with a little rubbery wobble and fades in ~0.3 s.
+ */
+function pawSlap() {
+  const rand = rng(0x5a1a)
+  const n = Math.round(0.32 * SR)
+  const out = new Float64Array(n)
+  let ph = 0
+  for (let i = 0; i < n; i++) {
+    const t = i / SR
+    const slap = t < 0.025 ? white(rand) * Math.exp(-t / 0.006) : 0
+    let goink = 0
+    if (t >= 0.015) {
+      const g = t - 0.015
+      ph += (TAU * (190 + 590 * Math.exp(-g / 0.06) + 18 * Math.sin(TAU * 22 * g))) / SR
+      goink = ramp(g / 0.004) * Math.exp(-g / 0.09) * (Math.sin(ph) + 0.25 * Math.sin(2 * ph))
+    }
+    out[i] = 0.75 * slap + 0.6 * goink
+  }
+  return master(out)
+}
+
 writeWav('tyre_screech.wav', tyreScreech())
 writeWav('car_horn.wav', carHorn())
 writeWav('sunday_lights.wav', sundayLights())
+writeWav('paw_slap.wav', pawSlap())
