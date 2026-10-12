@@ -39,6 +39,7 @@ import {
   CAR_FRIGHT_RADIUS_PX,
   SFX_EAR_RANGE_PX,
   DRINK_REACH_PX,
+  DEFAULT_ZOOM,
 } from "../config/gameplayConstants";
 import { CatWaterTrips } from "../systems/CatWaterTrips";
 import { drinkSpots, isWaterTile, waterWithin } from "../utils/waterEdge";
@@ -89,9 +90,12 @@ const TILE_SIZE = GP.TILE_SIZE;
 // named-cat "first meeting" registry mapping all live in
 // `CatDialogueController` now (Commit D).
 
-const DEFAULT_ZOOM = 2.5;
 const PEEK_ZOOM = 0.5;
 const ZOOM_DURATION = 500;
+/** A story shot's glide from Mamma Cat to what she's shown, and back. */
+const STORY_SHOT_GLIDE_MS = 1400;
+/** Slack after a story shot's expected end before its failsafe hands Mamma Cat back. */
+const STORY_SHOT_FAILSAFE_MS = 1500;
 /** A second Tab this soon after the first shows the whole map. */
 const FULL_MAP_DOUBLE_TAP_MS = 300;
 /** A second Space tap this soon after the last one is Mamma Cat's secret paw swipe (ATG-008). */
@@ -875,7 +879,7 @@ export class GameScene extends Phaser.Scene {
       (this.registry.get(StoryKeys.CAMILLE_ENCOUNTER) as number) >= 5 &&
       this.registry.get(StoryKeys.ENCOUNTER_5_COMPLETE) !== true
     ) {
-      this.time.delayedCall(500, () => this.camille.startEncounter(5));
+      this.time.delayedCall(500, () => this.resumeEncounter5());
     }
 
     // Recovery: the app was closed during the ending (fade or home narration), so
@@ -1296,6 +1300,54 @@ export class GameScene extends Phaser.Scene {
     cam.zoomTo(view === "peek" ? PEEK_ZOOM : DEFAULT_ZOOM, ZOOM_DURATION, undefined, true);
   }
 
+  /**
+   * A save made mid-encounter-5 brings Camille back, but only in the evening:
+   * at any other time she'd be spawned out of sight and miss her arrival
+   * shot; the next evening's roll brings her back the usual way.
+   */
+  private resumeEncounter5(): void {
+    if (this.dayNight.currentPhase === "evening") this.camille.startEncounter(5);
+  }
+
+  /**
+   * A story shot: Mamma Cat holds still while the camera glides to `target`,
+   * follows it for `holdMs`, and glides back to her. Unlike a cinematic the
+   * world runs on, so the target keeps walking. The hold is on the scene clock.
+   */
+  storyShot(target: Phaser.GameObjects.Sprite, holdMs: number, cb: { onArrive?: () => void; onDone: () => void }): void {
+    if (this.showingFullMap || this.isPeeking) {
+      this.isPeeking = false;
+      this.setCameraView("cat");
+    }
+    const cam = this.cameras.main;
+    const glide = this.registry.get("MOTION_REDUCED") === true ? 1 : STORY_SHOT_GLIDE_MS;
+    this.playerInputFrozen = true;
+    this.player.holdStill();
+    let done = false;
+    const finish = (): void => {
+      if (done) return;
+      done = true;
+      cam.startFollow(this.player, true, 0.08, 0.08);
+      this.playerInputFrozen = false;
+      cb.onDone();
+    };
+    cam.stopFollow();
+    cam.pan(target.x, target.y, glide, "Sine.easeInOut", true, (_c: Phaser.Cameras.Scene2D.Camera, there: number) => {
+      cam.panEffect.destination.set(target.x, target.y); // she walks on while the camera glides
+      if (there < 1) return;
+      cam.startFollow(target, true, 0.08, 0.08);
+      cb.onArrive?.();
+      this.time.delayedCall(holdMs, () => {
+        cam.stopFollow();
+        cam.pan(this.player.x, this.player.y, glide, "Sine.easeInOut", true, (_c2: Phaser.Cameras.Scene2D.Camera, back: number) => {
+          if (back >= 1) finish();
+        });
+      });
+    });
+    // a camera reset (resetFX) drops a pan's callback: never leave her frozen
+    this.time.delayedCall(holdMs + glide * 2 + STORY_SHOT_FAILSAFE_MS, finish);
+  }
+
   private tryPrimaryInteract(time: number): void {
     if (this.dialogue.isActive || this.playerInputFrozen || this.player.isSwiping) return;
 
@@ -1384,6 +1436,7 @@ export class GameScene extends Phaser.Scene {
     this.eggs.update(time, delta);
     this.nightLights?.setLevel(nightLevel(this.dayNight.currentPhase, this.dayNight.phaseProgress));
     this.camille.trySpawnAmbientDawnVisit();
+    this.camille.update();
 
     this.player.speedMultiplier = this.stats.speedMultiplier;
 
@@ -1620,7 +1673,7 @@ export class GameScene extends Phaser.Scene {
    * so story delays (Camille's beat delay, the beat-5 decision window) can't
    * run out behind a menu and paired tween+timer moments stay in step.
    * `time.now` keeps advancing, so a deadline paired with timers must be a
-   * timer itself (see EasterEggSystem.holdingEncounter). Camera effects
+   * timer itself (see the Colony Gathering in EasterEggSystem). Camera effects
    * (zoomTo) still run.
    */
   pauseWorld(paused: boolean): void {

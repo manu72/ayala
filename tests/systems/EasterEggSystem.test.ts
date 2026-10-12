@@ -18,6 +18,7 @@ const addNpcMemory = vi.hoisted(() => vi.fn(async () => {}));
 vi.mock("../../src/services/ConversationStore", () => ({ addNpcMemory }));
 
 import { EasterEggSystem, EGGS_KEY } from "../../src/systems/EasterEggSystem";
+import { DEFAULT_ZOOM } from "../../src/config/gameplayConstants";
 import type { GameScene } from "../../src/scenes/GameScene";
 
 /** Anything Phaser draws: every method returns the object itself. */
@@ -73,7 +74,7 @@ function makeScene(reg = new Map<string, unknown>()) {
     audio: { playKitten: vi.fn() },
     emotes: { show: vi.fn() },
     humans: { renderHumanBubble: vi.fn(), recordHumanLines: vi.fn() },
-    camille: { activeCamilleNPC: camille, activeKishNPC: null, pendingEncounterNumber: 0 },
+    camille: { activeCamilleNPC: camille, activeKishNPC: null },
     trust: { global: 0, getCatTrust: () => 0 },
     npcs: [],
     scene: { get: () => ({ showNarration: vi.fn() }) },
@@ -203,41 +204,115 @@ describe("EasterEggSystem", () => {
     expect((reg.get(EGGS_KEY) as { plush: string }).plush).toBe("given");
   });
 
-  it("the gathering stays available when none of the named cats is about", () => {
+  it("the gathering no longer runs before the last encounter: only Mamma Cat's yes starts it", () => {
     const { scene, reg } = makeScene();
-    scene.dayNight.currentPhase = "evening";
-    (scene.camille as { pendingEncounterNumber: number }).pendingEncounterNumber = 5;
+    scene.dayNight.currentPhase = "evening"; // Camille's last encounter waiting is no longer a trigger
     scene.trust.getCatTrust = () => 100;
+    (scene as { npcs: unknown[] }).npcs = [{ cat: { npcName: "Blacky", active: true, x: 50, y: 50 }, indicator: { setHidden: vi.fn() } }];
     const eggs = new EasterEggSystem(scene);
     eggs.update(0, 16);
     expect((reg.get(EGGS_KEY) as { gathered?: boolean }).gathered).toBeUndefined();
+    expect(eggs.farewellDue).toBe(true);
   });
 
-  it("the gathering holds the last encounter on the scene clock, so a long pause can't cut it short", () => {
-    const { scene } = makeScene();
-    scene.dayNight.currentPhase = "evening";
-    (scene.camille as { pendingEncounterNumber: number }).pendingEncounterNumber = 5;
+  it("isn't owed below 80 trust with every named cat, and stays owed when none of them is about", () => {
+    const { scene, reg } = makeScene();
+    const onDone = vi.fn();
+    Object.assign(scene.trust, { getCatTrust: (n: string) => (n === "Ginger B" ? 79 : 100) });
+    const eggs = new EasterEggSystem(scene);
+    expect(eggs.farewellDue).toBe(false);
+    expect(eggs.gatherForFarewell({ x: 20, y: 0 }, onDone)).toBe(false);
+
     scene.trust.getCatTrust = () => 100;
-    const blacky = { npcName: "Blacky", active: true, x: 50, y: 50 };
-    (scene as { npcs: unknown[] }).npcs = [{ cat: blacky, indicator: { setHidden: vi.fn() } }];
-    Object.assign(scene, { hushCrowd: vi.fn(), colony: { knowsCat: () => false } });
+    expect(eggs.gatherForFarewell({ x: 20, y: 0 }, onDone)).toBe(false); // no named cat in the park
+    expect((reg.get(EGGS_KEY) as { gathered?: boolean }).gathered).toBeUndefined();
+    expect(onDone).not.toHaveBeenCalled();
+  });
+
+  it("after her yes the colony gathers round her and Camille on the scene clock, then the journey runs once", () => {
+    const { scene, reg } = makeScene();
+    scene.trust.getCatTrust = () => 100;
+    const blacky = { npcName: "Blacky", active: true, x: 50, y: 50, setPosition: vi.fn(), setHome: vi.fn(), drink: vi.fn() };
+    const hideBlacky = vi.fn();
+    (scene as { npcs: unknown[] }).npcs = [{ cat: blacky, indicator: { setHidden: hideBlacky } }];
+    const hushCrowd = vi.fn();
+    Object.assign(scene, { hushCrowd, colony: { knowsCat: () => false }, catRoute: () => null, isInPark: () => true });
     const timers: Array<{ delay: number; fire: () => void }> = [];
     scene.time.delayedCall = vi.fn((delay: number, fire: () => void) => {
       timers.push({ delay, fire });
       return { remove: vi.fn() };
     }) as never;
+    const onDone = vi.fn();
+    const eggs = new EasterEggSystem(scene);
+    scene.player.x = 0;
+    scene.player.y = 0;
+    scene.cameras.main.zoom = 0.5; // she'd been peeking (Tab) when she said yes
+
+    expect(eggs.gatherForFarewell({ x: 30, y: 10 }, onDone)).toBe(true);
+    expect((reg.get(EGGS_KEY) as { gathered?: boolean }).gathered).toBe(true);
+    expect(eggs.farewellDue).toBe(false);
+    expect(hideBlacky).toHaveBeenCalledWith(true);
+    // the ring is round the two of them, not round Mamma Cat alone
+    expect(hushCrowd).toHaveBeenCalledWith(expect.objectContaining({ x: 15, y: 5 }));
+
+    expect(onDone).not.toHaveBeenCalled();
+
+    // play the scene clock out: the line, the hold, the camera back in, then the journey
+    for (let i = 0; i < timers.length; i++) timers[i]!.fire();
+    expect(blacky.drink).toHaveBeenCalled(); // he came and sat facing them
+    expect(scene.cameras.main.zoomTo).toHaveBeenCalledTimes(2); // out for the line, back in for the journey
+    expect(onDone).toHaveBeenCalledOnce();
+    // the journey waits out the zoom back in: Mamma Cat goes into the carrier close up, not from far out
+    expect(timers[timers.length - 1]).toEqual({ delay: 2000, fire: onDone });
+    expect(vi.mocked(scene.cameras.main.zoomTo).mock.calls[1]?.[0]).toBe(DEFAULT_ZOOM); // the cat view, not the peek
+    expect(eggs.gatherForFarewell({ x: 30, y: 10 }, onDone)).toBe(false); // once per save
+  });
+
+  it("the sunset over the skyline waits rather than pull the camera out from under a story moment", () => {
+    const { scene, reg } = makeScene();
+    Object.assign(scene.map, {
+      findObject: (_layer: string, match: (o: { name: string }) => boolean) =>
+        match({ name: "poi_pyramid_steps" }) ? { x: 0, y: 0 } : null,
+    });
+    const sunsetSeen = () => (reg.get(EGGS_KEY) as { sunset?: boolean }).sunset === true;
+    scene.dayNight.currentPhase = "evening";
+    const eggs = new EasterEggSystem(scene);
+    eggs.update(0, 16);
+    Object.assign(scene, { playerInputFrozen: true }); // Camille's farewell has the camera
+    scene.dayNight.currentPhase = "night";
+    eggs.update(16, 16);
+    expect(scene.cameras.main.zoomTo).not.toHaveBeenCalled();
+    expect(sunsetSeen()).toBe(false);
+
+    Object.assign(scene, { playerInputFrozen: false }); // another evening, on the steps, free
+    scene.dayNight.currentPhase = "evening";
+    eggs.update(32, 16);
+    scene.dayNight.currentPhase = "night";
+    eggs.update(48, 16);
+    expect(scene.cameras.main.zoomTo).toHaveBeenCalled();
+    expect(sunsetSeen()).toBe(true);
+  });
+
+  it("word of Camille and her carrier spreads from the cats nearest her outward, only when the colony will come", () => {
+    const { scene } = makeScene();
+    const near = { npcName: "Tiger", active: true, x: 1900, y: 100 };
+    const far = { npcName: "Blacky", active: true, x: 100, y: 100 };
+    const stranger = { npcName: "Some cat", active: true, x: 1950, y: 100 };
+    (scene as { npcs: unknown[] }).npcs = [far, stranger, near].map((cat) => ({ cat, indicator: { setHidden: vi.fn() } }));
+    Object.assign(scene, { colony: { knowsCat: () => false } });
+    const narration = vi.fn();
+    Object.assign(scene.scene, { get: () => ({ showNarration: narration }) });
+    scene.time.delayedCall = vi.fn((_delay: number, fire: () => void) => fire()) as never;
     const eggs = new EasterEggSystem(scene);
 
-    eggs.update(0, 16);
-    expect(eggs.holdingEncounter).toBe(true);
+    eggs.spreadWord({ x: 2000, y: 100 });
+    expect(scene.emotes.show).not.toHaveBeenCalled();
+    expect(narration).not.toHaveBeenCalled();
 
-    // paused behind a menu: time.now runs on, the scene's timers don't
-    scene.time.now = 10 * 60_000;
-    expect(eggs.holdingEncounter).toBe(true);
-
-    const hold = timers.reduce((a, b) => (b.delay > a.delay ? b : a));
-    hold.fire();
-    expect(eggs.holdingEncounter).toBe(false);
+    scene.trust.getCatTrust = () => 100;
+    eggs.spreadWord({ x: 2000, y: 100 });
+    expect(vi.mocked(scene.emotes.show).mock.calls.map((c) => (c[1] as { npcName: string }).npcName)).toEqual(["Tiger", "Blacky"]);
+    expect(narration).toHaveBeenCalledWith(expect.stringContaining("Word spreads through the colony"));
   });
 
   it("finds each hidden kitten once, when she comes close", () => {

@@ -16,7 +16,7 @@ import { SaveSystem } from "../../src/systems/SaveSystem";
 import { SnatcherSystem } from "../../src/systems/SnatcherSystem";
 
 function makeCaptureScene() {
-  const state = { beat5Pickup: false };
+  const state = { leaving: false };
   const dialogue = { dismiss: vi.fn(), show: vi.fn() };
   const scene = {
     npcs: [],
@@ -32,8 +32,8 @@ function makeCaptureScene() {
     scene: { restart: vi.fn() },
     dialogue,
     camille: {
-      get isBeat5PickupDialogueActive() {
-        return state.beat5Pickup;
+      get isLeavingWithCamille() {
+        return state.leaving;
       },
     },
   };
@@ -78,9 +78,9 @@ describe("SnatcherSystem capture", () => {
     expect(scene.cameras.main.fade).toHaveBeenCalledOnce();
   });
 
-  it("does not capture the player during Camille's Beat-5 pickup dialogue", () => {
+  it("does not capture the player once she has said yes to Camille (the farewell, the pickup)", () => {
     const { scene, dialogue, state, system } = makeCaptureScene();
-    state.beat5Pickup = true;
+    state.leaving = true;
 
     system.checkDetection();
 
@@ -111,7 +111,7 @@ describe("SnatcherSystem capture", () => {
     expect(dialogue.show).toHaveBeenCalledOnce();
   });
 
-  it("does not dismiss Beat-5 pickup dialogue if it opens during the capture fade", () => {
+  it("lets her go home if she says yes to Camille during the capture fade (the pickup modal stays up)", () => {
     const { scene, dialogue, state, system } = makeCaptureScene();
     scene.loseLife.mockReturnValue(true);
     vi.mocked(SaveSystem.clear).mockClear();
@@ -124,7 +124,7 @@ describe("SnatcherSystem capture", () => {
         _force: boolean,
         cb: (cam: unknown, progress: number) => void,
       ) => {
-        state.beat5Pickup = true;
+        state.leaving = true;
         cb({}, 1);
       },
     );

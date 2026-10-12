@@ -31,6 +31,7 @@ vi.mock("../../src/services/ConversationStore", async (importOriginal) => ({
 import { StoryKeys } from "../../src/registry/storyKeys";
 import {
   CAMILLE_BEAT5_ACCEPT_LINE,
+  CAMILLE_ENCOUNTER_5_JOURNEY_STEPS,
   CAMILLE_ENCOUNTER_MEMORY,
 } from "../../src/data/camille-encounter-beats";
 import { flush, makeScene, stageCamille, type Scene } from "./humanSceneHarness";
@@ -44,6 +45,12 @@ async function reachCamille(env: ReturnType<typeof makeScene>): Promise<void> {
 
 function readAll(dialogue: Scene["dialogue"]): void {
   while (dialogue.isActive) dialogue.advance();
+}
+
+/** The beat-5 journey ("The garden shrinks behind you...") is the modal on screen. */
+function journeyOpen(dialogue: Scene["dialogue"]): boolean {
+  const lines = (dialogue as unknown as { lines: string[] }).lines;
+  return dialogue.isActive && lines[0] === CAMILLE_ENCOUNTER_5_JOURNEY_STEPS[0]?.narrator;
 }
 
 beforeEach(() => {
@@ -292,19 +299,168 @@ describe("CamilleEncounterSystem — beat 5", () => {
 
     env.dialogue.show(["A guard leans on the railing and tells a story."]);
     env.timers.find((t) => t.ms === 3200)!.cb();
-    expect(env.scene.camille.isBeat5PickupDialogueActive).toBe(false);
+    expect(journeyOpen(env.dialogue)).toBe(false);
     env.dialogue.advance(); // the other modal closes
     env.timers[env.timers.length - 1]!.cb(); // the journey's retry
-    expect(env.scene.camille.isBeat5PickupDialogueActive).toBe(true);
+    expect(journeyOpen(env.dialogue)).toBe(true);
 
     readAll(env.dialogue);
     expect(env.reg.get(StoryKeys.ENCOUNTER_5_COMPLETE)).toBe(true);
     expect(env.scene.startChapter6Sequence).toHaveBeenCalledTimes(1);
   });
 
+  it("her yes hands the moment to the colony's farewell: Camille stays with her and the journey waits for it", () => {
+    const env = makeScene();
+    const { camille } = stageCamille(env.scene);
+    const farewell = { done: () => {} };
+    const gatherForFarewell = vi.fn((_camille: unknown, done: () => void) => {
+      farewell.done = done;
+      return true;
+    });
+    Object.assign(env.scene, { eggs: { gatherForFarewell } });
+    (env.scene.camille as unknown as { beginBeat5Decision(): void }).beginBeat5Decision();
+    env.scene.player.x = 110;
+    expect(env.scene.camille.isLeavingWithCamille).toBe(false);
+    const turn = vi.spyOn(camille, "pauseForEncounter");
+    env.scene.camille.tryAcceptBeat5Decision();
+    expect(env.scene.camille.isLeavingWithCamille).toBe(true); // snatchers leave her be from here
+    expect(turn).toHaveBeenCalledWith(110); // she turns to Mamma Cat, wherever she came from
+
+    env.timers.find((t) => t.ms === 3200)!.cb();
+    expect(gatherForFarewell).toHaveBeenCalledWith(camille, expect.any(Function));
+    expect(camille.paused).toBe(true);
+    expect(env.scene.playerInputFrozen).toBe(true);
+    expect(env.dialogue.isActive).toBe(false);
+
+    farewell.done();
+    expect(journeyOpen(env.dialogue)).toBe(true);
+    readAll(env.dialogue);
+    expect(env.reg.get(StoryKeys.ENCOUNTER_5_COMPLETE)).toBe(true);
+    expect(env.scene.startChapter6Sequence).toHaveBeenCalledTimes(1);
+  });
+
+  it("Camille is seen walking in with the carrier, and word spreads, before her last encounter can begin", () => {
+    const env = makeScene();
+    const { camille, internals } = stageCamille(env.scene, { pending: 5 });
+    let underTrees = true;
+    const storyShot = vi.fn();
+    const spreadWord = vi.fn();
+    Object.assign(env.scene, { storyShot, eggs: { spreadWord }, isUnderCanopy: () => underTrees });
+    Object.assign(internals, { arrivalShotDue: true });
+    const armed = () => env.timers.filter((t) => t.ms === 12_000).length;
+
+    env.scene.camille.checkProximity();
+    expect(armed()).toBe(0); // not before she's been seen arriving
+    underTrees = false;
+    camille.visible = false; // the frame she's spawned, before her first update shows her
+    env.scene.camille.update();
+    camille.visible = true;
+    underTrees = true;
+    env.scene.camille.update();
+    expect(storyShot).not.toHaveBeenCalled(); // hidden under the trees: there'd be nothing to see
+
+    underTrees = false;
+    env.dialogue.show(["A cat is talking."]);
+    env.scene.camille.update();
+    expect(storyShot).not.toHaveBeenCalled(); // waits for the screen
+    env.dialogue.advance();
+    env.scene.camille.update();
+    env.scene.camille.update();
+    expect(storyShot).toHaveBeenCalledOnce();
+    const [target, , cb] = storyShot.mock.calls[0] as [unknown, number, { onDone(): void }];
+    expect(target).toBe(camille);
+    env.scene.camille.checkProximity();
+    expect(armed()).toBe(0); // the camera is still on her
+
+    cb.onDone();
+    expect(spreadWord).toHaveBeenCalledWith(camille);
+    env.scene.camille.checkProximity();
+    expect(armed()).toBe(1);
+  });
+
+  it("Mamma Cat walks into the carrier Camille set down, and Camille picks it up only once she's in", () => {
+    const env = makeScene();
+    const { camille, internals } = stageCamille(env.scene);
+    const tweens: Array<Record<string, unknown>> = [];
+    Object.assign(env.scene.tweens, { add: (cfg: Record<string, unknown>) => tweens.push(cfg) });
+    const carrier = {
+      x: 0,
+      y: 0,
+      destroy() {},
+      setVisible: () => carrier,
+      setDepth: () => carrier,
+      setFlipX: () => carrier,
+      setPosition: (x: number, y: number) => Object.assign(carrier, { x, y }),
+    };
+    // the journey's re-crouch has just turned her right, toward Mamma Cat; the carrier hasn't caught up
+    Object.assign(camille, { depth: 3, anims: { currentAnim: { key: "camille-crouch-right" } }, setVisible() {} });
+    Object.assign(internals, { carrier, carrierSide: -1 });
+    camille.pauseForEncounter();
+
+    (env.scene.camille as unknown as { runBeat5Pickup(): void }).runBeat5Pickup();
+    expect(tweens[0]).toMatchObject({ targets: env.scene.player, x: camille.x + 13, y: camille.y + 11, alpha: 0 });
+    expect(tweens[1]).toMatchObject({ targets: camille, delay: 1000 });
+    expect(camille.paused).toBe(true); // crouched by the carrier while Mamma Cat goes in
+    expect(tweens[1]!.onStart).toBeUndefined(); // and held through the walk-off: her route can't steer her
+    (tweens[1]!.onComplete as () => void)();
+    expect(camille.paused).toBe(false);
+  });
+
+  it("the last visit is a fresh walk-in with the carrier: it waits until a care visit on screen is out of sight", () => {
+    const env = makeScene();
+    const { camille, internals } = stageCamille(env.scene);
+    internals.encounterActive = false; // an ambient care visit, still on its rounds
+    env.reg.set(StoryKeys.CAMILLE_ENCOUNTER, 4);
+    const view = { x: 0, y: 0, right: 800, bottom: 600 };
+    Object.assign(env.scene, {
+      map: { findObject: () => null }, // the care routes fall back to their built-in points
+      cameras: { main: { worldView: view } },
+      createHumanNavigationGrid: () => null,
+      routeHumanConfig: (config: unknown) => config,
+      physics: { add: { collider() {} } },
+    });
+    const destroy = vi.fn();
+    Object.assign(camille, { destroy });
+    const due = () => (internals as unknown as { arrivalShotDue: boolean }).arrivalShotDue;
+
+    env.scene.camille.checkEncounter(); // she's on screen
+    expect(internals.camilleNPC).toBe(camille);
+    expect(internals.pendingEncounter).toBe(0);
+
+    view.x = 5000; // the camera has moved on
+    view.right = 5800;
+    const roll = vi.spyOn(Math, "random").mockReturnValue(0);
+    try {
+      env.scene.camille.checkEncounter();
+    } finally {
+      roll.mockRestore();
+    }
+    expect(destroy).toHaveBeenCalled(); // not adopted: she walks in again from the underpass
+    expect(internals.pendingEncounter).toBe(5);
+    expect(due()).toBe(true); // with the carrier, owed her arrival shot
+
+    Object.assign(internals, { camilleNPC: null, manuNPC: null, kishNPC: null }); // (the spawned fakes are bare)
+    env.scene.camille.startEncounter(4);
+    expect(due()).toBe(false); // earlier visits bring no carrier
+  });
+
+  it("a scene shutdown after her yes lets everything go: not leaving, Camille released", () => {
+    const env = makeScene();
+    const { camille } = stageCamille(env.scene);
+    (env.scene.camille as unknown as { beginBeat5Decision(): void }).beginBeat5Decision();
+    env.scene.player.x = 110;
+    env.scene.camille.tryAcceptBeat5Decision();
+    expect(camille.paused).toBe(true);
+
+    env.scene.camille.shutdownCamilleState();
+    expect(env.scene.camille.isLeavingWithCamille).toBe(false);
+    expect(env.scene.playerInputFrozen).toBe(false);
+    expect(camille.paused).toBe(false);
+  });
+
   it("closing the journey early still reaches Chapter 6, exactly once", () => {
     const env = makeScene();
-    stageCamille(env.scene);
+    const { camille } = stageCamille(env.scene);
     (env.scene.camille as unknown as { beginBeat5Decision(): void }).beginBeat5Decision();
     env.scene.player.x = 110;
     env.scene.camille.tryAcceptBeat5Decision();
@@ -314,7 +470,8 @@ describe("CamilleEncounterSystem — beat 5", () => {
 
     expect(env.reg.get(StoryKeys.ENCOUNTER_5_COMPLETE)).toBe(true);
     expect(env.scene.startChapter6Sequence).toHaveBeenCalledTimes(1);
-    expect(env.scene.camille.isBeat5PickupDialogueActive).toBe(false);
+    expect(env.dialogue.isActive).toBe(false);
+    expect(camille.paused).toBe(true); // still held: only her walk-off tween moves her now
   });
 
   it("a timed-out ask is remembered only if Camille's line was shown", () => {
@@ -332,6 +489,7 @@ describe("CamilleEncounterSystem — beat 5", () => {
     camilleSystem.beginBeat5Decision();
     env.timers[env.timers.length - 1]!.cb();
     expect(store.records).toHaveLength(1);
+    expect(env.scene.camille.isLeavingWithCamille).toBe(false);
   });
 });
 

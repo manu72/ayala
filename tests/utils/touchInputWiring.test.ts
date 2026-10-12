@@ -265,7 +265,7 @@ function makeFrozenUpdateScene() {
   );
 
   Object.assign(scene, {
-    camille: { trySpawnAmbientDawnVisit: vi.fn(), tick: vi.fn() },
+    camille: { trySpawnAmbientDawnVisit: vi.fn(), update: vi.fn(), tick: vi.fn() },
     catDialogue: {
       tickEngagement: vi.fn(),
       refreshLastPartner: vi.fn(),
@@ -1061,5 +1061,92 @@ describe("touch input scene wiring", () => {
       right: true,
       run: true,
     });
+  });
+});
+
+describe("story shot (ATG-009)", () => {
+  type PanCallback = (cam: unknown, progress: number) => void;
+
+  function shotScene(opts: { peeking?: boolean } = {}) {
+    const timers: Array<{ ms: number; fire: () => void }> = [];
+    const pans: Array<{ x: number; y: number; cb: PanCallback }> = [];
+    const cam = {
+      stopFollow: vi.fn(),
+      startFollow: vi.fn(),
+      pan: vi.fn((x: number, y: number, _ms: number, _ease: string, _force: boolean, cb: PanCallback) => {
+        pans.push({ x, y, cb });
+      }),
+      panEffect: { destination: { set: vi.fn() } },
+    };
+    const player = { x: 10, y: 20, holdStill: vi.fn() };
+    const scene = {
+      showingFullMap: false,
+      isPeeking: opts.peeking === true,
+      setCameraView: vi.fn(),
+      cameras: { main: cam },
+      registry: { get: () => undefined },
+      player,
+      playerInputFrozen: false,
+      time: {
+        delayedCall: vi.fn((ms: number, fire: () => void) => {
+          timers.push({ ms, fire });
+        }),
+      },
+    };
+    return { scene, cam, pans, timers, player };
+  }
+
+  it("freezes her while the camera glides to the target, holds, glides back, then hands her back once", () => {
+    const { scene, cam, pans, timers, player } = shotScene();
+    const target = { x: 500, y: 600 };
+    const onArrive = vi.fn();
+    const onDone = vi.fn();
+    GameScene.prototype.storyShot.call(scene as never, target as never, 5500, { onArrive, onDone });
+    expect(scene.playerInputFrozen).toBe(true);
+    expect(player.holdStill).toHaveBeenCalledOnce(); // no run cycle looping in place
+    expect(pans[0]).toMatchObject({ x: 500, y: 600 });
+
+    target.x = 520; // she walks on during the glide
+    pans[0]!.cb(cam, 0.5);
+    expect(cam.panEffect.destination.set).toHaveBeenLastCalledWith(520, 600);
+    expect(onArrive).not.toHaveBeenCalled();
+    pans[0]!.cb(cam, 1);
+    expect(cam.startFollow).toHaveBeenLastCalledWith(target, true, 0.08, 0.08);
+    expect(onArrive).toHaveBeenCalledOnce();
+
+    timers.find((t) => t.ms === 5500)!.fire();
+    expect(pans[1]).toMatchObject({ x: 10, y: 20 });
+    expect(scene.playerInputFrozen).toBe(true);
+    pans[1]!.cb(cam, 1);
+    expect(scene.playerInputFrozen).toBe(false);
+    expect(cam.startFollow).toHaveBeenLastCalledWith(player, true, 0.08, 0.08);
+    expect(onDone).toHaveBeenCalledOnce();
+
+    // the failsafe, due a little after the glide out, the hold and the glide back, finds it done
+    timers.find((t) => t.ms === 5500 + 2 * 1400 + 1500)!.fire();
+    expect(onDone).toHaveBeenCalledOnce();
+  });
+
+  it("a save made mid-encounter-5 brings Camille back only in the evening (else the next evening's roll does)", () => {
+    const startEncounter = vi.fn();
+    const resume = (GameScene.prototype as unknown as { resumeEncounter5(this: unknown): void }).resumeEncounter5;
+    for (const phase of ["dawn", "day", "night"]) resume.call({ dayNight: { currentPhase: phase }, camille: { startEncounter } });
+    expect(startEncounter).not.toHaveBeenCalled();
+    resume.call({ dayNight: { currentPhase: "evening" }, camille: { startEncounter } });
+    expect(startEncounter).toHaveBeenCalledWith(5);
+  });
+
+  it("comes out of the peek view first, and never leaves her frozen if a camera reset swallows the glide", () => {
+    const { scene, timers } = shotScene({ peeking: true });
+    const onDone = vi.fn();
+    GameScene.prototype.storyShot.call(scene as never, { x: 1, y: 2 } as never, 5500, { onDone });
+    expect(scene.setCameraView).toHaveBeenCalledWith("cat");
+    expect(scene.isPeeking).toBe(false);
+
+    // the pan's callback never comes (resetFX): only the failsafe is left
+    expect(timers).toHaveLength(1);
+    timers[0]!.fire();
+    expect(scene.playerInputFrozen).toBe(false);
+    expect(onDone).toHaveBeenCalledOnce();
   });
 });

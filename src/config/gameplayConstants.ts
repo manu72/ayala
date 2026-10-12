@@ -88,6 +88,16 @@ export const CAMILLE_CARE_ROUTE_ENTRY_BLACKY_PAUSE_MS = 3800;
 export const CAMILLE_BEAT5_DECISION_MS = 10_000;
 
 /**
+ * How long (ms) the camera stays with Camille as she comes in carrying the pet
+ * carrier on her last visit, before it glides back to Mamma Cat: long enough to
+ * see her set off from the underpass entrance (after its linger) and reach Blacky.
+ */
+export const CAMILLE_ARRIVAL_SHOT_HOLD_MS = 5500;
+
+/** The camera's zoom on Mamma Cat (the normal cat view; Tab peeks wider). */
+export const DEFAULT_ZOOM = 2.5;
+
+/**
  * Human speech bubbles wrap at this width (world px, ~400 screen px at the
  * 2.5x zoom) so long lines such as the beat-5 acceptance stay on screen.
  */

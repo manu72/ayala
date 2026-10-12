@@ -8,13 +8,14 @@ import { mixSeed, seededRng } from "../utils/forage";
 import type { NPCCat } from "../sprites/NPCCat";
 import { StoryKeys } from "../registry/storyKeys";
 import { addNpcMemory } from "../services/ConversationStore";
+import { DEFAULT_ZOOM } from "../config/gameplayConstants";
 
 /**
  * The secrets in docs/Ayala_Easter_Eggs.md: the Hidden Letter and the Stuffed Cat (carried in her
  * mouth to Camille / Kish), Pedigree's buried collar, the Balloon, the Hidden Kittens, the Sunset
  * Viewpoint, the Developer's Note, the Ghost of Mamma Cat's Past, Blacky's Midnight Story, the
- * Kittens Are Coming, and the Complete Colony Gathering before the last encounter. Each plays once
- * per save, never with a banner (easter egg principle 1), and never gates the story.
+ * Kittens Are Coming, and the Complete Colony Gathering when Mamma Cat says yes to Camille. Each
+ * plays once per save, never with a banner (easter egg principle 1), and never gates the story.
  */
 
 export const EGGS_KEY = StoryKeys.EGGS;
@@ -32,6 +33,10 @@ const FRINGE_SPREAD_MS = 13_000;
 /** From the last cat setting off until the line: time to walk in and sit. */
 const GATHER_SETTLE_MS = 14_000;
 const GATHER_HOLD_MS = 7000;
+const GATHER_ZOOM_BACK_MS = 2000;
+/** Word of Camille and her carrier runs through the colony, nearest her first, over this long at most. */
+const WORD_SPREAD_MS = 4000;
+const WORD_GAP_MS = 300;
 /**
  * While they sit with her, strangers keep away: no crowd, joggers, guards, dog walkers or cats she
  * doesn't know within this of the gathering (wider than the pulled-back camera's view).
@@ -133,7 +138,6 @@ export class EasterEggSystem {
   private prevPhase: string;
   private ghostOn = false;
   private restWasOn = false;
-  private gatheringHold: Phaser.Time.TimerEvent | null = null;
   private hush: { x: number; y: number; r: number; until: number; guests: Set<NPCCat> } | null = null;
   private readonly hiddenCats = new Set<NPCCat>();
   private storyWoke = false;
@@ -145,9 +149,9 @@ export class EasterEggSystem {
     this.persist();
   }
 
-  /** Camille's last encounter waits while the colony gathers (on the scene clock, which stops behind the pause menu). */
-  get holdingEncounter(): boolean {
-    return this.gatheringHold !== null;
+  /** The Complete Colony Gathering is still owed: every named cat loves her (80+). */
+  get farewellDue(): boolean {
+    return !this.state.gathered && NAMED_CATS.every((n) => this.scene.trust.getCatTrust(n) >= GATHERING_TRUST);
   }
 
   // ──────────── Space ────────────
@@ -248,7 +252,8 @@ export class EasterEggSystem {
       !this.state.sunset &&
       this.prevPhase === "evening" &&
       phase === "night" &&
-      this.at("poi_pyramid_steps", SUNSET_TILE_PX)
+      this.at("poi_pyramid_steps", SUNSET_TILE_PX) &&
+      !this.scene.playerInputFrozen // not over a story moment's camera (Camille's farewell)
     )
       this.sunset();
     this.prevPhase = phase;
@@ -288,11 +293,6 @@ export class EasterEggSystem {
     this.restWasOn = player.isResting;
 
     this.tickHush(time);
-
-    // The Complete Colony Gathering: before the last encounter, if every named cat loves her
-    if (!this.state.gathered && this.scene.camille.pendingEncounterNumber === 5 && phase === "evening") {
-      if (NAMED_CATS.every((n) => this.scene.trust.getCatTrust(n) >= GATHERING_TRUST)) this.gather(time);
-    }
   }
 
   // ──────────── the eggs ────────────
@@ -610,30 +610,58 @@ export class EasterEggSystem {
     );
   }
 
-  private gather(time: number): void {
+  /**
+   * Camille has walked in with the carrier: if the colony is going to come and say goodbye, word of
+   * her runs through it first, cat to cat, from the ones nearest her outward.
+   */
+  spreadWord(camille: Pt): void {
+    if (!this.farewellDue) return;
+    const scene = this.scene;
+    const cats = scene.npcs
+      .filter((e) => e.cat.active && ((NAMED_CATS as readonly string[]).includes(e.cat.npcName) || scene.colony.knowsCat(e.cat)))
+      .map((e) => e.cat)
+      .sort(
+        (a, b) =>
+          Phaser.Math.Distance.Between(a.x, a.y, camille.x, camille.y) -
+          Phaser.Math.Distance.Between(b.x, b.y, camille.x, camille.y),
+      );
+    const gap = Math.min(WORD_GAP_MS, WORD_SPREAD_MS / Math.max(1, cats.length));
+    cats.forEach((cat, i) =>
+      scene.time.delayedCall(i * gap, () => {
+        if (cat.active) scene.emotes.show(scene, cat, "alert");
+      }),
+    );
+    this.narrate("Word spreads through the colony, cat to cat: your special friend is here. And she's brought a box.");
+  }
+
+  /**
+   * The Complete Colony Gathering, after Mamma Cat says yes: Camille stays crouched beside her while
+   * every cat she knows comes and sits round the two of them. When they're all there the camera pulls
+   * back for the line, then comes in again and `onDone` (the journey home) runs, once. False when it
+   * isn't owed or none of the named cats is about (the journey then runs straight away).
+   */
+  gatherForFarewell(camille: Pt, onDone: () => void): boolean {
+    if (!this.farewellDue) return false;
     const scene = this.scene;
     const named = NAMED_CATS.map((n) => scene.npcs.find((e) => e.cat.npcName === n)?.cat).filter(
       (c): c is NonNullable<typeof c> => !!c?.active,
     );
-    if (named.length === 0) return;
+    if (named.length === 0) return false;
     this.state.gathered = true;
     this.persist();
     const { player } = scene;
-    const centre = { x: player.x, y: player.y };
+    const centre = { x: (player.x + camille.x) / 2, y: (player.y + camille.y) / 2 };
     // every other cat she knows by name: the colony she greeted, Cat cat and Mittens, settled newcomers, the street cats
     const fringe = scene.npcs
       .map((e) => e.cat)
       .filter((c) => c.active && !named.includes(c) && scene.colony.knowsCat(c));
     const rng = seededRng(mixSeed(scene.dayNight.dayCount, 5150));
     const slots = gatheringSlots(centre, named.length, fringe.length, rng);
-    this.hush = { ...centre, r: HUSH_RADIUS_PX, until: time + HUSH_MS, guests: new Set([...named, ...fringe]) };
+    this.hush = { ...centre, r: HUSH_RADIUS_PX, until: scene.time.now + HUSH_MS, guests: new Set([...named, ...fringe]) };
     scene.hushCrowd(this.hush);
     const lastNamedMs = (named.length - 1) * NAMED_GAP_MS;
     const fringeAt = fringeStarts(fringe.length, FRINGE_FIRST_MS, FRINGE_SPREAD_MS, rng);
     const settledMs = Math.max(lastNamedMs, fringeAt[fringeAt.length - 1] ?? 0) + GATHER_SETTLE_MS;
-    this.gatheringHold = scene.time.delayedCall(settledMs + GATHER_HOLD_MS, () => {
-      this.gatheringHold = null;
-    });
 
     // no names, no moods over anyone: just the cats
     for (const e of scene.npcs) if (named.includes(e.cat) || fringe.includes(e.cat)) e.indicator.setHidden(true);
@@ -648,8 +676,11 @@ export class EasterEggSystem {
       }),
     );
 
+    // Inside beat 5's input freeze, so the pause menu can't open; the timers are on the scene clock anyway.
+    // The camera comes back to the cat view, not the zoom it had: she may have been peeking, or the
+    // sunset may have had it pulled back.
     const cam = scene.cameras.main;
-    const zoom = cam.zoom;
+    const zoom = DEFAULT_ZOOM;
     scene.time.delayedCall(settledMs, () => {
       // wide enough to take in the fringe, so she can see them all
       cam.zoomTo(
@@ -659,8 +690,13 @@ export class EasterEggSystem {
         true,
       );
       this.narrate("They came. All of them. To say goodbye.");
-      scene.time.delayedCall(GATHER_HOLD_MS, () => cam.zoomTo(zoom, 2000, "Sine.easeInOut", true));
+      scene.time.delayedCall(GATHER_HOLD_MS, () => {
+        // back in close, the named cats round her, to watch her go into the carrier
+        cam.zoomTo(zoom, GATHER_ZOOM_BACK_MS, "Sine.easeInOut", true);
+        scene.time.delayedCall(GATHER_ZOOM_BACK_MS, onDone);
+      });
     });
+    return true;
   }
 
   /**
