@@ -36,8 +36,7 @@ const LINKS = [
 const CREDITS = [
   "AYALA",
   "",
-  "Developer: Manu",
-  "AI Co-developer: Claude",
+  "Developer: t8 Manu",
   "",
   "For Camille",
   "",
@@ -91,12 +90,7 @@ export class EpilogueScene extends Phaser.Scene {
     }
   }
 
-  private showTextSequence(
-    lines: string[],
-    width: number,
-    height: number,
-    onComplete: () => void,
-  ): void {
+  private showTextSequence(lines: string[], width: number, height: number, onComplete: () => void): void {
     let yOffset = height * 0.3;
     let delay = 0;
 
