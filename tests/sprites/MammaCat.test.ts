@@ -127,3 +127,30 @@ describe('MammaCat paw swipe (ATG-008)', () => {
     expect(cat.playerState).toBe('swiping')
   })
 })
+
+describe('MammaCat holds still for a story shot (ATG-009)', () => {
+  it('stops a walk or run in an idle pose: standing, or sitting if crouched', () => {
+    const cat = makeCat()
+    cat.isRunning = true
+    cat.holdStill()
+    expect(cat.isRunning).toBe(false)
+    expect(cat.setVelocity).toHaveBeenLastCalledWith(0)
+    expect(cat.setTexture).toHaveBeenCalled() // facing south: the stand frame
+
+    cat.playerState = 'crouching'
+    cat.holdStill()
+    expect(cat.anims.play).toHaveBeenLastCalledWith(expect.stringMatching(/^mc-sit-idle-/), true)
+  })
+
+  it('leaves a pose that ends on its own (loaf, greeting) alone', () => {
+    const cat = makeCat()
+    cat.enterCatloaf()
+    const setTexture = cat.setTexture as unknown as ReturnType<typeof vi.fn>
+    const plays = cat.anims.play.mock.calls.length
+    const textures = setTexture.mock.calls.length
+    cat.holdStill()
+    expect(cat.playerState).toBe('catloaf')
+    expect(cat.anims.play).toHaveBeenCalledTimes(plays)
+    expect(setTexture).toHaveBeenCalledTimes(textures) // no standing frame over the loaf
+  })
+})

@@ -156,5 +156,14 @@
       "mammacat_paw_swipe_west.png": "336x48, 7 frames of 48x48: the 52x52 PixelLab west frames centre-cropped (offset 2,2)",
       "mammacat_paw_swipe_east.png": "each west frame mirrored (the generated east read as a stretch, not a swat; her other E/W sheets are exact mirrors too)"
     }
+  },
+  "pet_carrier": {
+    "_about": "Provenance only (not packed by build-pixellab-extras.py): the pet carrier Camille brings to the last encounter (ATG-009). Saved as generated.",
+    "job_id": "4090f0fe-b561-47e7-b78c-8c091b566608",
+    "tool": "create_image_pixflux, 32x32, no_background, view low top-down, direction east, single color black outline, medium shading, medium detail",
+    "prompt": "small cat travel carrier box, side view, light blue plastic with white top half, black handle on top, metal grille door at the front, pixel art prop",
+    "outputs": {
+      "pet_carrier.png": "32x32, door on the left; drawn at about 0.3 scale beside Camille, flipped to face her way"
+    }
   }
 }

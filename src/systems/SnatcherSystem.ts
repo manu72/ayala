@@ -175,8 +175,8 @@ export class SnatcherSystem {
         continue;
       }
 
-      // Beat-5 pickup dialogue completes from onHide. Leave that modal up.
-      if (this.scene.camille.isBeat5PickupDialogueActive) {
+      // From her yes to Camille (the farewell, the pickup modal) she's frozen and going home: leave her be.
+      if (this.scene.camille.isLeavingWithCamille) {
         continue;
       }
 
@@ -373,14 +373,14 @@ export class SnatcherSystem {
    * range.
    */
   private handleSnatcherCapture(): void {
-    if (this.scene.camille.isBeat5PickupDialogueActive) return;
+    if (this.scene.camille.isLeavingWithCamille) return;
     this.capturing = true;
 
     let settled = false;
     this.scene.cameras.main.fade(100, 0, 0, 0, false, (_cam: Phaser.Cameras.Scene2D.Camera, progress: number) => {
       if (progress < 1 || settled) return;
       settled = true;
-      if (this.scene.camille.isBeat5PickupDialogueActive) {
+      if (this.scene.camille.isLeavingWithCamille) {
         this.capturing = false;
         this.scene.cameras.main.resetFX();
         return;

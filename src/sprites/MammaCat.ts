@@ -264,6 +264,19 @@ export class MammaCat extends Phaser.Physics.Arcade.Sprite {
   }
 
   /**
+   * A story moment has taken the controls: stop where she is, standing idle
+   * (or sitting, if crouched) so no walk or run cycle loops in place. Any
+   * other pose (loaf, rest, greeting, ...) is left to end on its own.
+   */
+  holdStill(): void {
+    this.isRunning = false;
+    this.setVelocity(0);
+    if (this.playerState === "normal" || this.playerState === "crouching") {
+      this.playIdleAnimation(this.playerState === "crouching");
+    }
+  }
+
+  /**
    * Face toward a world position (for dialogue engagement).
    *
    * No-op while a lock-in animation state owns the sprite (`greeting` /

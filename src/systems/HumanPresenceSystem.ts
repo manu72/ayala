@@ -341,7 +341,8 @@ export class HumanPresenceSystem {
       // proximity-greeting branch — their encounter pause already sets
       // their pose, and firing a second greeting would clobber the crouch
       // animation and spawn a duplicate bubble above their head. The same
-      // holds while a beat is being staged and during the beat-5 pickup.
+      // holds while a beat is being staged and while input is frozen (Camille's
+      // arrival shot, and from the beat-5 yes through the pickup).
       if (human.isCatPerson && !human.isGreeting && !human.isEncounterPaused && !this.isGreetingHeld(human, false)) {
         let greeted = false;
 
@@ -683,7 +684,7 @@ export class HumanPresenceSystem {
     );
   }
 
-  /** Story moments where humans keep quiet: a Camille beat armed or being staged, or the beat-5 pickup. */
+  /** Story moments where humans keep quiet: a Camille beat armed or being staged, or input frozen (her arrival shot, the yes through the pickup). */
   private isGreetingHeld(human: HumanNPC, toMammaCat: boolean): boolean {
     return this.scene.playerInputFrozen || this.scene.camille.holdsGreetingFrom(human, toMammaCat);
   }

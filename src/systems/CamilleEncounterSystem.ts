@@ -4,7 +4,7 @@ import type { HUDScene } from "../scenes/HUDScene";
 import { HumanNPC, type HumanConfig } from "../sprites/HumanNPC";
 import { kishProfileForDay } from "../sprites/SpriteProfiles";
 import { StoryKeys } from "../registry/storyKeys";
-import { GP, CAMILLE_BEAT5_DECISION_MS } from "../config/gameplayConstants";
+import { GP, CAMILLE_ARRIVAL_SHOT_HOLD_MS, CAMILLE_BEAT5_DECISION_MS } from "../config/gameplayConstants";
 import { AI_PERSONAS } from "../ai/personas";
 import { FallbackDialogueService } from "../services/FallbackDialogueService";
 import type { DialogueRequest, DialogueResponse } from "../services/DialogueService";
@@ -22,6 +22,9 @@ import {
   type EncounterStep,
 } from "../data/camille-encounter-beats";
 
+/** The 32 px pet carrier drawn about 45 cm long beside Camille. */
+const CARRIER_SCALE = 0.3;
+
 /** What the AI added to a beat: Camille's spoken lines and, optionally, her impression of Mamma Cat. */
 type EncounterReply = Pick<DialogueResponse, "lines" | "memoryNote">;
 
@@ -30,13 +33,19 @@ type EncounterReply = Pick<DialogueResponse, "lines" | "memoryNote">;
  * visits, the five scripted encounter beats (with AI-assisted middle
  * beats 2–4), the Beat-5 three-phase consent gate (pre-decision → 10s
  * player window → journey tween), Camille-era human lifecycle
- * (Camille / Manu / Kish), and the Kish-slow-down ambient bubble.
+ * (Camille / Manu / Kish), the Kish-slow-down ambient bubble, and the
+ * last visit's pet carrier and arrival shot. Between the yes and the
+ * journey, the Complete Colony Gathering may play
+ * ({@link EasterEggSystem.gatherForFarewell}).
  *
  * Call sites on {@link GameScene}:
  *   - `checkEncounter()` + `checkProximity()` are polled from the 5s
  *     chapter-check block.
  *   - `trySpawnAmbientDawnVisit()` is polled from `update()` each frame
  *     (gated internally by phase + registry per-day limits).
+ *   - `update()` runs each frame: the encounter-5 pet carrier follows
+ *     Camille, and her arrival shot ({@link GameScene.storyShot}) plays
+ *     once the moment is calm.
  *   - `flushTeardown()` runs once per `updateHumans` tick after the
  *     human iteration completes (avoids splicing mid-iter).
  *   - `tryRunKishSlowDownBeat()` is folded into `updateHumans` where the
@@ -92,9 +101,15 @@ export class CamilleEncounterSystem {
   private eraTeardownPending = false;
   private pendingEncounter = 0;
   private beat5DecisionActive = false;
-  /** True only while the frozen Beat-5 pickup modal is actually on screen. */
-  private beat5PickupDialogueActive = false;
   private beat5DecisionTimer: Phaser.Time.TimerEvent | null = null;
+  /** From Mamma Cat's yes until the scene ends: the farewell and the journey home. */
+  private leaving = false;
+  /** The pet carrier Camille brings to the last encounter: in her hand, or set down while she crouches. */
+  private carrier: Phaser.GameObjects.Image | null = null;
+  private carrierSide = 1;
+  /** Encounter 5: the camera still owes Mamma Cat a look at Camille walking in with the carrier. */
+  private arrivalShotDue = false;
+  private arrivalShotActive = false;
   private kishSlowDownShown = false;
   /** The 8–12 s wait between reaching Camille and her beat (see {@link scheduleEncounterDialogue}). */
   private beatDelay: Phaser.Time.TimerEvent | null = null;
@@ -138,12 +153,9 @@ export class CamilleEncounterSystem {
     return this.encounterActive;
   }
 
-  /**
-   * Frozen Beat-5 pickup modal. That beat completes from `onHide`, so another
-   * system dismissing it also starts Chapter 6.
-   */
-  get isBeat5PickupDialogueActive(): boolean {
-    return this.beat5PickupDialogueActive;
+  /** Mamma Cat said yes: nothing may take her (or the screen) until she's gone home. */
+  get isLeavingWithCamille(): boolean {
+    return this.leaving;
   }
 
   get activeCamilleNPC(): HumanNPC | null {
@@ -152,11 +164,6 @@ export class CamilleEncounterSystem {
 
   get activeKishNPC(): HumanNPC | null {
     return this.kishNPC;
-  }
-
-  /** The encounter waiting for Mamma Cat to reach Camille (0 = none). */
-  get pendingEncounterNumber(): number {
-    return this.pendingEncounter;
   }
 
   /**
@@ -196,13 +203,16 @@ export class CamilleEncounterSystem {
     this.eraTeardownPending = false;
     this.pendingEncounter = 0;
     this.beat5DecisionActive = false;
-    this.beat5PickupDialogueActive = false;
     if (this.beat5DecisionTimer) {
       this.beat5DecisionTimer.remove(false);
       this.beat5DecisionTimer = null;
     }
     this.cancelStagedBeat();
     this.kishSlowDownShown = false;
+    this.leaving = false;
+    this.carrier = null; // the old scene destroyed it
+    this.arrivalShotDue = false;
+    this.arrivalShotActive = false;
   }
 
   /**
@@ -213,6 +223,12 @@ export class CamilleEncounterSystem {
   tick(): void {
     this.checkEncounter();
     this.checkProximity();
+  }
+
+  /** Each frame: the carrier keeps to Camille, and her arrival is shown once the moment allows. */
+  update(): void {
+    this.followCarrier();
+    if (this.arrivalShotDue) this.tryArrivalShot();
   }
 
   /**
@@ -268,6 +284,9 @@ export class CamilleEncounterSystem {
       if (!awaitingEncounter5Completion) this.trySpawnAmbientEveningVisit();
       return;
     }
+    // The last visit is a fresh spawn at the underpass: wait (without using up
+    // the roll) rather than delete a care visit in front of Mamma Cat.
+    if (currentEncounter >= 4 && this.eraGroupInView()) return;
     this.rollDay = scene.dayNight.dayCount;
 
     if (currentEncounter > 0 && Math.random() > 0.6) {
@@ -327,7 +346,7 @@ export class CamilleEncounterSystem {
     const scene = this.scene;
     if (this.pendingEncounter === 0) return;
     if (scene.dayNight.currentPhase !== "evening") return;
-    if (scene.eggs?.holdingEncounter) return; // the colony is still gathering
+    if (this.arrivalShotDue || this.arrivalShotActive) return; // she's seen arriving first
     if (!this.camilleNPC?.visible) return;
     if (scene.dialogue.isActive) return;
 
@@ -349,6 +368,7 @@ export class CamilleEncounterSystem {
     if (!this.eraTeardownPending) return;
     this.eraTeardownPending = false;
     this.cancelStagedBeat();
+    this.dropCarrier();
     this.eraParkExitCount = 0;
     this.eraParkExitTarget = 1;
     for (const npc of [this.camilleNPC, this.manuNPC, this.kishNPC]) {
@@ -423,11 +443,14 @@ export class CamilleEncounterSystem {
   startEncounter(encounterNum: number): void {
     // Same group either way (Manu from encounter 2, Kish from 3), so keep a
     // still-walking ambient visit rather than teleporting it to the underpass.
-    const adopt = canAdoptAmbientCareGroup({
-      camille: this.camilleNPC,
-      encounterActive: this.encounterActive,
-      teardownPending: this.eraTeardownPending,
-    });
+    // Not for the last one: she must be seen walking in with the carrier.
+    const adopt =
+      encounterNum < 5 &&
+      canAdoptAmbientCareGroup({
+        camille: this.camilleNPC,
+        encounterActive: this.encounterActive,
+        teardownPending: this.eraTeardownPending,
+      });
     if (!adopt) this.cleanupNPCs();
     this.encounterActive = true;
     if (!adopt) {
@@ -439,6 +462,7 @@ export class CamilleEncounterSystem {
     }
     this.scene.registry.set(StoryKeys.CAMILLE_AMBIENT_EVENING_DAY, this.scene.dayNight.dayCount);
     this.pendingEncounter = encounterNum;
+    if (encounterNum === 5) this.bringCarrier();
   }
 
   /**
@@ -447,7 +471,7 @@ export class CamilleEncounterSystem {
    * playable, even if the player was mid-Beat-5-pickup. In particular:
    *
    *  - The two tweens launched by {@link runBeat5Pickup} (Mamma fading
-   *    toward Camille's feet; Camille walking off-screen) are stopped
+   *    into the carrier; Camille walking off-screen) are stopped
    *    explicitly. Without this, a shutdown that races the tween can
    *    leave the player at partial alpha when the tween gets killed by
    *    Phaser's own lifecycle, and — critically — the `onComplete` that
@@ -464,8 +488,9 @@ export class CamilleEncounterSystem {
   shutdownCamilleState(): void {
     this.cancelBeat5Decision();
     this.beat5DecisionActive = false;
-    this.beat5PickupDialogueActive = false;
+    this.leaving = false;
     this.scene.playerInputFrozen = false;
+    this.dropCarrier();
 
     // Abort any in-flight `requestEncounterLines` LLM call so (a) the
     // fetch is cancelled (no wasted bandwidth), and (b) the orchestrator
@@ -490,9 +515,12 @@ export class CamilleEncounterSystem {
     this.resumeEraHumans();
   }
 
-  /** Release paused Camille-era humans. Safe to call when nothing is paused. */
+  /**
+   * Release paused Camille-era humans. Safe to call when nothing is paused.
+   * After the yes Camille stays held: the walk-off tween alone moves her.
+   */
   resumeEraHumans(): void {
-    this.camilleNPC?.resumeFromEncounter();
+    if (!this.leaving) this.camilleNPC?.resumeFromEncounter();
     this.manuNPC?.resumeFromEncounter();
     this.kishNPC?.resumeFromEncounter();
   }
@@ -585,6 +613,16 @@ export class CamilleEncounterSystem {
     }
   }
 
+  /** Any of Camille's group on screen (with a margin), so removing them would be seen. */
+  private eraGroupInView(): boolean {
+    const view = this.scene.cameras?.main.worldView;
+    if (!view) return false;
+    const m = 64;
+    return [this.camilleNPC, this.manuNPC, this.kishNPC].some(
+      (h) => !!h?.active && h.visible && h.x > view.x - m && h.x < view.right + m && h.y > view.y - m && h.y < view.bottom + m,
+    );
+  }
+
   /** Count park-exit completions; teardown when every spawned human has exited. */
   private onEraParkExit(): void {
     this.eraParkExitCount += 1;
@@ -602,8 +640,9 @@ export class CamilleEncounterSystem {
     this.cancelStagedBeat();
     this.cancelBeat5Decision();
     this.beat5DecisionActive = false;
-    this.beat5PickupDialogueActive = false;
+    this.leaving = false;
     this.scene.playerInputFrozen = false;
+    this.dropCarrier();
     for (const npc of [this.camilleNPC, this.manuNPC, this.kishNPC]) {
       if (!npc) continue;
       npc.resumeFromEncounter();
@@ -776,7 +815,6 @@ export class CamilleEncounterSystem {
         },
         onHide: (completed): void => {
           clearBubble();
-          if (opts?.completeOnDismiss) this.beat5PickupDialogueActive = false;
           // Natural completion: onComplete runs next and owns the resume.
           if (completed) return;
           if (isCamilleBeat) {
@@ -797,7 +835,6 @@ export class CamilleEncounterSystem {
         },
       },
     );
-    if (opts?.completeOnDismiss) this.beat5PickupDialogueActive = true;
     return true;
   }
 
@@ -972,8 +1009,10 @@ export class CamilleEncounterSystem {
   private acceptBeat5(): void {
     this.beat5DecisionActive = false;
     this.cancelBeat5Decision();
-    // Freeze now, not at the journey: a cat chat or the letter opened in
-    // the next 3.2 s would hold the screen the journey needs.
+    this.leaving = true;
+    // Freeze now, not at the journey: a cat chat or the letter opened during
+    // the 3.2 s accept line, or the Colony Gathering that may follow it, would
+    // hold the screen the journey needs.
     this.scene.playerInputFrozen = true;
     this.scene.player.startGreeting();
     this.scene.humans.recordHumanEngagement();
@@ -987,6 +1026,8 @@ export class CamilleEncounterSystem {
       this.playBeat5Journey();
       return;
     }
+    // She turns to Mamma Cat (who came from wherever she was), the carrier on her side.
+    speaker.pauseForEncounter(this.scene.player.x);
     const bubble = this.scene.humans.renderHumanBubble(speaker, CAMILLE_BEAT5_ACCEPT_LINE, {
       persistent: true,
     });
@@ -998,7 +1039,8 @@ export class CamilleEncounterSystem {
     );
     this.scene.time.delayedCall(3200, () => {
       bubble?.destroy();
-      this.playBeat5Journey();
+      // Camille stays crouched beside her while the colony comes to say goodbye (if it loves her)
+      if (!this.scene.eggs?.gatherForFarewell(speaker, () => this.playBeat5Journey())) this.playBeat5Journey();
     });
   }
 
@@ -1027,9 +1069,9 @@ export class CamilleEncounterSystem {
   /**
    * Phase C: narration over the pickup tween. The journey paired beat
    * runs two narrator-only steps in the modal; on the FIRST step shown
-   * we kick off the pickup tween so "The garden shrinks behind you" is
-   * perfectly synchronised with Mamma Cat being lifted into the carrier
-   * and Camille walking toward the underpass exit.
+   * we kick off the pickup tween so "The garden shrinks behind you" starts
+   * as Mamma Cat walks into the carrier; a second later Camille picks it
+   * up and walks toward the underpass exit.
    *
    * Input is already frozen from the accept, but a modal that opened just
    * before (a cat reply in flight, a guard's tale) would swallow the
@@ -1066,10 +1108,12 @@ export class CamilleEncounterSystem {
 
   /**
    * Run the "Camille picks up Mamma Cat" visual:
-   *   1. Tween Mamma Cat to Camille's feet while fading out (carrier).
+   *   1. Tween Mamma Cat into the carrier set down beside Camille (or to
+   *      her feet if there's no carrier texture) while fading out.
    *   2. Disable Mamma's physics body + hide her.
-   *   3. Tween Camille off-screen toward the underpass exit with her
-   *      walk animation.
+   *   3. A second later (with a carrier), tween Camille off-screen toward
+   *      the underpass exit with her walk animation. She stays held for
+   *      the encounter until it ends, so her route can't steer her too.
    * All under the existing `playerInputFrozen` guard so nothing else
    * can steer the player while this plays out.
    */
@@ -1078,11 +1122,15 @@ export class CamilleEncounterSystem {
     const speaker = this.camilleNPC;
     if (!speaker) return;
 
+    // Into the carrier set down beside Camille (or to her feet if there's none),
+    // on whichever side the journey's re-crouch just turned her to.
+    this.followCarrier();
+    const into = this.carrier ?? { x: speaker.x, y: speaker.y + 4 };
     const mammaBody = scene.player.body as Phaser.Physics.Arcade.Body | undefined;
     scene.tweens.add({
       targets: scene.player,
-      x: speaker.x,
-      y: speaker.y + 4,
+      x: into.x,
+      y: into.y,
       alpha: 0,
       duration: 900,
       ease: "Sine.easeInOut",
@@ -1092,17 +1140,16 @@ export class CamilleEncounterSystem {
       },
     });
 
-    // Camille walks off-screen toward her underpass spawn waypoint.
-    // Release just Camille (not the whole Camille-era group — Manu/Kish
-    // continue their own circuits normally once the beat resolves).
+    // Once she's in, Camille picks the carrier up and walks off-screen toward
+    // her underpass spawn waypoint. Manu/Kish continue their own circuits.
     const exitTarget = speaker.config.path[0] ?? { x: speaker.x - 200, y: speaker.y };
     this.manuNPC?.resumeFromEncounter();
     this.kishNPC?.resumeFromEncounter();
-    speaker.resumeFromEncounter();
     scene.tweens.add({
       targets: speaker,
       x: exitTarget.x,
       y: exitTarget.y,
+      delay: this.carrier ? 1000 : 0,
       duration: 3200,
       ease: "Sine.easeInOut",
       onUpdate: () => {
@@ -1116,6 +1163,85 @@ export class CamilleEncounterSystem {
       },
       onComplete: () => {
         speaker.setVisible(false);
+        speaker.resumeFromEncounter();
+      },
+    });
+  }
+
+  // ──────────── The pet carrier and her arrival ────────────
+
+  /** Encounter 5: Camille comes with the pet carrier, and Mamma Cat is shown her walking in. */
+  private bringCarrier(): void {
+    this.dropCarrier();
+    this.arrivalShotDue = true;
+    if (!this.scene.textures?.exists("pet_carrier")) return;
+    this.carrier = this.scene.add.image(0, 0, "pet_carrier").setScale(CARRIER_SCALE).setVisible(false);
+  }
+
+  private dropCarrier(): void {
+    this.carrier?.destroy();
+    this.carrier = null;
+    this.arrivalShotDue = false;
+    this.arrivalShotActive = false;
+  }
+
+  /** In her hand while she walks; set down in front of her, door toward Mamma Cat, while she crouches. */
+  private followCarrier(): void {
+    const carrier = this.carrier;
+    if (!carrier) return;
+    const camille = this.camilleNPC;
+    carrier.setVisible(!!camille?.active && camille.visible);
+    if (!camille?.active) return;
+    const anim = camille.anims.currentAnim?.key ?? "";
+    if (anim.endsWith("-left")) this.carrierSide = -1;
+    else if (anim.endsWith("-right")) this.carrierSide = 1;
+    const side = this.carrierSide;
+    let dx = side * 3;
+    let dy = 7;
+    let depth = camille.depth + 0.01;
+    if (anim.includes("-crouch-")) {
+      dx = side * 13;
+      dy = 11;
+    } else if (anim.endsWith("-down")) {
+      dx = -7;
+      dy = 5;
+    } else if (anim.endsWith("-up")) {
+      dx = 7;
+      dy = 4;
+      depth = camille.depth - 0.01;
+    }
+    carrier.setPosition(camille.x + dx, camille.y + dy).setDepth(depth).setFlipX(side > 0);
+  }
+
+  /**
+   * As soon as she's in through the underpass and nothing else holds the
+   * screen, the camera goes to Camille and her carrier (she sets off from the
+   * entrance and reaches Blacky while it holds), then back to Mamma Cat; then
+   * word spreads through the colony, Blacky first (if it loves her enough to come).
+   */
+  private tryArrivalShot(): void {
+    const scene = this.scene;
+    const camille = this.camilleNPC;
+    if (camille?.isExitingPark || scene.dayNight.currentPhase !== "evening") {
+      this.arrivalShotDue = false; // she's leaving, or the evening is over: the encounter carries on without it
+      return;
+    }
+    // shown once she appears (the frame after her spawn) and isn't hidden under the trees
+    if (!camille?.active || !camille.visible || scene.isUnderCanopy(camille.x, camille.y)) return;
+    if (scene.dialogue.isActive || scene.playerInputFrozen || scene.isPaused || scene.cinematicActive) return;
+    if (scene.player.isResting || scene.stats.collapsed) return;
+    this.arrivalShotDue = false;
+    this.arrivalShotActive = true;
+    scene.storyShot(camille, CAMILLE_ARRIVAL_SHOT_HOLD_MS, {
+      onArrive: () => {
+        const hud = scene.scene.get("HUDScene") as HUDScene | undefined;
+        hud?.showNarration("Camille is back. She's carrying something. A box... with a little door.");
+      },
+      onDone: () => {
+        this.arrivalShotActive = false;
+        // not if night fell during the shot and she's on her way out again
+        const staying = !camille.isExitingPark && scene.dayNight.currentPhase === "evening";
+        if (this.camilleNPC === camille && staying) scene.eggs?.spreadWord(camille);
       },
     });
   }
